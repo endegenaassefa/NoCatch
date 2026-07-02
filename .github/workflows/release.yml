@@ -118,23 +118,64 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Generate commit changelog
         id: changelog
         shell: bash
         run: |
           CURRENT_TAG="${GITHUB_REF_NAME}"
-          # Find the most recent tag that is not the current one
-          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1)
+          REPO_URL="https://github.com/${{ github.repository }}"
+
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag --sort=-creatordate | grep -vx "${CURRENT_TAG}" | while read -r t; do
+              if git merge-base --is-ancestor "$t" "${CURRENT_TAG}" 2>/dev/null; then echo "$t"; break; fi
+            done | head -1)
+          fi
 
           if [ -z "$PREV_TAG" ]; then
-            # First ever release — include all commits
-            COMMIT_LOG=$(git log --pretty=format:"- \`%h\` %s" --reverse)
+            RANGE=""
             RANGE_LABEL="Initial release"
           else
-            COMMIT_LOG=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"- \`%h\` %s" --reverse)
-            RANGE_LABEL="[\`${PREV_TAG}..${CURRENT_TAG}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${CURRENT_TAG})"
+            RANGE="${PREV_TAG}..${CURRENT_TAG}"
+            RANGE_LABEL="[\`${PREV_TAG}...${CURRENT_TAG}\`](${REPO_URL}/compare/${PREV_TAG}...${CURRENT_TAG})"
           fi
+
+          COMMIT_COUNT=$(git rev-list --count ${RANGE:-HEAD})
+          echo "Changelog range: ${RANGE:-<all commits>} (${COMMIT_COUNT} commits)"
+
+          FS_CHAR="$(printf '\037')"
+          git log ${RANGE:-} --reverse --pretty=format:'%H%x1f%s' | awk -v FS="$FS_CHAR" -v repo="$REPO_URL" '
+            {
+              short=substr($1,1,7); subj=$2; low=tolower(subj); clean=subj;
+              sub(/^([Ff]eat|[Ff]ix|[Dd]ocs|[Cc]hore|[Rr]efactor|[Pp]erf|[Tt]est|[Bb]uild|[Cc]i|[Ss]tyle)(\([^)]*\))?!?:[ ]*/, "", clean);
+              line="- " clean " ([`" short "`](" repo "/commit/" $1 "))";
+              if (low ~ /^(feat|add|introduc|new )/) f[++nf]=line;
+              else if (low ~ /(^fix|bug|hotfix)/) x[++nx]=line;
+              else if (low ~ /^(improv|update|refactor|perf|polish|enhance|optimi)/) m[++ni]=line;
+              else if (low ~ /^(doc|readme)/) d[++nd]=line;
+              else o[++no]=line;
+            }
+            END {
+              if (nf) { print "### Features"; print ""; for(i=1;i<=nf;i++) print f[i]; print "" }
+              if (nx) { print "### Fixes"; print ""; for(i=1;i<=nx;i++) print x[i]; print "" }
+              if (ni) { print "### Improvements"; print ""; for(i=1;i<=ni;i++) print m[i]; print "" }
+              if (nd) { print "### Documentation"; print ""; for(i=1;i<=nd;i++) print d[i]; print "" }
+              if (no) { print "### Other Changes"; print ""; for(i=1;i<=no;i++) print o[i]; print "" }
+            }' > CHANGELOG_SECTION.md
+
+          {
+            echo "### Summary"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "This release includes **${COMMIT_COUNT} commits** since ${PREV_TAG}."
+            else
+              echo "First release of OpenCluely — **${COMMIT_COUNT} commits**."
+            fi
+            echo ""
+            cat CHANGELOG_SECTION.md
+          } > WHATS_CHANGED.md
 
           # Write combined body to file (multiline-safe)
           cat > RELEASE_BODY.md << 'BODY_EOF'
@@ -168,15 +209,17 @@ jobs:
 
           BODY_EOF
 
-          # Append the changelog section
           {
             echo ""
             echo "## What's Changed"
             echo ""
-            echo "**Full Changelog**: ${RANGE_LABEL}"
+            cat WHATS_CHANGED.md
             echo ""
-            echo "${COMMIT_LOG}"
+            echo "**Full Changelog**: ${RANGE_LABEL}"
           } >> RELEASE_BODY.md
+
+          echo "=== Final release body ==="
+          cat RELEASE_BODY.md
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

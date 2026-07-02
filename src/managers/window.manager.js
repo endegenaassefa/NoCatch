@@ -1,4 +1,4 @@
-const { BrowserWindow, screen, desktopCapturer } = require('electron');
+const { BrowserWindow, screen, desktopCapturer, shell } = require('electron');
 const path = require('path');
 const logger = require('../core/logger').createServiceLogger('WINDOW');
 const config = require('../core/config');
@@ -448,7 +448,24 @@ class WindowManager {
     browserWindowOptions.simpleFullscreen = false;
 
   const window = new BrowserWindow(browserWindowOptions);
-    
+
+    // External links (GitHub, the website, Google AI Studio, etc.) must open in
+    // the user's real browser, never inside the frameless overlay windows.
+    // Deny any in-app window.open and hand http(s) URLs to the OS browser, and
+    // block the current window from navigating away to an external site.
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) {
+        shell.openExternal(url);
+      }
+      return { action: 'deny' };
+    });
+    window.webContents.on('will-navigate', (event, url) => {
+      if (/^https?:\/\//i.test(url) && url !== window.webContents.getURL()) {
+        event.preventDefault();
+        shell.openExternal(url);
+      }
+    });
+
   // Load the HTML file
     await window.loadFile(windowConfig.file);
     

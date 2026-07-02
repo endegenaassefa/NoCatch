@@ -1038,7 +1038,7 @@ class MainWindowUI {
                     <input type="password" id="geminiApiKey" placeholder="Enter your Gemini API key" 
                            class="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white">
                     <p class="text-xs text-gray-400 mt-1">
-                        Get your API key from: <a href="https://makersuite.google.com/app/apikey" target="_blank" class="text-blue-400">Google AI Studio</a>
+                        Get your API key from: <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400">Google AI Studio</a>
                     </p>
                 </div>
                 
@@ -1175,8 +1175,8 @@ class MainWindowUI {
         });
 
         const quitOption = this.createMenuItem('Quit OpenCluely', 'fa-power-off', () => {
-            if (window.electronAPI) {
-                window.electronAPI.quitApp();
+            if (window.electronAPI && window.electronAPI.quit) {
+                window.electronAPI.quit();
             }
         });
 

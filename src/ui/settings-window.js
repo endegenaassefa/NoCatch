@@ -176,7 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Add event listeners for all inputs
     const inputs = [
-        speechProviderSelect,
         azureKeyInput,
         azureRegionInput,
         whisperCommandInput,

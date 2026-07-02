@@ -43,6 +43,7 @@
   const state = {
     step: 0,
     geminiKey: '',
+    geminiConfigured: false, // a key already exists in .env from a prior run
     speechProvider: null, // 'whisper' | 'azure' | 'skip'
     azureKey: '',
     azureRegion: '',
@@ -134,7 +135,8 @@
       case 'welcome':
         return true;
       case 'apikey':
-        return !!state.geminiKey.trim();
+        // A key already in .env is enough — don't force a re-entry.
+        return !!state.geminiKey.trim() || state.geminiConfigured;
       case 'speech':
         if (state.speechProvider === 'azure') {
           return !!state.azureKey.trim() && !!state.azureRegion.trim();
@@ -450,8 +452,8 @@
     const rows = [];
     rows.push({
       label: '<i class="fas fa-key"></i> Gemini API',
-      value: state.geminiKey ? 'Configured' : 'Missing',
-      cls: state.geminiKey ? 'ok' : 'skip',
+      value: (state.geminiKey || state.geminiConfigured) ? 'Configured' : 'Missing',
+      cls: (state.geminiKey || state.geminiConfigured) ? 'ok' : 'skip',
     });
     if (state.speechProvider === 'whisper') {
       rows.push({
@@ -659,7 +661,9 @@
     window.electronAPI.getFirstRunStatus().then((s) => {
       if (s && s.geminiConfigured) {
         // We can't read the key back (settings returns empty for keys),
-        // but we can mark status as success if the env file already has one.
+        // but we can mark status as success if the env file already has one
+        // and let the user advance without retyping it.
+        state.geminiConfigured = true;
         setKeyStatus('success', 'Already configured — click Continue');
         geminiInput.placeholder = '•••••••••••••••• (already set)';
       }

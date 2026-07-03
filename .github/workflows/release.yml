@@ -91,7 +91,6 @@ jobs:
       - name: Build
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Intentionally do NOT set CSC_LINK / WIN_CSC_LINK etc.
           # electron-builder treats empty strings as "set but invalid"
           # and tries to resolve them as certificate paths, producing
@@ -99,7 +98,7 @@ jobs:
           # opt-in: add the secrets to the repo and wire them in here
           # only when you have real certificates.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build:${{ matrix.script }}
+        run: npm run build:${{ matrix.script }} -- --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

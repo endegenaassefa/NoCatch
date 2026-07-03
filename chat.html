@@ -403,6 +403,14 @@
         max-width: 100%;
         display: block;
       }
+      .message-text .math {
+        font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', Georgia, serif;
+        white-space: nowrap;
+      }
+      .message-text sup, .message-text sub {
+        font-size: 0.72em;
+        line-height: 0;
+      }
       .chat-input {
         padding: 16px 20px;
         border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -702,7 +710,8 @@
         </div>
       </div>
     </div>
-    <script src="lib/markdown.js"></script> 
+    <script src="lib/markdown.js"></script>
+    <script src="lib/mathrender.js"></script>
     <!-- PrismJS core and autoloader for language components -->
     <script src="./node_modules/prismjs/prism.min.js"></script>
     <script src="./node_modules/prismjs/plugins/autoloader/prism-autoloader.min.js"></script>
@@ -858,6 +867,7 @@
         // Format assistant messages as markdown
         if (type === 'assistant') {
           textDiv.innerHTML = formatMarkdown(text);
+          if (window.renderMathInElement) window.renderMathInElement(textDiv);
         } else {
           textDiv.textContent = text;
         }

@@ -629,6 +629,10 @@ class WindowManager {
     // Make window undetectable by screen capture (if supported)
     try {
       window.setContentProtection(true);
+      if (process.platform === 'linux' && !this._warnedNoContentProtection) {
+        this._warnedNoContentProtection = true;
+        logger.warn('Screen-capture protection is unavailable on Linux (Electron limitation). The overlay WILL be visible in screen shares. This stealth feature only works on macOS and Windows.');
+      }
     } catch (error) {
       logger.debug('Content protection not supported on this platform');
     }

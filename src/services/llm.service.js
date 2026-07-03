@@ -48,7 +48,8 @@ class LLMService {
       temperature: 0.7,
       topK: 40,
       topP: 0.95,
-      maxOutputTokens: 4096
+      maxOutputTokens: 4096,
+      thinkingConfig: { thinkingBudget: 0 }
     };
 
     const merged = { ...fallback, ...defaults, ...overrides };
@@ -224,6 +225,78 @@ class LLMService {
     }
   }
 
+  async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
+    if (!this.isInitialized) {
+      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+    }
+
+    if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+      throw new Error('Invalid image buffer provided to processImageWithSkillStream');
+    }
+
+    const startTime = Date.now();
+    this.requestCount++;
+
+    try {
+      const { promptLoader } = require('../../prompt-loader');
+      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+      const base64 = imageBuffer.toString('base64');
+
+      const geminiRequest = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: this.formatImageInstruction(activeSkill, programmingLanguage) },
+              { inlineData: { data: base64, mimeType } }
+            ]
+          }
+        ]
+      };
+      this.applyGenerationDefaults(geminiRequest);
+      if (skillPrompt && skillPrompt.trim().length > 0) {
+        geminiRequest.systemInstruction = { parts: [{ text: skillPrompt }] };
+      }
+
+      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
+        if (typeof onDelta === 'function' && delta) {
+          onDelta(delta);
+        }
+      });
+
+      const finalResponse = programmingLanguage
+        ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
+        : fullText;
+
+      logger.logPerformance('LLM image streaming', startTime, {
+        activeSkill,
+        imageSize: imageBuffer.length,
+        responseLength: finalResponse.length,
+        requestId: this.requestCount
+      });
+
+      return {
+        response: finalResponse,
+        metadata: {
+          skill: activeSkill,
+          programmingLanguage,
+          processingTime: Date.now() - startTime,
+          requestId: this.requestCount,
+          usedFallback: false,
+          streamed: true,
+          isImageAnalysis: true,
+          mimeType
+        }
+      };
+    } catch (error) {
+      logger.warn('Streaming image analysis failed, falling back to non-streaming', {
+        error: error.message,
+        requestId: this.requestCount
+      });
+      return this.processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage);
+    }
+  }
+
   formatImageInstruction(activeSkill, programmingLanguage) {
     const langNote = programmingLanguage ? ` Use only ${programmingLanguage.toUpperCase()} for any code.` : '';
     return `Analyze this image for a ${activeSkill.toUpperCase()} question. Extract the problem concisely and provide the best possible solution with explanation and final code.${langNote}`;
@@ -311,8 +384,56 @@ class LLMService {
       if (config.get('llm.gemini.fallbackEnabled')) {
         return this.generateFallbackResponse(text, activeSkill);
       }
-      
+
       throw error;
+    }
+  }
+
+  async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
+    if (!this.isInitialized) {
+      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+    }
+
+    const startTime = Date.now();
+    this.requestCount++;
+
+    try {
+      const geminiRequest = this.buildGeminiRequest(text, activeSkill, sessionMemory, programmingLanguage);
+
+      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
+        if (typeof onDelta === 'function' && delta) {
+          onDelta(delta);
+        }
+      });
+
+      const finalResponse = programmingLanguage
+        ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
+        : fullText;
+
+      logger.logPerformance('LLM text streaming', startTime, {
+        activeSkill,
+        textLength: text.length,
+        responseLength: finalResponse.length,
+        requestId: this.requestCount
+      });
+
+      return {
+        response: finalResponse,
+        metadata: {
+          skill: activeSkill,
+          programmingLanguage,
+          processingTime: Date.now() - startTime,
+          requestId: this.requestCount,
+          usedFallback: false,
+          streamed: true
+        }
+      };
+    } catch (error) {
+      logger.warn('Streaming text failed, falling back to non-streaming', {
+        error: error.message,
+        requestId: this.requestCount
+      });
+      return this.processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage);
     }
   }
 
@@ -740,9 +861,6 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     for (const modelName of modelsToTry) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          // Pre-flight check
-          await this.performPreflightCheck();
-
           const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Request timeout')), timeout)
           );
@@ -951,8 +1069,6 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
         // pushed to the UI, which would corrupt the bubble we already gave up on.
         let cancelled = false;
         try {
-          await this.performPreflightCheck();
-
           let fullText = '';
           const consume = (async () => {
             const stream = await this.client.models.generateContentStream({

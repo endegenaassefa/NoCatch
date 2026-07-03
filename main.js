@@ -576,7 +576,7 @@ class ApplicationController {
       // NOT the voice "intelligent filter" pipeline. Voice keeps its filter
       // behaviour; typed chat goes through processWithLLM so it gets real
       // answers using the active skill prompt and recent conversation history.
-      setTimeout(async () => {
+      (async () => {
         try {
           const sessionHistory = sessionManager.getOptimizedHistory();
           await this.processWithLLM(text, sessionHistory);
@@ -586,7 +586,7 @@ class ApplicationController {
             text: text.substring(0, 100)
           });
         }
-      }, 500);
+      })();
 
       return { success: true };
     });
@@ -1041,15 +1041,28 @@ class ApplicationController {
       const skillsRequiringProgrammingLanguage = ['dsa'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
-      const llmResult = await llmService.processImageWithSkill(
+      this._responseSeq = (this._responseSeq || 0) + 1;
+      const messageId = `img-${Date.now()}-${this._responseSeq}`;
+      windowManager.broadcastToAllWindows("transcription-llm-response-start", {
+        messageId,
+        skill: this.activeSkill
+      });
+
+      const llmResult = await llmService.processImageWithSkillStream(
         capture.imageBuffer,
         capture.mimeType || 'image/png',
         this.activeSkill,
         sessionHistory.recent,
-        needsProgrammingLanguage ? this.codingLanguage : null
+        needsProgrammingLanguage ? this.codingLanguage : null,
+        (delta) => {
+          windowManager.broadcastToAllWindows("transcription-llm-response-chunk", {
+            messageId,
+            delta
+          });
+        }
       );
+      llmResult.metadata = { ...llmResult.metadata, messageId };
 
-      // Record model response in session
       sessionManager.addModelResponse(llmResult.response, {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
@@ -1057,14 +1070,14 @@ class ApplicationController {
         isImageAnalysis: true
       });
 
+      this.broadcastTranscriptionLLMResponse(llmResult);
+
       windowManager.showLLMResponse(llmResult.response, {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
         isImageAnalysis: true
       });
-
-      this.broadcastLLMSuccess(llmResult);
     } catch (error) {
       logger.error("Screenshot OCR process failed", {
         error: error.message,
@@ -1093,13 +1106,28 @@ class ApplicationController {
       // Check if current skill needs programming language context
       const skillsRequiringProgrammingLanguage = ['dsa'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
-      
-      const llmResult = await llmService.processTextWithSkill(
+
+      this._responseSeq = (this._responseSeq || 0) + 1;
+      const messageId = `chat-${Date.now()}-${this._responseSeq}`;
+      windowManager.broadcastToAllWindows("transcription-llm-response-start", {
+        messageId,
+        skill: this.activeSkill
+      });
+      windowManager.showLLMLoading();
+
+      const llmResult = await llmService.processTextWithSkillStream(
         text,
         this.activeSkill,
         sessionHistory.recent,
-        needsProgrammingLanguage ? this.codingLanguage : null
+        needsProgrammingLanguage ? this.codingLanguage : null,
+        (delta) => {
+          windowManager.broadcastToAllWindows("transcription-llm-response-chunk", {
+            messageId,
+            delta
+          });
+        }
       );
+      llmResult.metadata = { ...llmResult.metadata, messageId };
 
       logger.info("LLM processing completed, showing response", {
         responseLength: llmResult.response.length,
@@ -1116,13 +1144,13 @@ class ApplicationController {
         usedFallback: llmResult.metadata.usedFallback,
       });
 
+      this.broadcastTranscriptionLLMResponse(llmResult);
+
       windowManager.showLLMResponse(llmResult.response, {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
       });
-
-      this.broadcastLLMSuccess(llmResult);
     } catch (error) {
       logger.error("LLM processing failed", {
         error: error.message,

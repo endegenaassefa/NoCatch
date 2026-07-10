@@ -40,7 +40,7 @@ It is free and open source. Processing stays on your machine, and the only thing
 - **Session memory.** The whole conversation is remembered, so follow-ups, edge cases, and optimizations keep their context.
 - **Language aware.** Tailored answers for C++, C, Python, Java, and JavaScript.
 - **Stealthy by design.** Runs under ordinary system names, ships with no telemetry, and keeps your session local.
-- **Cross platform.** Windows, macOS on Apple Silicon and Intel, and Linux through .deb and AppImage builds.
+- **Cross platform.** Pre-built installers for Windows and Linux (.deb and AppImage). macOS runs from source in one command.
 
 ## Download
 
@@ -49,12 +49,12 @@ Pre-built installers are published with every release. These links always point 
 | Platform | File | Notes |
 |---|---|---|
 | Windows | [Setup .exe](https://github.com/TechyCSR/OpenCluely/releases/latest) | NSIS installer. Adds a Start Menu shortcut. |
-| macOS (Apple Silicon) | [arm64 .dmg](https://github.com/TechyCSR/OpenCluely/releases/latest) | For M1, M2, M3, and M4 Macs. |
-| macOS (Intel) | [x64 .dmg](https://github.com/TechyCSR/OpenCluely/releases/latest) | For older Intel based Macs. |
 | Linux (Debian or Ubuntu) | [.deb](https://github.com/TechyCSR/OpenCluely/releases/latest) | Pulls system deps automatically (Python, ffmpeg, GTK). |
 | Linux (universal) | [.AppImage](https://github.com/TechyCSR/OpenCluely/releases/latest) | No install. Run `chmod +x` then launch. |
 
-Every build is produced automatically on GitHub Actions across all three platforms and ships with SHA-256 checksums. Each release also lists the full set of commits it includes.
+> **macOS:** there is no pre-built download. The app is unsigned and un-notarized, so macOS Gatekeeper blocks it as "damaged and can't be opened." Run OpenCluely from source instead — see [Quick start](#quick-start). It is a one-line `./setup.sh` once Node.js is installed.
+
+Every build is produced automatically on GitHub Actions and ships with SHA-256 checksums. Each release also lists the full set of commits it includes.
 
 The website at [opencluely.techycsr.dev](https://opencluely.techycsr.dev) detects your operating system and offers the right installer directly.
 
@@ -85,6 +85,7 @@ If you would rather build from source, three steps are all it takes.
 
 - On Windows, use Git Bash (included with Git for Windows) or WSL to run `setup.sh`.
 - On macOS and Linux, your normal terminal works.
+- **macOS users must build from source** (steps above) — there is no pre-built `.dmg`. Because the app is unsigned, a downloaded build would be blocked by Gatekeeper as "damaged"; running from source avoids that entirely.
 - No manual `npm` commands are needed. The script handles everything.
 
 ### Setup script options

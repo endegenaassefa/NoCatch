@@ -110,22 +110,15 @@
     var ua = (navigator.userAgent || '').toLowerCase();
     var plat = (navigator.platform || '').toLowerCase();
     if (ua.indexOf('windows') !== -1 || plat.indexOf('win') !== -1) return 'windows';
-    if (ua.indexOf('mac') !== -1 || plat.indexOf('mac') !== -1) {
-      // Apple Silicon is the default for new Macs; cannot read arch reliably.
-      return 'macos-arm';
-    }
+    if (ua.indexOf('mac') !== -1 || plat.indexOf('mac') !== -1) return 'macos';
     if (ua.indexOf('linux') !== -1 || ua.indexOf('x11') !== -1) return 'linux-deb';
     return null;
   }
 
-  /* ---------- Platforms ---------- */
+  /* ---------- Platforms (pre-built: Windows + Linux only) ---------- */
   var PLATFORMS = [
     { id: 'windows', label: 'Windows', icon: 'i-windows', note: 'NSIS installer. Adds a Start Menu shortcut.',
       match: function (n) { return n.endsWith('.exe') && n.indexOf('blockmap') === -1; } },
-    { id: 'macos-arm', label: 'macOS, Apple Silicon', icon: 'i-apple', note: 'For M1, M2, M3 and M4 Macs.',
-      match: function (n) { return n.endsWith('.dmg') && n.indexOf('arm64') !== -1; } },
-    { id: 'macos-intel', label: 'macOS, Intel', icon: 'i-apple', note: 'For older Intel based Macs.',
-      match: function (n) { return n.endsWith('.dmg') && n.indexOf('arm64') === -1; } },
     { id: 'linux-deb', label: 'Linux, Debian or Ubuntu', icon: 'i-linux', note: 'Pulls system deps automatically.',
       match: function (n) { return n.endsWith('.deb'); } },
     { id: 'linux-appimage', label: 'Linux, universal', icon: 'i-linux', note: 'No install. Mark executable and run.',
@@ -170,6 +163,19 @@
     });
 
     // Grid
+    var macCard =
+      '<div class="platform">' +
+        '<div class="platform-head">' + icon('i-apple') + '<h4>macOS</h4></div>' +
+        '<p class="pnote">No pre-built download &mdash; the unsigned app is blocked by Gatekeeper. Build from source instead.</p>' +
+        '<div class="dl-links">' +
+          '<a class="asset" href="https://github.com/' + REPO + '#quick-start" target="_blank" rel="noopener">' +
+            icon('i-download') +
+            '<span class="meta"><span class="fname">git clone &amp; ./setup.sh</span>' +
+            '<span class="fsize">Runs from source</span></span>' +
+            '<span class="go"><svg class="ic"><use href="#i-arrow"/></svg></span>' +
+          '</a>' +
+        '</div>' +
+      '</div>';
     el('dl-grid').innerHTML = byPlatform.map(function (g) {
       var links = g.assets.length
         ? g.assets.map(assetRow).join('')
@@ -179,30 +185,47 @@
         '<p class="pnote">' + g.p.note + '</p>' +
         '<div class="dl-links">' + links + '</div>' +
         '</div>';
-    }).join('');
+    }).join('') + macCard;
 
     // Recommended card for the visitor's OS
     var os = detectOS();
-    var rec = null;
-    for (var k = 0; k < byPlatform.length; k++) {
-      if (byPlatform[k].p.id === os && byPlatform[k].assets.length) { rec = byPlatform[k]; break; }
-    }
-    if (rec) {
-      var a = rec.assets[0];
+    if (os === 'macos') {
       el('dl-recommend').innerHTML =
         '<div class="rec-left">' +
-          '<span class="rec-ic">' + icon(rec.p.icon) + '</span>' +
+          '<span class="rec-ic">' + icon('i-apple') + '</span>' +
           '<span class="rec-text">' +
-            '<span class="rec-label">Recommended for you</span>' +
-            '<span class="rec-title">' + rec.p.label + '</span>' +
-            '<span class="rec-file">' + a.name + ' &middot; ' + fmtBytes(a.size) + '</span>' +
+            '<span class="rec-label">You are on macOS</span>' +
+            '<span class="rec-title">Build from source</span>' +
+            '<span class="rec-file">No signed build yet &middot; one-line ./setup.sh</span>' +
           '</span>' +
         '</div>' +
-        '<a class="btn btn-solid" href="' + a.browser_download_url + '" target="_blank" rel="noopener" download>' +
-          icon('i-download') + 'Download</a>';
+        '<a class="btn btn-solid" href="https://github.com/' + REPO + '#quick-start" target="_blank" rel="noopener">' +
+          icon('i-download') + 'How to run</a>';
       el('dl-recommend').classList.remove('hidden');
-      var heroLbl = el('hero-dl-label');
-      if (heroLbl) { heroLbl.textContent = 'Download for ' + (os.indexOf('mac') === 0 ? 'macOS' : os.indexOf('win') === 0 ? 'Windows' : 'Linux'); }
+      var heroLblMac = el('hero-dl-label');
+      if (heroLblMac) { heroLblMac.textContent = 'Build from source for macOS'; }
+    } else {
+      var rec = null;
+      for (var k = 0; k < byPlatform.length; k++) {
+        if (byPlatform[k].p.id === os && byPlatform[k].assets.length) { rec = byPlatform[k]; break; }
+      }
+      if (rec) {
+        var a = rec.assets[0];
+        el('dl-recommend').innerHTML =
+          '<div class="rec-left">' +
+            '<span class="rec-ic">' + icon(rec.p.icon) + '</span>' +
+            '<span class="rec-text">' +
+              '<span class="rec-label">Recommended for you</span>' +
+              '<span class="rec-title">' + rec.p.label + '</span>' +
+              '<span class="rec-file">' + a.name + ' &middot; ' + fmtBytes(a.size) + '</span>' +
+            '</span>' +
+          '</div>' +
+          '<a class="btn btn-solid" href="' + a.browser_download_url + '" target="_blank" rel="noopener" download>' +
+            icon('i-download') + 'Download</a>';
+        el('dl-recommend').classList.remove('hidden');
+        var heroLbl = el('hero-dl-label');
+        if (heroLbl) { heroLbl.textContent = 'Download for ' + (os.indexOf('win') === 0 ? 'Windows' : 'Linux'); }
+      }
     }
 
     el('dl-loading').classList.add('hidden');

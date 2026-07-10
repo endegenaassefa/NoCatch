@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         include:
           - os: ubuntu-latest
             script: linux
@@ -32,11 +32,6 @@ jobs:
             script: win
             artifact_glob: |
               dist/*.exe
-          - os: macos-latest
-            script: mac
-            artifact_glob: |
-              dist/*.dmg
-              dist/*.zip
 
     steps:
       - name: Checkout
@@ -185,10 +180,14 @@ jobs:
           | Platform | File | Notes |
           |---|---|---|
           | **Windows** | `OpenCluely-Setup-*.exe` | NSIS installer — installs app + adds to Start Menu |
-          | **macOS (Apple Silicon)** | `*-arm64.dmg` | M1/M2/M3/M4 Macs |
-          | **macOS (Intel)** | `*-x64.dmg` | Older Intel Macs |
           | **Linux** | `*.deb` | Debian/Ubuntu — auto-pulls system deps (Python, ffmpeg, GTK) |
           | **Linux** | `*.AppImage` | Universal — no install, just `chmod +x` and run |
+
+          > **macOS:** no pre-built build is shipped. The app is unsigned/un-notarized, so macOS Gatekeeper blocks it as "damaged". Run OpenCluely from source instead:
+          > ```bash
+          > git clone https://github.com/TechyCSR/OpenCluely && cd OpenCluely && ./setup.sh
+          > ```
+          > Requires Node.js 18+. See the [README](https://github.com/TechyCSR/OpenCluely#quick-start) for details.
 
           ## First Run
 
@@ -228,20 +227,14 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          # Pick only the primary installer per platform (max 2-3 per
-          # platform). This intentionally drops:
+          # Pick only the primary installer per platform. This intentionally drops:
           #   - Windows portable EXE (we ship the NSIS installer)
-          #   - macOS .zip (the DMG is the canonical macOS installer)
           #   - .blockmap files (electron-updater diff metadata)
           #   - latest-*.yml (electron-updater channel metadata)
           #   - Source archives (GitHub auto-generates these from the tag)
           #
           # The order below is the order files appear in the release page.
           find artifacts -type f -name 'OpenCluely-Setup-*.exe' \
-            -exec cp -v {} release/ \;
-          # macOS DMGs — electron-builder omits the arch suffix for the
-          # default (x64) arch, so we keep every OpenCluely-*.dmg.
-          find artifacts -type f -name 'OpenCluely-*.dmg' \
             -exec cp -v {} release/ \;
           find artifacts -type f -name 'opencluely_*_amd64.deb' \
             -exec cp -v {} release/ \;

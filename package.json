@@ -157,7 +157,8 @@
       "createStartMenuShortcut": true,
       "perMachine": false,
       "include": "scripts/post-install-nsis.nsh",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "OpenCluely-Setup-${version}.${ext}"
     },
     "dmg": {
       "title": "OpenCluely Interview Assistant",

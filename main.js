@@ -20,7 +20,13 @@ function resolveEnvPath() {
     }
     return userDataEnv;
   } catch (_) {
-    return path.join(process.cwd(), ".env");
+    // On packaged macOS builds, process.cwd() may be inside a read-only .app
+    // bundle. Fall back to userData so .env writes never fail.
+    try {
+      return path.join(app.getPath("userData"), ".env");
+    } catch (e2) {
+      return path.join(process.cwd(), ".env");
+    }
   }
 }
 const ENV_PATH = resolveEnvPath();
@@ -305,7 +311,10 @@ class ApplicationController {
     // Allow HTTPS requests to Google APIs
     ses.webRequest.onBeforeSendHeaders((details, callback) => {
       if (details.url.includes('generativelanguage.googleapis.com')) {
-        details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.156 Safari/537.36';
+        const platformUA = process.platform === 'darwin'
+          ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.156 Safari/537.36'
+          : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.156 Safari/537.36';
+        details.requestHeaders['User-Agent'] = platformUA;
       }
       callback({ requestHeaders: details.requestHeaders });
     });
@@ -1762,17 +1771,17 @@ class ApplicationController {
 
       // Set app icon for dock/taskbar
       if (process.platform === "darwin") {
-        // macOS - update dock icon
-        app.dock.setIcon(fullIconPath);
-
-        // Force dock refresh with multiple attempts
-        setTimeout(() => {
+        // macOS - update dock icon (only if dock is available)
+        if (app.dock) {
           app.dock.setIcon(fullIconPath);
-        }, 100);
 
-        setTimeout(() => {
-          app.dock.setIcon(fullIconPath);
-        }, 500);
+          // Force dock refresh with multiple attempts
+          const retryDockIcon = () => {
+            try { app.dock.setIcon(fullIconPath); } catch (_) { /* dock may not exist */ }
+          };
+          setTimeout(retryDockIcon, 100);
+          setTimeout(retryDockIcon, 500);
+        }
       } else {
         // Windows/Linux - update window icons
         windowManager.windows.forEach((window, type) => {
@@ -1816,19 +1825,6 @@ class ApplicationController {
         // Multiple attempts to ensure the name sticks
         app.setName(appName);
 
-        // Force update the bundle name for macOS stealth
-        const { execSync } = require("child_process");
-        try {
-          // Update the app's Info.plist CFBundleName in memory
-          if (process.mainModule && process.mainModule.filename) {
-            const appPath = process.mainModule.filename;
-            // Force set the bundle name directly
-            process.env.CFBundleName = appName.trim();
-          }
-        } catch (e) {
-          // Silently fail if we can't modify bundle info
-        }
-
         // Clear dock badge and reset
         if (app.dock) {
           app.dock.setBadge("");
@@ -1841,8 +1837,10 @@ class ApplicationController {
         }
       }
 
-      // Set app user model ID for Windows taskbar grouping
-      app.setAppUserModelId(`${appName.trim()}-${iconKey}`);
+      // Set app user model ID for Windows taskbar grouping (Windows only)
+      if (process.platform === "win32") {
+        app.setAppUserModelId(`${appName.trim()}-${iconKey}`);
+      }
 
       // Update all window titles to match the new app name
       const windows = windowManager.windows;

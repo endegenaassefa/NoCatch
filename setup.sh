@@ -181,11 +181,10 @@ install_system_deps() {
 
   case "$OS_NAME" in
     macos)
-      if command -v brew >/dev/null 2>&1; then
-        brew install sox || echo "Could not install sox automatically. Install it manually with: brew install sox"
-      else
-        echo "Homebrew not found. Install sox manually."
-      fi
+      # OpenCluely captures microphone audio via the renderer (Web Audio API) on
+      # macOS, so the native sox/arecord recorders are not used. Skip installing
+      # sox to avoid an unnecessary Homebrew dependency.
+      echo "macOS uses built-in renderer audio capture; skipping sox install."
       ;;
     linux)
       if command -v apt-get >/dev/null 2>&1; then

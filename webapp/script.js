@@ -97,10 +97,24 @@
   fetch('https://api.github.com/repos/' + REPO, { headers: { Accept: 'application/vnd.github+json' } })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
-      if (d && typeof d.stargazers_count === 'number' && starEl) {
-        starEl.textContent = d.stargazers_count >= 1000
+      if (d && typeof d.stargazers_count === 'number') {
+        var label = d.stargazers_count >= 1000
           ? (d.stargazers_count / 1000).toFixed(1) + 'k'
           : String(d.stargazers_count);
+        if (starEl) { starEl.textContent = label; }
+      }
+    })
+    .catch(function () {});
+
+  /* ---------- GitHub total downloads (live, mirrors README badge) ---------- */
+  var dlEl = el('dl-count-nav');
+  var dlElMobile = el('dl-count-mobile');
+  fetch('https://img.shields.io/github/downloads/TechyCSR/OpenCluely/total.json')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (d && typeof d.value === 'string' && d.value.length) {
+        if (dlEl) { dlEl.textContent = d.value + ' downloads'; }
+        if (dlElMobile) { dlElMobile.textContent = d.value; }
       }
     })
     .catch(function () {});

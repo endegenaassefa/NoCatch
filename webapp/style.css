@@ -98,6 +98,33 @@ img, video, svg { display: block; max-width: 100%; }
 .ghost-pill:hover { background: var(--surface-2); border-color: #3a3a3a; }
 .ghost-pill .ic { font-size: 1.05rem; }
 .ghost-pill .star-ic { color: #f5c518; font-size: 0.98rem; }
+.ghost-pill .dl-ic { color: #9ad7ff; font-size: 1rem; }
+
+.nav-downloads { display: none; }
+@media (min-width: 761px) { .nav-downloads { display: inline-flex; } }
+
+.mobile-dl-card {
+  display: flex; align-items: center; gap: 14px;
+  margin: 14px 16px; padding: 14px 16px;
+  background: linear-gradient(180deg, #161616 0%, #0e0e0e 100%);
+  border: 1px solid var(--border-2); border-radius: 14px;
+  color: var(--text); text-decoration: none;
+  font-weight: 600; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset;
+}
+.mobile-dl-card:active { background: var(--surface); }
+.mobile-dl-card .mobile-dl-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(154, 215, 255, 0.12); border: 1px solid rgba(154, 215, 255, 0.3);
+  flex: 0 0 auto;
+}
+.mobile-dl-card .mobile-dl-icon .dl-ic { color: #9ad7ff; font-size: 1.2rem; }
+.mobile-dl-card .mobile-dl-text { display: flex; flex-direction: column; gap: 2px; line-height: 1.2; flex: 1 1 auto; min-width: 0; }
+.mobile-dl-card .mobile-dl-eyebrow { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.mobile-dl-card .mobile-dl-count { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.mobile-dl-card .mobile-dl-go { color: var(--muted); flex: 0 0 auto; }
+.mobile-dl-card .mobile-dl-go .ic { font-size: 1.1rem; }
+@media (min-width: 761px) { .mobile-dl-card { display: none; } }
 
 .menu-btn {
   display: none; background: var(--surface); color: var(--text);

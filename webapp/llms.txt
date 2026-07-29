@@ -1,0 +1,72 @@
+# OpenCluely — AI guidance
+> The invisible AI interview copilot. Real-time AI help during technical
+> interviews on a stealth overlay that screen sharing cannot see.
+
+## What this is
+
+OpenCluely is a free, open-source Electron desktop app that places a small
+overlay on your screen that recording and conferencing tools do not capture.
+You can speak a question or take a screenshot, and the AI (powered by Google
+Gemini) answers in real time. The answer streams into a floating window and
+an optional chat panel with clean code blocks and syntax highlighting.
+
+## Core facts
+
+- **Repository:** https://github.com/TechyCSR/OpenCluely
+- **License:** MIT — https://opensource.org/licenses/MIT
+- **Website:** https://opencluely.techycsr.dev/
+- **Author:** TechyCSR (https://techycsr.dev)
+- **Platforms:** Windows (NSIS .exe), Linux (.deb, .AppImage), macOS (source only)
+- **Tech stack:** Electron, Google Gemini API, Azure Speech / OpenAI Whisper, PrismJS
+- **Pricing:** Free. Only the user's own Gemini API usage costs (has a free tier).
+- **Privacy:** No telemetry. Processing is local. Only requests to the AI provider leave the device.
+
+## Key features
+
+1. **Invisible overlay** — Windows excluded from Zoom, Google Meet, Teams,
+   Discord, and OBS screen captures.
+2. **Voice input** — Local Whisper (with voice-activity detection) or Azure
+   Speech for transcription.
+3. **Screenshot analysis** — Direct Gemini visual reasoning, no intermediate
+   OCR step.
+4. **Streamed answers** — Real-time streaming with markdown rendering and
+   syntax-highlighted code blocks.
+5. **Session memory** — Full conversation context maintained for follow-ups
+   and edge cases.
+6. **Stealth design** — Runs under ordinary system names, no telemetry, no
+   data collection.
+7. **Cross platform** — Windows .exe installer, Linux .deb/AppImage, macOS
+   from source.
+
+## Quick start
+
+```sh
+git clone https://github.com/TechyCSR/OpenCluely.git
+cd OpenCluely
+./setup.sh
+```
+
+On first launch the Settings window opens automatically. Get a free Gemini API
+key from https://aistudio.google.com/ and paste it in.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| Cmd/Ctrl+Shift+S | Screenshot capture |
+| Alt+R | Toggle speech recognition |
+| Cmd/Ctrl+Shift+V | Toggle window visibility |
+| Cmd/Ctrl+Shift+I / Alt+A | Toggle click-through interaction |
+| Cmd/Ctrl+Shift+C | Open chat |
+| Cmd/Ctrl+, | Open settings |
+
+## FAQ
+
+- **Is it really invisible during screen sharing?** Yes — on Windows and macOS
+  the overlay uses OS-level window exclusions (WDA_EXCLUDEFROMCAPTURE and
+  NSWindowSharingNone). Linux lacks this API so the overlay is visible on that
+  platform.
+- **Do I need an API key?** Yes, a free Google Gemini API key.
+- **Is voice input required?** No. Optional. Use screenshots and chat instead.
+- **Is my data collected?** No telemetry. Everything stays local.
+- **Is it free?** Yes, MIT licensed.

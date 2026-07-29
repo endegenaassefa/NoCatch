@@ -1,0 +1,13 @@
+# OpenCluely — robots.txt
+# https://opencluely.techycsr.dev/
+#
+# All well-behaved crawlers are welcome. The site is a single-page
+# landing with no private or crawl-costly paths to restrict.
+
+User-agent: *
+Allow: /
+
+# Sitemap for discovery of all canonical pages.
+Sitemap: https://opencluely.techycsr.dev/sitemap.xml
+
+# No disallowed paths — every page is public.

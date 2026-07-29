@@ -36,7 +36,30 @@
   <link rel="preload" href="style.css" as="style" />
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Structured data: software application -->
+  <!-- Structured data: WebSite -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "OpenCluely",
+    "url": "https://opencluely.techycsr.dev/",
+    "description": "The invisible AI interview copilot. Real-time AI help on a stealth overlay that screen sharing cannot see.",
+    "applicationCategory": "DeveloperApplication",
+    "inLanguage": "en-US",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://github.com/TechyCSR/OpenCluely/search?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    },
+    "publisher": {
+      "@type": "Person",
+      "name": "TechyCSR",
+      "url": "https://techycsr.dev"
+    }
+  }
+  </script>
+
+  <!-- Structured data: SoftwareApplication -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -44,11 +67,140 @@
     "name": "OpenCluely",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Windows, macOS, Linux",
-    "description": "A free, open-source desktop app that provides real-time AI assistance during technical interviews through an invisible overlay.",
-    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "description": "A free, open-source desktop app that provides real-time AI assistance during technical interviews through an invisible overlay. Features include voice input, screenshot analysis, streamed answers, session memory, and screen-share invisibility.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD",
+      "priceValidUntil": "2030-12-31"
+    },
     "url": "https://opencluely.techycsr.dev/",
-    "author": { "@type": "Person", "name": "TechyCSR", "url": "https://techycsr.dev" },
+    "sameAs": [
+      "https://github.com/TechyCSR/OpenCluely",
+      "https://techycsr.dev"
+    ],
+    "downloadUrl": "https://github.com/TechyCSR/OpenCluely/releases/latest",
+    "softwareVersion": "1.0.0",
+    "releaseNotes": "https://github.com/TechyCSR/OpenCluely/releases",
+    "author": {
+      "@type": "Person",
+      "name": "TechyCSR",
+      "url": "https://techycsr.dev"
+    },
     "license": "https://opensource.org/licenses/MIT"
+  }
+  </script>
+
+  <!-- Structured data: Person (author) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "TechyCSR",
+    "url": "https://techycsr.dev",
+    "description": "Developer of OpenCluely, the invisible AI interview copilot.",
+    "knowsAbout": ["Software Engineering", "Artificial Intelligence", "Electron", "Interview Preparation"],
+    "owns": {
+      "@type": "SoftwareApplication",
+      "name": "OpenCluely",
+      "url": "https://opencluely.techycsr.dev/"
+    }
+  }
+  </script>
+
+  <!-- Structured data: BreadcrumbList -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://opencluely.techycsr.dev/" },
+      { "@type": "ListItem", "position": 2, "name": "Features", "item": "https://opencluely.techycsr.dev/#features" },
+      { "@type": "ListItem", "position": 3, "name": "Download", "item": "https://opencluely.techycsr.dev/#download" },
+      { "@type": "ListItem", "position": 4, "name": "FAQ", "item": "https://opencluely.techycsr.dev/#faq" }
+    ]
+  }
+  </script>
+
+  <!-- Structured data: FAQPage (inline with the questions on this page) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Is OpenCluely really invisible during screen sharing?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. The overlay windows are excluded from capture in tools like Zoom, Google Meet, Microsoft Teams, Discord, and OBS. When a screen share starts, the app can also hide every window on its own. You still see the answers on your physical display."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Do I need an API key?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "You need a free Google Gemini API key for the AI features. On first launch the app opens its Settings window and walks you through adding it. You can paste it in the UI or edit the .env file directly."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is voice input required?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Voice is optional. You can use screenshots and the chat on their own. If you want speech, pick either local Whisper for offline transcription or Azure Speech. When no provider is set up, the mic button hides itself."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Which platforms are supported?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Windows and Linux (.deb and AppImage) ship as pre-built installers, built automatically on GitHub Actions with every release. macOS is not pre-built because the unsigned app is blocked by Gatekeeper, so on macOS you run it from source with a one-line ./setup.sh."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is my data collected?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No telemetry and no data collection. Processing happens locally and your session stays on your device. Only the requests you send to the AI provider leave your machine, encrypted in transit."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is OpenCluely free?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. OpenCluely is open source under the MIT license. You only pay for whatever AI usage your own Gemini key incurs, which has a generous free tier."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does the screen-capture invisibility work?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "On Windows OpenCluely uses WDA_EXCLUDEFROMCAPTURE and on macOS it uses NSWindowSharingNone. Both are operating-system-level flags that tell screen recording APIs to skip that window. Linux does not offer this API, so the overlay is visible on that platform."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I use OpenCluely with any AI model?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Currently OpenCluely is built around Google Gemini (Flash-Lite and Flash models). Support for OpenAI, Anthropic Claude, and local models is planned."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does it work in non-English languages?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Gemini understands most major languages, so you can ask questions in any language. Whisper voice transcription supports multiple languages with automatic detection."
+        }
+      }
+    ]
   }
   </script>
 </head>
@@ -354,7 +506,19 @@
           </details>
           <details>
             <summary>Is it free?<svg class="ic chev"><use href="#i-arrow"/></svg></summary>
-            <p>Yes. OpenCluely is open source under the MIT license. You only pay for whatever AI usage your own Gemini key incurs, which has a free tier.</p>
+            <p>Yes. OpenCluely is open source under the MIT license. You only pay for whatever AI usage your own Gemini key incurs, which has a generous free tier.</p>
+          </details>
+          <details>
+            <summary>How does the screen-capture invisibility work?<svg class="ic chev"><use href="#i-arrow"/></svg></summary>
+            <p>On Windows OpenCluely uses <code>WDA_EXCLUDEFROMCAPTURE</code> and on macOS it uses <code>NSWindowSharingNone</code> &mdash; both are operating-system-level flags that tell the screen recording APIs to skip that window. The app checks for active screen sharing and can auto-hide every window when a share begins. Linux does not offer this API, so the overlay is visible on that platform; share a single window instead of the full screen as a partial workaround.</p>
+          </details>
+          <details>
+            <summary>Can I use OpenCluely with any AI model?<svg class="ic chev"><use href="#i-arrow"/></svg></summary>
+            <p>Currently OpenCluely is built around Google Gemini (Flash-Lite and Flash models). Support for OpenAI, Anthropic Claude, and local models is planned. The architecture is designed to be model-agnostic, so additional backends will be added over time.</p>
+          </details>
+          <details>
+            <summary>Does it work in non-English languages?<svg class="ic chev"><use href="#i-arrow"/></svg></summary>
+            <p>Gemini understands most major languages, so you can ask questions in the language you prefer. Whisper voice transcription supports multiple languages (set <code>WHISPER_LANGUAGE=auto</code> for automatic detection). The DSA skill prompt and code answers are language-aware and adapt to your chosen coding language.</p>
           </details>
         </div>
       </div>
@@ -406,6 +570,7 @@ cd OpenCluely</code></pre>
         </a>
         <nav class="footer-links" aria-label="Footer">
           <a href="#features">Features</a>
+          <a href="#how">How it works</a>
           <a href="#download">Download</a>
           <a href="#faq">FAQ</a>
           <a href="https://github.com/TechyCSR/OpenCluely" target="_blank" rel="noopener">GitHub</a>

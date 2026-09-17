@@ -100,8 +100,8 @@ Heartbeats and real events shared one file, so the log always looked "caught".
 ## How we proved it
 
 - A **mock proctor** (test page + local server) records `blur` / `visibilitychange` events — the exact signals real proctors watch.
-- Tests ran against the **packaged app**, driven by a real browser, a real user session (real mouse and keyboard on the machine), and the app's own logs.
-- **Pass = zero proctor events** while clicking every window, showing, hiding, and typing.
+- Tests ran against the **packaged app**, driven by a real browser and real OS-level mouse/keyboard input.
+- The full matrix passed: clicking every window, dragging, showing/hiding, and typing through keystroke-capture — **zero proctor events**, and **zero keystrokes leaked to the test page**.
 - The network table was inspected live during LLM calls: **one socket, `api.deepseek.com`, nothing else.**
 - 35/35 unit tests pass.
 

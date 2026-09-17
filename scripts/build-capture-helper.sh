@@ -17,4 +17,18 @@ fi
 mkdir -p "$OUT_DIR"
 echo "Compiling keystroke-capture helper..."
 swiftc -O "$SRC_DIR/main.swift" -o "$OUT_DIR/keystroke-capture"
+
+# Sign the helper with the app's code-signing identity. WITHOUT this, macOS
+# TCC refuses to chain the Accessibility / Input Monitoring grants from the
+# parent app to this child process (responsibility requires a valid signing
+# chain), so the grants never reach the helper and synthetic input / the
+# event tap silently fail. The identity is the one electron-builder uses for
+# the app itself.
+SIGN_ID="8C10C68F099D70FF70B0FB62BCF0567CB5ACE04B"
+if codesign -s "$SIGN_ID" "$OUT_DIR/keystroke-capture" >/dev/null 2>&1; then
+  echo "Signed helper with app identity"
+else
+  echo "WARNING: helper codesign failed — TCC grants will not reach it" >&2
+fi
+
 echo "Built $OUT_DIR/keystroke-capture"

@@ -78,6 +78,18 @@ if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "post" {
             postMouse(.leftMouseDown, p)
         case "up":
             postMouse(.leftMouseUp, p)
+        case "dragto":
+            // mouseMoved carries no button state — a real drag needs
+            // leftMouseDragged events so the OS keeps the button held.
+            if let ev = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .leftMouseDragged,
+                mouseCursorPosition: p,
+                mouseButton: .left
+            ) {
+                ev.post(tap: .cghidEventTap)
+                usleep(30000)
+            }
         case "dblclick":
             postMouse(.mouseMoved, p)
             for _ in 0..<2 {
@@ -134,6 +146,9 @@ if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "post" {
                 print("{\"where\":[\(loc.x),\(loc.y)]}")
                 fflush(stdout)
             }
+        case "permcheck":
+            print("{\"listen\":\(CGPreflightListenEventAccess()),\"post\":\(CGPreflightPostEventAccess())}")
+            fflush(stdout)
         default:
             break
         }

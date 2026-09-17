@@ -984,7 +984,7 @@ class ApplicationController {
       return { active: this._captureMode, target: this._captureTarget };
     });
 
-    ipcMain.handle("synthetic-input", (event, command) => {
+    ipcMain.handle("synthetic-input", async (event, command) => {
       // TEST-HARNESS ONLY: synthesize real OS input (mouse clicks/keys) for
       // the automated stealth matrix. Disabled unless the app is launched
       // with CLUELY_TEST_HARNESS=1 so production launches carry no remote
@@ -998,13 +998,23 @@ class ApplicationController {
         const helperPath = this.resolveCaptureHelperPath();
         if (!helperPath) return { success: false, reason: "helper missing" };
         const { spawn } = require("child_process");
-        const child = spawn(helperPath, ["post"], { stdio: ["pipe", "ignore", "pipe"] });
+        const child = spawn(helperPath, ["post"], { stdio: ["pipe", "pipe", "pipe"] });
+        let stdoutBuf = "";
+        let stderrBuf = "";
+        child.stdout.on("data", (chunk) => { stdoutBuf += String(chunk); });
+        child.stderr.on("data", (chunk) => { stderrBuf += String(chunk); });
         child.stdin.write(JSON.stringify(command || {}) + "\n");
         child.stdin.end(); // helper exits on stdin EOF
         child.on("error", (error) => {
           logger.warn("synthetic-input helper error", { error: error.message });
         });
-        return { success: true, command };
+        // Wait for the helper to exit so we can return its output (e.g. the
+        // "where" probe) for permission diagnostics.
+        const output = await new Promise((resolve) => {
+          child.on("exit", () => resolve({ stdout: stdoutBuf.trim(), stderr: stderrBuf.trim() }));
+          setTimeout(() => resolve({ stdout: stdoutBuf.trim(), stderr: stderrBuf.trim() + " (timeout)" }), 5000);
+        });
+        return { success: true, command, ...output };
       } catch (error) {
         logger.warn("synthetic-input failed", { error: error.message });
         return { success: false, reason: error.message };

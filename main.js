@@ -230,8 +230,12 @@ class ApplicationController {
 
     // macOS: run as an accessory app so clicking overlay windows never
     // activates the app (which would steal focus from the proctored page).
-    // The app has no Dock icon; keyboard input paths temporarily switch to
-    // 'regular' via windowManager.focusForKeyboardInput() and revert on blur.
+    // The app has no Dock icon. Keyboard input works without ever leaving
+    // this policy: every overlay window is a non-activating panel (or
+    // focusable:false) and panels accept typing by becoming key WITHOUT
+    // activating the app. WindowManager passes skipTransformProcessType
+    // to setVisibleOnAllWorkspaces() so Electron's DockShow() transform
+    // cannot silently revert this policy back to 'regular'.
     if (
       process.platform === "darwin" &&
       config.get("stealth.hideFromDock") !== false

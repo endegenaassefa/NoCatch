@@ -1,4 +1,4 @@
-const { BrowserWindow, screen, desktopCapturer, shell, app } = require('electron');
+const { BrowserWindow, screen, desktopCapturer, shell } = require('electron');
 const path = require('path');
 const logger = require('../core/logger').createServiceLogger('WINDOW');
 const config = require('../core/config');
@@ -9,11 +9,6 @@ class WindowManager {
     this.activeWindow = 'main';
     this.isInteractive = true; // default to interactive so windows are clickable/drag-able
 
-    // macOS accessory-mode tracking: overlay windows must never steal focus
-    // from the proctored page. focusForKeyboardInput()/revertToAccessory()
-    // temporarily switch to 'regular' only when keyboard input is needed.
-    this._accessoryMode = process.platform === 'darwin' && config.get('stealth.hideFromDock') !== false;
-    this._inputActivationActive = false;
     this.isVisible = false;
     this.currentDisplay = null;
     this.screenWatcher = null;
@@ -930,41 +925,12 @@ class WindowManager {
     });
   }
 
-  // macOS only: temporarily switch the app to 'regular' activation so the
-  // user can type into chat/settings/onboarding. Accessory apps cannot
-  // become frontmost for keyboard input. revertToAccessory() undoes this
-  // when the typing window stops being key (see setupWindowEventHandlers).
-  focusForKeyboardInput(win) {
-    if (!win || win.isDestroyed()) return;
-    if (process.platform === 'darwin') {
-      try {
-        if (this._accessoryMode) {
-          app.setActivationPolicy('regular');
-          app.focus({ steal: true });
-        }
-        win.show();
-        win.focus();
-        this._inputActivationActive = true;
-      } catch (error) {
-        logger.warn('Failed to activate app for keyboard input', { error: error.message });
-      }
-    } else {
-      win.focus();
-    }
-  }
-
-  revertToAccessory() {
-    if (!this._inputActivationActive) return;
-    this._inputActivationActive = false;
-    if (process.platform === 'darwin' && this._accessoryMode) {
-      try {
-        app.setActivationPolicy('accessory');
-        logger.debug('Reverted to accessory activation policy');
-      } catch (error) {
-        logger.warn('Failed to revert to accessory activation policy', { error: error.message });
-      }
-    }
-  }
+  // NOTE: no accessory<->regular activation toggle is used here. Every
+  // overlay window is a non-activating panel (or focusable:false) and the
+  // app runs under the accessory policy set in main.js; panels accept
+  // keyboard input by becoming key WITHOUT activating the app, so no
+  // policy switch is ever needed. A toggle would only add dock-icon
+  // flicker and a "stuck in regular" failure mode.
   
   setupWindowEventHandlers() {
     this.windows.forEach((window, type) => {
@@ -983,14 +949,6 @@ class WindowManager {
         // Only log, don't force focus back
         logger.debug('Window blurred', { type });
       });
-
-      // Typing windows temporarily escalate the app to 'regular' so keyboard
-      // input works; revert to accessory as soon as they stop being key.
-      if (type === 'chat' || type === 'settings' || type === 'onboarding') {
-        window.on('blur', () => {
-          this.revertToAccessory();
-        });
-      }
 
       window.on('show', () => {
         logger.debug('Window shown', { type });
@@ -1434,7 +1392,6 @@ class WindowManager {
     if (settingsWindow) {
       settingsWindow.hide();
     }
-    this.revertToAccessory();
   }
 
   async showOnboarding() {
@@ -1454,9 +1411,16 @@ class WindowManager {
 
     this.showOnCurrentDesktop(onboardingWindow);
     this.centerWindow(onboardingWindow);
-    // Onboarding requires keyboard input (API keys): temporarily escalate
-    // the app to 'regular' activation; it reverts on window blur.
-    this.focusForKeyboardInput(onboardingWindow);
+    // Onboarding is a non-activating panel and the app runs under the
+    // accessory policy: the user clicks the wizard once and it accepts
+    // keyboard input by becoming key WITHOUT activating the app (same
+    // mechanism as the settings window), so no activation policy switch
+    // or focus steal is needed.
+    if (process.platform !== 'darwin') {
+      // Windows/Linux: keep the first-run convenience of focusing the
+      // wizard so the user can type immediately.
+      onboardingWindow.focus();
+    }
     logger.info('Onboarding window displayed');
     return onboardingWindow;
   }
@@ -1474,7 +1438,6 @@ class WindowManager {
       onboardingWindow.close();
     }
     this.windows.delete('onboarding');
-    this.revertToAccessory();
   }
 
   expandLLMWindow(contentMetrics = null) {
@@ -1873,7 +1836,6 @@ class WindowManager {
       chatWindow.hide();
       logger.debug('Chat window hidden');
     }
-    this.revertToAccessory();
   }
 
   handleRecordingStarted() {

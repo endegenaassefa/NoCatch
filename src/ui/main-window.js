@@ -1174,7 +1174,7 @@ class MainWindowUI {
             document.body.removeChild(menu);
         });
 
-        const quitOption = this.createMenuItem('Quit OpenCluely', 'fa-power-off', () => {
+        const quitOption = this.createMenuItem('Quit', 'fa-power-off', () => {
             if (window.electronAPI && window.electronAPI.quit) {
                 window.electronAPI.quit();
             }

@@ -1,7 +1,7 @@
 {
-  "name": "opencluely",
+  "name": "screen-reader-util",
   "version": "1.0.0",
-  "description": "AI Problem Solving Assistant",
+  "description": "Personal desktop reading assistant",
   "main": "main.js",
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron .",
@@ -20,13 +20,7 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "author": {
-    "name": "TechyCSR",
-    "email": "info@techycsr.dev",
-    "url": "https://techycsr.dev"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/TechyCSR/OpenCluely"
+    "name": "screen-reader-util contributors"
   },
   "license": "ISC",
   "dependencies": {
@@ -46,8 +40,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.opencluely.app",
-    "productName": "OpenCluely",
+    "appId": "com.screenreaderutil.app",
+    "productName": "screen-reader-util",
     "directories": {
       "output": "dist"
     },
@@ -91,9 +85,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "OpenCluely uses the microphone to transcribe your speech locally with Whisper.",
-        "NSCameraUsageDescription": "OpenCluely does not record video; this entitlement is only present for media-capture compatibility.",
-        "NSScreenCaptureUsageDescription": "OpenCluely captures the screen to read on-screen content for AI assistance."
+        "NSMicrophoneUsageDescription": "screen-reader-util uses the microphone to transcribe your speech locally with Whisper.",
+        "NSCameraUsageDescription": "screen-reader-util does not record video; this entitlement is only present for media-capture compatibility.",
+        "NSScreenCaptureUsageDescription": "screen-reader-util captures the screen to read on-screen content for AI assistance."
       }
     },
     "win": {
@@ -162,10 +156,10 @@
       "perMachine": false,
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
-      "artifactName": "OpenCluely-Setup-${version}.${ext}"
+      "artifactName": "screen-reader-util-Setup-${version}.${ext}"
     },
     "dmg": {
-      "title": "OpenCluely Interview Assistant",
+      "title": "screen-reader-util",
       "backgroundColor": "#000000",
       "window": {
         "width": 600,

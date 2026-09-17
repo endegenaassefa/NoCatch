@@ -625,8 +625,15 @@ class WindowManager {
       }, 100);
     }
 
-    // Ensure window appears on all workspaces/desktops initially
-    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // Ensure window appears on all workspaces/desktops initially.
+    // skipTransformProcessType: the app runs under the accessory activation
+    // policy (see main.js); without this flag Electron flips the process
+    // between UIElement and Foreground on every call, which would silently
+    // undo the accessory policy and show a Dock icon.
+    window.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
     
     // Hide from taskbar to maintain stealth
     window.setSkipTaskbar(true);
@@ -850,9 +857,15 @@ class WindowManager {
     const isLLM = llmWin && !llmWin.isDestroyed() && win.id === llmWin.id;
 
     if (process.platform === 'darwin') {
-      // macOS: prevent space switching and keep visibility stable
+      // macOS: prevent space switching and keep visibility stable.
+      // skipTransformProcessType keeps this call from flipping the app's
+      // activation policy (UIElement <-> Foreground), which would undo the
+      // accessory policy set at startup and briefly show a Dock icon.
       win.hide();
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      win.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
 
       const setMacOSAlwaysOnTop = () => {
         if (win.isDestroyed()) return;
@@ -875,20 +888,30 @@ class WindowManager {
         setTimeout(() => {
           if (win.isDestroyed()) return;
           if (!isLLM) {
-            win.setVisibleOnAllWorkspaces(false);
+            // NOTE: without skipTransformProcessType, this call transforms
+            // the process to a Foreground app (Dock icon + activatable),
+            // undoing the accessory activation policy.
+            win.setVisibleOnAllWorkspaces(false, {
+              skipTransformProcessType: true,
+            });
           }
           setMacOSAlwaysOnTop();
         }, 300);
       }, 50);
     } else {
       // Linux/Windows
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      win.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
       win.setAlwaysOnTop(true);
       win.showInactive(); // Non-activating show: never steal focus
       setTimeout(() => {
         if (win.isDestroyed()) return;
         if (!isLLM) {
-          win.setVisibleOnAllWorkspaces(false);
+          win.setVisibleOnAllWorkspaces(false, {
+            skipTransformProcessType: true,
+          });
         }
         win.setAlwaysOnTop(true);
       }, 500);

@@ -34,6 +34,17 @@ class CaptureService {
     try {
       const { image, metadata } = await this.captureScreenshot(options);
 
+      // Default capture region: the left half of the main display, where the
+      // readable text pane renders in a typical two-pane (text left, editor
+      // right) layout. An explicit options.area always wins.
+      if (!options.area) {
+        const { width, height } = image.getSize();
+        options = {
+          ...options,
+          area: { x: 0, y: 0, width: Math.floor(width / 2), height }
+        };
+      }
+
       // Crop if area specified
       let finalImage = image;
       if (options.area && this._isValidArea(options.area)) {

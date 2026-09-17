@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to OpenCluely</title>
+    <title>Welcome</title>
     <link rel="stylesheet" href="./assests/vendor/fontawesome/all.min.css">
     <style>
         *, *::before, *::after {
@@ -702,7 +702,7 @@
         <div class="header">
             <div class="brand">
                 <div class="brand-dot"></div>
-                OpenCluely
+                Reader
             </div>
             <div class="step-badge" id="stepBadge">Step 1 of 4</div>
         </div>
@@ -722,7 +722,7 @@
             <section class="screen active" data-screen="welcome">
                 <div class="hero">
                     <div class="hero-logo"><i class="fas fa-bolt"></i></div>
-                    <h1>Welcome to OpenCluely</h1>
+                    <h1>Welcome</h1>
                     <p class="tagline">
                         Your AI-powered interview &amp; problem-solving copilot.
                         Let's get you set up in about a minute.
@@ -740,13 +740,36 @@
 
             <!-- SCREEN 2: API Key -->
             <section class="screen" data-screen="apikey">
-                <h1>Connect Google Gemini</h1>
-                <p class="subtitle">
-                    OpenCluely uses Google's Gemini to generate answers. You'll need a free API key.
+                <h1 id="apiKeyTitle">Connect Google Gemini</h1>
+                <p class="subtitle" id="apiKeySubtitle">
+                    This app uses Google's Gemini to generate answers. You'll need a free API key.
                 </p>
 
+                <div class="choice-list" id="llmChoices">
+                    <div class="choice-card" data-value="gemini">
+                        <div class="choice-icon"><i class="fas fa-brain"></i></div>
+                        <div class="choice-text">
+                            <div class="choice-title">Google Gemini</div>
+                            <div class="choice-desc">
+                                Google's multimodal models. Free tier available via Google AI Studio.
+                            </div>
+                        </div>
+                        <div class="choice-radio"></div>
+                    </div>
+                    <div class="choice-card" data-value="deepseek">
+                        <div class="choice-icon"><i class="fas fa-whale"></i></div>
+                        <div class="choice-text">
+                            <div class="choice-title">DeepSeek</div>
+                            <div class="choice-desc">
+                                DeepSeek's deepseek-flash model — vision-capable, pay-as-you-go.
+                            </div>
+                        </div>
+                        <div class="choice-radio"></div>
+                    </div>
+                </div>
+
                 <div class="field">
-                    <label for="geminiKey">Gemini API Key</label>
+                    <label for="geminiKey" id="apiKeyLabel">Gemini API Key</label>
                     <div class="input-wrap">
                         <i class="fas fa-key icon"></i>
                         <input
@@ -761,7 +784,7 @@
                             <i class="fas fa-eye"></i>
                         </button>
                     </div>
-                    <div class="hint">
+                    <div class="hint" id="apiKeyHint">
                         Don't have one? Get a free key at
                         <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
                             aistudio.google.com/apikey
@@ -921,17 +944,14 @@
 
                     <div class="star-card">
                         <div class="star-icon"><i class="fas fa-star"></i></div>
-                        <h3>Enjoying OpenCluely?</h3>
+                        <h3>Enjoying the app?</h3>
                         <p>
-                            If this saved you time in an interview or a coding session,
-                            a quick ⭐ on GitHub helps others find it.
+                            You're all set. Press the hotkey any time to capture the
+                            reading pane and get an answer in the overlay.
                         </p>
                         <div class="actions">
                             <button class="btn primary" id="starBtn" type="button">
-                                <i class="fab fa-github"></i> Star on GitHub
-                            </button>
-                            <button class="btn ghost" id="skipStarBtn" type="button">
-                                Maybe later
+                                <i class="fas fa-check"></i> Finish setup
                             </button>
                         </div>
                     </div>
@@ -957,11 +977,7 @@
         <!-- ── Footer ── -->
         <div class="footer">
             <div class="dev">
-                Built by <a href="https://techycsr.dev" target="_blank" rel="noreferrer"><strong>@TechyCSR</strong></a>
-                <span style="opacity:0.5; margin: 0 8px;">·</span>
-                <a href="https://github.com/TechyCSR/OpenCluely" target="_blank" rel="noreferrer">
-                    <i class="fab fa-github"></i> GitHub
-                </a>
+                screen-reader-util — personal desktop reading assistant
             </div>
         </div>
     </div>

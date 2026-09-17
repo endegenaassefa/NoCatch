@@ -2,11 +2,14 @@ const { GoogleGenAI } = require('@google/genai');
 const logger = require('../core/logger').createServiceLogger('LLM');
 const config = require('../core/config');
 const { promptLoader } = require('../../prompt-loader');
+const { DeepSeekClient } = require('./deepseek.client');
 
 class LLMService {
   constructor() {
     this.client = null;
     this.model = null;
+    this.provider = null;
+    this.deepseekClient = null;
     this.isInitialized = false;
     this.requestCount = 0;
     this.errorCount = 0;
@@ -15,6 +18,20 @@ class LLMService {
   }
 
   initializeClient() {
+    // LLM_PROVIDER wins at runtime (settings persist it to .env and
+    // process.env), falling back to the config default ('gemini').
+    const provider = String(process.env.LLM_PROVIDER || config.get('llm.provider') || 'gemini')
+      .trim()
+      .toLowerCase();
+
+    if (provider === 'deepseek') {
+      this._initializeDeepSeekClient();
+      return;
+    }
+
+    // ── Gemini (default) ──
+    this.provider = 'gemini';
+    this.deepseekClient = null;
     const apiKey = config.getApiKey('GEMINI');
     
     if (!apiKey || apiKey === 'your-api-key-here') {
@@ -42,8 +59,60 @@ class LLMService {
     }
   }
 
+  _initializeDeepSeekClient() {
+    const apiKey = config.getApiKey('DEEPSEEK');
+
+    this.provider = 'deepseek';
+    this.client = null;
+    this.model = config.get('llm.deepseek.model') || 'deepseek-flash';
+
+    if (!apiKey || apiKey === 'your-api-key-here') {
+      logger.warn('DeepSeek API key not configured', {
+        keyExists: !!apiKey,
+        isPlaceholder: apiKey === 'your-api-key-here'
+      });
+      this.deepseekClient = null;
+      this.isInitialized = false;
+      return;
+    }
+
+    try {
+      this.deepseekClient = new DeepSeekClient({
+        apiKey,
+        model: this.model,
+        baseUrl: config.get('llm.deepseek.baseUrl'),
+        timeout: config.get('llm.deepseek.timeout'),
+        maxRetries: config.get('llm.deepseek.maxRetries'),
+        fallbackModels: config.get('llm.deepseek.fallbackModels') || [],
+        generation: config.get('llm.deepseek.generation') || {},
+        userAgent: this.getUserAgent()
+      });
+      this.isInitialized = true;
+
+      logger.info('DeepSeek client initialized successfully', {
+        model: this.model
+      });
+    } catch (error) {
+      logger.error('Failed to initialize DeepSeek client', {
+        error: error.message
+      });
+      this.deepseekClient = null;
+      this.isInitialized = false;
+    }
+  }
+
+  _isDeepSeek() {
+    return this.provider === 'deepseek';
+  }
+
+  _fallbackEnabled() {
+    const enabled = config.get(this._isDeepSeek() ? 'llm.deepseek.fallbackEnabled' : 'llm.gemini.fallbackEnabled');
+    return enabled !== false;
+  }
+
   getGenerationConfig(overrides = {}) {
-    const defaults = config.get('llm.gemini.generation') || {};
+    const section = this._isDeepSeek() ? 'llm.deepseek.generation' : 'llm.gemini.generation';
+    const defaults = config.get(section) || {};
     const fallback = {
       temperature: 0.7,
       topK: 40,
@@ -123,7 +192,7 @@ class LLMService {
    */
   async processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
     if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
@@ -161,6 +230,9 @@ class LLMService {
 
       // Execute with retries/timeout - try alternative method first for network reliability
       let responseText;
+      if (this._isDeepSeek()) {
+        responseText = await this._executeDeepSeek(request);
+      } else {
       const preferAlternative = !!config.get('llm.gemini.enableFallbackMethod');
       try {
         if (preferAlternative) {
@@ -183,6 +255,7 @@ class LLMService {
           });
           throw secondaryError;
         }
+      }
       }
 
       // Enforce language in code fences if provided
@@ -218,7 +291,7 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (config.get('llm.gemini.fallbackEnabled')) {
+      if (this._fallbackEnabled()) {
         return this.generateFallbackResponse('[image]', activeSkill);
       }
       throw error;
@@ -227,7 +300,7 @@ class LLMService {
 
   async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
     if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
@@ -258,7 +331,7 @@ class LLMService {
         geminiRequest.systemInstruction = { parts: [{ text: skillPrompt }] };
       }
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
+      const fullText = await this._executeStreaming(geminiRequest, (delta) => {
         if (typeof onDelta === 'function' && delta) {
           onDelta(delta);
         }
@@ -299,12 +372,21 @@ class LLMService {
 
   formatImageInstruction(activeSkill, programmingLanguage) {
     const langNote = programmingLanguage ? ` Use only ${programmingLanguage.toUpperCase()} for any code.` : '';
-    return `Analyze this image for a ${activeSkill.toUpperCase()} question. Extract the problem concisely and provide the best possible solution with explanation and final code.${langNote}`;
+
+    const skillInstructions = {
+      'mcq': 'If this is a multiple choice question, identify the correct option and explain why in one sentence.',
+      'ood': 'If this is a design question, provide a class diagram description and explain the design decisions.',
+      'system-design': 'If this is a system design question, provide a high-level architecture description and discuss scalability trade-offs.',
+      'behavioral': 'If this is a behavioral question, provide a structured STAR-method answer.'
+    };
+
+    const extra = skillInstructions[activeSkill] || '';
+    return `Analyze this image for a ${activeSkill.toUpperCase()} question. Extract the problem concisely and provide the best possible solution with explanation and final code.${langNote} ${extra}`.trim();
   }
 
   async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
     const startTime = Date.now();
@@ -323,6 +405,9 @@ class LLMService {
 
       const preferAlternative = !!config.get('llm.gemini.enableFallbackMethod');
       let response;
+      if (this._isDeepSeek()) {
+        response = await this._executeDeepSeek(geminiRequest);
+      } else {
       try {
         if (preferAlternative) {
           logger.debug('Attempting alternative HTTPS method first for text processing');
@@ -347,6 +432,7 @@ class LLMService {
           });
           throw secondaryError;
         }
+      }
       }
       
       // Enforce language in code fences if programmingLanguage specified
@@ -381,7 +467,7 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (config.get('llm.gemini.fallbackEnabled')) {
+      if (this._fallbackEnabled()) {
         return this.generateFallbackResponse(text, activeSkill);
       }
 
@@ -391,7 +477,7 @@ class LLMService {
 
   async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
     const startTime = Date.now();
@@ -400,7 +486,7 @@ class LLMService {
     try {
       const geminiRequest = this.buildGeminiRequest(text, activeSkill, sessionMemory, programmingLanguage);
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
+      const fullText = await this._executeStreaming(geminiRequest, (delta) => {
         if (typeof onDelta === 'function' && delta) {
           onDelta(delta);
         }
@@ -439,7 +525,7 @@ class LLMService {
 
   async processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
     const startTime = Date.now();
@@ -458,6 +544,9 @@ class LLMService {
 
       const preferAlternative = !!config.get('llm.gemini.enableFallbackMethod');
       let response;
+      if (this._isDeepSeek()) {
+        response = await this._executeDeepSeek(geminiRequest);
+      } else {
       try {
         if (preferAlternative) {
           logger.debug('Attempting alternative HTTPS method first for transcription processing');
@@ -482,6 +571,7 @@ class LLMService {
           });
           throw secondaryError;
         }
+      }
       }
       
       // Enforce language in code fences if programmingLanguage specified
@@ -517,7 +607,7 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (config.get('llm.gemini.fallbackEnabled')) {
+      if (this._fallbackEnabled()) {
         return this.generateIntelligentFallbackResponse(text, activeSkill);
       }
       
@@ -838,6 +928,32 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     return `Context: ${activeSkill.toUpperCase()} analysis request\n\nText to analyze:\n${text}`;
   }
 
+  /**
+   * Execute a Gemini-shaped request against DeepSeek (non-streaming).
+   * The DeepSeekClient translates contents/systemInstruction into OpenAI
+   * chat messages internally.
+   */
+  async _executeDeepSeek(geminiRequest) {
+    if (!this.deepseekClient) {
+      throw new Error('DeepSeek client not initialized. Check your DeepSeek API key.');
+    }
+    return this.deepseekClient.executeNonStreaming(geminiRequest);
+  }
+
+  /**
+   * Provider-aware streaming execution. DeepSeek and Gemini both accept a
+   * callback that receives each text delta.
+   */
+  _executeStreaming(geminiRequest, onDelta) {
+    if (this._isDeepSeek()) {
+      if (!this.deepseekClient) {
+        return Promise.reject(new Error('DeepSeek client not initialized. Check your DeepSeek API key.'));
+      }
+      return this.deepseekClient.executeStreaming(geminiRequest, onDelta);
+    }
+    return this.executeStreamingRequest(geminiRequest, onDelta);
+  }
+
   async executeRequest(geminiRequest) {
     const maxRetries = config.get('llm.gemini.maxRetries');
     const timeout = config.get('llm.gemini.timeout');
@@ -980,7 +1096,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
    */
   async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
     const startTime = Date.now();
@@ -989,7 +1105,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     try {
       const geminiRequest = this.buildIntelligentTranscriptionRequest(text, activeSkill, sessionMemory, programmingLanguage);
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
+      const fullText = await this._executeStreaming(geminiRequest, (delta) => {
         if (typeof onDelta === 'function' && delta) {
           onDelta(delta);
         }
@@ -1192,10 +1308,12 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     // Quick connectivity check
     try {
       const startTime = Date.now();
+      const host = this._isDeepSeek() ? 'api.deepseek.com' : 'generativelanguage.googleapis.com';
+      const name = this._isDeepSeek() ? 'DeepSeek API Endpoint' : 'Gemini API Endpoint';
       await this.testNetworkConnection({ 
-        host: 'generativelanguage.googleapis.com', 
+        host, 
         port: 443, 
-        name: 'Gemini API Endpoint' 
+        name
       });
       const latency = Date.now() - startTime;
       
@@ -1277,9 +1395,11 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
 
   async checkNetworkConnectivity() {
     const connectivityTests = [
-      { host: 'google.com', port: 443, name: 'Google (HTTPS)' },
-      { host: 'generativelanguage.googleapis.com', port: 443, name: 'Gemini API Endpoint' }
+      { host: 'google.com', port: 443, name: 'Google (HTTPS)' }
     ];
+    connectivityTests.push(this._isDeepSeek()
+      ? { host: 'api.deepseek.com', port: 443, name: 'DeepSeek API Endpoint' }
+      : { host: 'generativelanguage.googleapis.com', port: 443, name: 'Gemini API Endpoint' });
 
     const results = await Promise.allSettled(
       connectivityTests.map(test => this.testNetworkConnection(test))
@@ -1330,7 +1450,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       'dsa': 'This appears to be a data structures and algorithms problem. Consider breaking it down into smaller components and identifying the appropriate algorithm or data structure to use.',
       'system-design': 'For this system design question, consider scalability, reliability, and the trade-offs between different architectural approaches.',
       'programming': 'This looks like a programming challenge. Focus on understanding the requirements, edge cases, and optimal time/space complexity.',
-      'default': 'I can help analyze this content. Please ensure your Gemini API key is properly configured for detailed analysis.'
+      'default': 'I can help analyze this content. Please ensure your LLM provider API key is properly configured for detailed analysis.'
     };
 
     const response = fallbackResponses[activeSkill] || fallbackResponses.default;
@@ -1392,6 +1512,10 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   async testConnection() {
     if (!this.isInitialized) {
       return { success: false, error: 'Service not initialized' };
+    }
+
+    if (this._isDeepSeek()) {
+      return this._testDeepSeekConnection();
     }
 
     try {
@@ -1481,49 +1605,116 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   /**
+   * DeepSeek equivalent of testConnection(): a tiny Chat Completions call
+   * through the DeepSeekClient. Returns the same { success, error, ... }
+   * shape the UI expects.
+   */
+  async _testDeepSeekConnection() {
+    try {
+      const networkCheck = await this.checkNetworkConnectivity();
+
+      const request = {
+        contents: [{ role: 'user', parts: [{ text: 'Test connection. Please respond with "OK".' }] }],
+        generationConfig: this.getGenerationConfig({ temperature: 0, maxOutputTokens: 64 })
+      };
+
+      const startTime = Date.now();
+      const text = await this._executeDeepSeek(request);
+      const latency = Date.now() - startTime;
+
+      logger.info('DeepSeek connection test successful', {
+        response: text,
+        latency,
+        model: this.model
+      });
+
+      return {
+        success: true,
+        response: text,
+        latency,
+        model: this.model,
+        networkConnectivity: networkCheck
+      };
+    } catch (error) {
+      const errorAnalysis = this.analyzeError(error);
+      logger.error('DeepSeek connection test failed', {
+        error: error.message,
+        errorAnalysis
+      });
+
+      return {
+        success: false,
+        error: this._friendlyTestError(error, errorAnalysis),
+        errorType: errorAnalysis?.type || 'UNKNOWN',
+        errorAnalysis,
+        networkConnectivity: await this.checkNetworkConnectivity().catch(() => null)
+      };
+    }
+  }
+
+  /**
    * Translate raw SDK / network errors into something a user can act on.
    */
   _friendlyTestError(error, analysis) {
     const type = analysis?.type;
     const raw = (error?.message || '').toLowerCase();
+    const isDeepSeek = this._isDeepSeek();
+    const providerName = isDeepSeek ? 'DeepSeek' : 'Gemini';
 
     if (type === 'NETWORK_ERROR' || raw.includes('fetch failed') || raw.includes('enotfound')) {
-      return 'Cannot reach Google servers. Check your internet connection, firewall, or VPN settings.';
+      return isDeepSeek
+        ? 'Cannot reach DeepSeek servers. Check your internet connection, firewall, or VPN settings.'
+        : 'Cannot reach Google servers. Check your internet connection, firewall, or VPN settings.';
     }
-    if (type === 'AUTH_ERROR' || raw.includes('api key') || raw.includes('401') || raw.includes('403')) {
-      return 'Invalid API key or insufficient permissions. Double-check the key at aistudio.google.com/apikey.';
+    if (type === 'AUTH_ERROR' || raw.includes('api key') || raw.includes('401') || raw.includes('403') || raw.includes('authentication')) {
+      return isDeepSeek
+        ? 'Invalid DeepSeek API key. Double-check the key at platform.deepseek.com/api_keys.'
+        : 'Invalid API key or insufficient permissions. Double-check the key at aistudio.google.com/apikey.';
     }
-    if (type === 'RATE_LIMIT_ERROR' || raw.includes('429') || raw.includes('quota')) {
-      return 'Rate limit or quota exceeded. Wait a moment or check your Google Cloud billing.';
+    if (type === 'RATE_LIMIT_ERROR' || raw.includes('429') || raw.includes('quota') || raw.includes('insufficient_quota')) {
+      return isDeepSeek
+        ? 'Rate limit or quota exceeded. Wait a moment or top up your DeepSeek balance.'
+        : 'Rate limit or quota exceeded. Wait a moment or check your Google Cloud billing.';
     }
     if (type === 'TIMEOUT_ERROR') {
-      return 'Request timed out. The Google API may be slow or unreachable right now.';
+      return `Request timed out. The ${providerName} API may be slow or unreachable right now.`;
     }
     if (type === 'MODEL_ERROR' || raw.includes('model') || raw.includes('404')) {
-      return 'The configured Gemini model is unavailable. Try a different model in Settings.';
+      return `The configured ${providerName} model is unavailable. Try a different model in Settings.`;
     }
     if (raw.includes('503') || raw.includes('unavailable') || raw.includes('high demand')) {
-      return 'Gemini is experiencing high demand. Please wait a moment and try again.';
+      return `${providerName} is experiencing high demand. Please wait a moment and try again.`;
     }
     // Fall back to a stripped-down raw message (no SDK prefix noise)
     return (error?.message || 'Connection failed').replace(/^\[(GoogleGenerativeAI|GoogleGenAI) Error\]:\s*/i, '');
   }
 
   updateApiKey(newApiKey) {
-    process.env.GEMINI_API_KEY = newApiKey;
+    // Determine the target from the same source initializeClient() uses,
+    // not this.provider — the provider may be stale if the key is saved
+    // before the service has been reinitialized.
+    const activeProvider = String(process.env.LLM_PROVIDER || config.get('llm.provider') || 'gemini')
+      .trim()
+      .toLowerCase();
+    const envKey = activeProvider === 'deepseek' ? 'DEEPSEEK_API_KEY' : 'GEMINI_API_KEY';
+    process.env[envKey] = newApiKey;
     this.isInitialized = false;
     this.initializeClient();
     
-    logger.info('API key updated and client reinitialized');
+    logger.info('API key updated and client reinitialized', { envKey });
   }
 
   getStats() {
+    const activeSection = this._isDeepSeek() ? 'llm.deepseek' : 'llm.gemini';
     return {
       isInitialized: this.isInitialized,
+      provider: this.provider || 'gemini',
+      model: this.model,
+      hasApiKey: this.isInitialized,
       requestCount: this.requestCount,
       errorCount: this.errorCount,
       successRate: this.requestCount > 0 ? ((this.requestCount - this.errorCount) / this.requestCount) * 100 : 0,
-      config: config.get('llm.gemini')
+      config: config.get(activeSection)
     };
   }
 

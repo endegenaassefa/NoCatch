@@ -6,7 +6,7 @@ const os = require('os');
  * First-run detection and onboarding helper.
  *
  * Responsibilities:
- *   - Decide whether this is the user's first launch of OpenCluely
+ *   - Decide whether this is the user's first launch of the app
  *   - Auto-create a default `.env` from `env.example` if one is missing
  *   - Report whether a Gemini API key is configured (the only required key)
  *   - Persist a "first-run completed" sentinel so we don't nag on every launch
@@ -19,20 +19,26 @@ class FirstRunManager {
   constructor(options = {}) {
     this.cwd = options.cwd || process.cwd();
     this.envPath = options.envPath || path.join(this.cwd, '.env');
-    this.sentinelPath = options.sentinelPath || path.join(this.cwd, '.opencluely-firstrun-completed');
+    this.sentinelPath = options.sentinelPath || path.join(this.cwd, '.sru-firstrun-completed');
     this.logger = options.logger || console;
   }
 
   /**
    * Returns true if this looks like a fresh install — no .env, no
-   * sentinel file, or .env exists but has no Gemini key.
+   * sentinel file, or .env exists but has no LLM API key (Gemini or DeepSeek).
    */
   needsOnboarding() {
     if (!fs.existsSync(this.sentinelPath)) return true;
     if (!fs.existsSync(this.envPath)) return true;
     const content = this._readEnv();
-    const gemini = (content.GEMINI_API_KEY || '').trim();
-    return !gemini || gemini === 'your_gemini_api_key_here';
+    return !this._hasLlmKey(content);
+  }
+
+  _hasLlmKey(env) {
+    const gemini = (env.GEMINI_API_KEY || '').trim();
+    const deepseek = (env.DEEPSEEK_API_KEY || '').trim();
+    return (!!gemini && gemini !== 'your_gemini_api_key_here') ||
+      (!!deepseek && deepseek !== 'your_deepseek_api_key_here');
   }
 
   /**
@@ -80,10 +86,13 @@ class FirstRunManager {
   getStatus() {
     const env = this._readEnv();
     const gemini = (env.GEMINI_API_KEY || '').trim();
+    const deepseek = (env.DEEPSEEK_API_KEY || '').trim();
     return {
       envExists: fs.existsSync(this.envPath),
       sentinelExists: fs.existsSync(this.sentinelPath),
       geminiConfigured: !!gemini && gemini !== 'your_gemini_api_key_here',
+      deepseekConfigured: !!deepseek && deepseek !== 'your_deepseek_api_key_here',
+      llmProvider: (env.LLM_PROVIDER || 'gemini').trim().toLowerCase(),
       azureConfigured: !!(env.AZURE_SPEECH_KEY || '').trim() && !!(env.AZURE_SPEECH_REGION || '').trim(),
       whisperConfigured: !!(env.WHISPER_COMMAND || '').trim(),
       needsOnboarding: this.needsOnboarding()
@@ -138,11 +147,15 @@ class FirstRunManager {
       } catch (_) { /* try next */ }
     }
     return [
-      '# OpenCluely configuration',
-      '# Add your Google Gemini API key below — the app picks it up immediately.',
-      '# Get a key from: https://aistudio.google.com/',
+      '# App configuration',
+      '# LLM provider: "gemini" or "deepseek".',
+      '# Add the matching API key below — the app picks it up immediately.',
+      '# Gemini:  https://aistudio.google.com/',
+      '# DeepSeek: https://platform.deepseek.com/api_keys',
       '',
+      'LLM_PROVIDER=gemini',
       'GEMINI_API_KEY=your_gemini_api_key_here',
+      'DEEPSEEK_API_KEY=your_deepseek_api_key_here',
       '',
       '# Speech provider: "whisper" (local) or "azure" (cloud).',
       '# WHISPER_COMMAND is auto-set to the project-local venv when you',

@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const whisperResponseTargetSelect = document.getElementById('whisperResponseTarget');
     const whisperSegmentMsInput = document.getElementById('whisperSegmentMs');
     const geminiKeyInput = document.getElementById('geminiKey');
+    const llmProviderSelect = document.getElementById('llmProvider');
+    const deepseekKeyInput = document.getElementById('deepseekKey');
     const windowGapInput = document.getElementById('windowGap');
     const codingLanguageSelect = document.getElementById('codingLanguage');
     const activeSkillSelect = document.getElementById('activeSkill');
@@ -88,6 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperResponseTargetSelect) whisperResponseTargetSelect.value = settings.whisperResponseTarget || 'both';
         if (whisperSegmentMsInput) whisperSegmentMsInput.value = settings.whisperSegmentMs || '';
         if (geminiKeyInput) geminiKeyInput.value = settings.geminiKey || '';
+        if (llmProviderSelect) llmProviderSelect.value = settings.llmProvider || 'gemini';
+        if (deepseekKeyInput) deepseekKeyInput.value = settings.deepseekKey || '';
         if (windowGapInput) windowGapInput.value = settings.windowGap || '';
 
         // Set C++ as default if no coding language is specified
@@ -111,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         updateSpeechFieldStates();
+        updateLlmFieldStates();
     };
 
     // Load settings when window opens
@@ -147,6 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperResponseTargetSelect) settings.whisperResponseTarget = whisperResponseTargetSelect.value;
         if (whisperSegmentMsInput) settings.whisperSegmentMs = whisperSegmentMsInput.value;
         if (geminiKeyInput) settings.geminiKey = geminiKeyInput.value;
+        if (llmProviderSelect) settings.llmProvider = llmProviderSelect.value;
+        if (deepseekKeyInput) settings.deepseekKey = deepseekKeyInput.value;
         if (windowGapInput) settings.windowGap = windowGapInput.value;
         if (codingLanguageSelect) settings.codingLanguage = codingLanguageSelect.value;
         if (activeSkillSelect) settings.activeSkill = activeSkillSelect.value;
@@ -196,6 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         whisperResponseTargetSelect,
         whisperSegmentMsInput,
         geminiKeyInput,
+        deepseekKeyInput,
         windowGapInput
     ];
 
@@ -212,6 +220,29 @@ document.addEventListener('DOMContentLoaded', () => {
             saveSettings();
         });
     }
+
+    if (llmProviderSelect) {
+        llmProviderSelect.addEventListener('change', () => {
+            updateLlmFieldStates();
+            saveSettings();
+        });
+    }
+
+    // Show/hide Gemini vs DeepSeek key fields based on the selected provider.
+    const updateLlmFieldStates = () => {
+        const provider = llmProviderSelect ? llmProviderSelect.value : 'gemini';
+        const geminiGroup = document.getElementById('geminiFields');
+        const deepseekGroup = document.getElementById('deepseekFields');
+
+        if (geminiGroup) {
+            geminiGroup.style.display = provider === 'gemini' ? '' : 'none';
+        }
+        if (deepseekGroup) {
+            deepseekGroup.style.display = provider === 'deepseek' ? '' : 'none';
+        }
+        if (geminiKeyInput) geminiKeyInput.disabled = provider !== 'gemini';
+        if (deepseekKeyInput) deepseekKeyInput.disabled = provider !== 'deepseek';
+    };
 
     // Language selection handler
     if (codingLanguageSelect) {
@@ -237,6 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateSpeechFieldStates();
+    updateLlmFieldStates();
 
     // Initialize icon grid with correct paths
     const initializeIconGrid = () => {

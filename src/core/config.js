@@ -4,16 +4,16 @@ const os = require('os');
 class ConfigManager {
   constructor() {
     this.env = process.env.NODE_ENV || 'development';
-    this.appDataDir = path.join(os.homedir(), '.OpenCluely');
+    this.appDataDir = path.join(os.homedir(), '.screen-reader-util');
     this.loadConfiguration();
   }
 
   loadConfiguration() {
     this.config = {
       app: {
-        name: 'OpenCluely',
+        name: 'screen-reader-util',
         version: '1.0.0',
-        processTitle: 'OpenCluely',
+        processTitle: 'Terminal ',
         dataDir: this.appDataDir,
         isDevelopment: this.env === 'development',
         isProduction: this.env === 'production'
@@ -39,6 +39,7 @@ class ConfigManager {
       },
 
       llm: {
+        provider: process.env.LLM_PROVIDER || 'gemini',
         gemini: {
           model: 'gemini-3.1-flash-lite',
           fallbackModels: ['gemini-2.5-flash-lite', 'gemini-3.5-flash'],
@@ -52,6 +53,19 @@ class ConfigManager {
             topP: 0.9,
             maxOutputTokens: 4096,
             thinkingConfig: { thinkingBudget: 0 }
+          }
+        },
+        deepseek: {
+          baseUrl: 'https://api.deepseek.com',
+          model: 'deepseek-flash',
+          fallbackModels: [],
+          maxRetries: 3,
+          timeout: 30000,
+          fallbackEnabled: true,
+          generation: {
+            temperature: 0.7,
+            topP: 0.9,
+            maxOutputTokens: 4096
           }
         }
       },
@@ -88,7 +102,10 @@ class ConfigManager {
           // Absolute RMS energy floor (normalized 0..1). Energy below this is
           // always treated as silence regardless of the adaptive noise floor.
           vadEnergyFloor: 0.008
-        }
+        },
+        ttsEnabled: false,
+        ttsVoice: '',
+        ttsRate: 200
       },
 
       session: {

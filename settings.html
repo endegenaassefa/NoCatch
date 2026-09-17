@@ -318,6 +318,10 @@
                         </div>
                         <select class="input-field" id="activeSkill">
                             <option value="dsa">Data Structures & Algorithms</option>
+                            <option value="ood">Object-Oriented Design</option>
+                            <option value="mcq">Multiple Choice</option>
+                            <option value="system-design">System Design</option>
+                            <option value="behavioral">Behavioral / HR</option>
                         </select>
                     </div>
                 </div>
@@ -459,15 +463,39 @@
             <div class="settings-section">
                 <div class="settings-section-title">
                     <i class="fas fa-robot"></i>
-                    Gemini Settings
+                    AI Model Settings
                 </div>
                 <div class="settings-section-content">
                     <div class="settings-item">
                         <div>
-                            <div class="settings-item-label">Google API Key</div>
-                            <div class="settings-item-description">Your Google API key for Gemini models</div>
+                            <div class="settings-item-label">AI Provider</div>
+                            <div class="settings-item-description">Which LLM provider generates the answers</div>
                         </div>
-                        <input type="password" class="input-field" id="geminiKey" placeholder="Enter your Google API key">
+                        <select class="input-field" id="llmProvider">
+                            <option value="gemini">Google Gemini</option>
+                            <option value="deepseek">DeepSeek</option>
+                        </select>
+                    </div>
+                    <div id="geminiFields">
+                        <div class="settings-item">
+                            <div>
+                                <div class="settings-item-label">Google API Key</div>
+                                <div class="settings-item-description">Your Google API key for Gemini models</div>
+                            </div>
+                            <input type="password" class="input-field" id="geminiKey" placeholder="Enter your Google API key">
+                        </div>
+                    </div>
+                    <div id="deepseekFields" style="display:none;">
+                        <div class="settings-item">
+                            <div>
+                                <div class="settings-item-label">DeepSeek API Key</div>
+                                <div class="settings-item-description">Your DeepSeek API key (sk-…) from platform.deepseek.com</div>
+                            </div>
+                            <input type="password" class="input-field" id="deepseekKey" placeholder="Enter your DeepSeek API key">
+                        </div>
+                    </div>
+                    <div class="settings-note">
+                        Keys apply immediately and are also written back to <code>.env</code> so they persist across restarts.
                     </div>
                 </div>
             </div>

@@ -42,6 +42,7 @@
   // ── State ─────────────────────────────────────────────────────────
   const state = {
     step: 0,
+    llmProvider: 'gemini', // 'gemini' | 'deepseek'
     geminiKey: '',
     geminiConfigured: false, // a key already exists in .env from a prior run
     speechProvider: null, // 'whisper' | 'azure' | 'skip'
@@ -158,6 +159,37 @@
   const geminiInput = $('#geminiKey');
   const toggleVis = $('#toggleVis');
   const keyStatus = $('#keyStatus');
+
+  // Provider choice cards + dynamic label/hint/placeholder.
+  const llmProviderCards = $$('#llmChoices .choice-card');
+  function applyProviderUI() {
+    const isDeep = state.llmProvider === 'deepseek';
+    llmProviderCards.forEach((c) => c.classList.toggle('selected', c.dataset.value === state.llmProvider));
+    const title = $('#apiKeyTitle');
+    const subtitle = $('#apiKeySubtitle');
+    const label = $('#apiKeyLabel');
+    const hint = $('#apiKeyHint');
+    if (title) title.textContent = isDeep ? 'Connect DeepSeek' : 'Connect Google Gemini';
+    if (subtitle) {
+      subtitle.textContent = isDeep
+        ? "This app uses DeepSeek's models (deepseek-flash, vision-capable) to generate answers. You'll need an API key."
+        : "This app uses Google's Gemini to generate answers. You'll need a free API key.";
+    }
+    if (label) label.textContent = isDeep ? 'DeepSeek API Key' : 'Gemini API Key';
+    geminiInput.placeholder = isDeep ? 'sk-…' : 'AIza…';
+    if (hint) {
+      hint.innerHTML = isDeep
+        ? 'Don\'t have one? Create a key at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">platform.deepseek.com/api_keys</a>. It\'s stored locally in <code>.env</code> — never sent anywhere except DeepSeek.'
+        : 'Don\'t have one? Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>. It\'s stored locally in <code>.env</code> — never sent anywhere except Google.';
+    }
+  }
+  llmProviderCards.forEach((card) => {
+    card.addEventListener('click', () => {
+      state.llmProvider = card.dataset.value;
+      applyProviderUI();
+    });
+  });
+  applyProviderUI();
 
   function setKeyStatus(state_, text) {
     keyStatus.className = `status-pill ${state_}`;
@@ -451,7 +483,7 @@
   function populateSummary() {
     const rows = [];
     rows.push({
-      label: '<i class="fas fa-key"></i> Gemini API',
+      label: `<i class="fas fa-key"></i> ${state.llmProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} API`,
       value: (state.geminiKey || state.geminiConfigured) ? 'Configured' : 'Missing',
       cls: (state.geminiKey || state.geminiConfigured) ? 'ok' : 'skip',
     });
@@ -489,16 +521,14 @@
       .join('');
   }
 
-  $('#starBtn').addEventListener('click', () => {
-    if (window.electronAPI && window.electronAPI.openExternal) {
-      window.electronAPI.openExternal('https://github.com/TechyCSR/OpenCluely');
-    } else {
-      window.open('https://github.com/TechyCSR/OpenCluely', '_blank');
-    }
-  });
-  $('#skipStarBtn').addEventListener('click', () => {
-    // No-op — just visual closure
-  });
+  const starBtn = $('#starBtn');
+  if (starBtn) {
+    starBtn.addEventListener('click', () => {
+      // Finish setup — same as completing the wizard
+      const nextBtn = $('#nextBtn');
+      if (nextBtn) nextBtn.click();
+    });
+  }
 
   // ── Wire up: Hero CTA (welcome screen) ────────────────────────────
   // The big inline "Get Started" button on the welcome screen reuses
@@ -514,7 +544,7 @@
     const name = currentScreenName();
     if (!canAdvance()) {
       // Lightly nudge the user
-      if (name === 'apikey') setKeyStatus('error', 'Enter a Gemini API key');
+      if (name === 'apikey') setKeyStatus('error', `Enter a ${state.llmProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} API key`);
       return;
     }
 
@@ -523,7 +553,13 @@
     // testing.
     if (name === 'apikey' && state.geminiKey && window.electronAPI) {
       try {
-        await window.electronAPI.saveSettings({ geminiKey: state.geminiKey });
+        const payload = { llmProvider: state.llmProvider };
+        if (state.llmProvider === 'deepseek') {
+          payload.deepseekKey = state.geminiKey;
+        } else {
+          payload.geminiKey = state.geminiKey;
+        }
+        await window.electronAPI.saveSettings(payload);
       } catch (_) { /* surfaced elsewhere */ }
     }
     if (name === 'speech' && window.electronAPI) {
@@ -655,15 +691,19 @@
   // ── Boot ──────────────────────────────────────────────────────────
   showScreen('welcome');
 
-  // Pre-populate Gemini key from existing .env (if any) so users with
+  // Pre-populate API key info from existing .env (if any) so users with
   // a partial config don't have to retype.
   if (window.electronAPI && window.electronAPI.getFirstRunStatus) {
     window.electronAPI.getFirstRunStatus().then((s) => {
-      if (s && s.geminiConfigured) {
+      if (s && (s.geminiConfigured || s.deepseekConfigured)) {
         // We can't read the key back (settings returns empty for keys),
         // but we can mark status as success if the env file already has one
         // and let the user advance without retyping it.
         state.geminiConfigured = true;
+        if (s.llmProvider === 'deepseek' || s.llmProvider === 'gemini') {
+          state.llmProvider = s.llmProvider;
+          applyProviderUI();
+        }
         setKeyStatus('success', 'Already configured — click Continue');
         geminiInput.placeholder = '•••••••••••••••• (already set)';
       }

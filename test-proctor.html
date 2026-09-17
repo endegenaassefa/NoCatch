@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mock Proctor Test</title>
+  <style>
+    body { font-family: system-ui; margin: 2em; background: #1a1a1a; color: #eee; }
+    #log { white-space: pre-wrap; background: #2a2a2a; padding: 1em; height: 300px; overflow: auto; font-family: monospace; font-size: 12px; }
+    textarea, button { font-size: 16px; padding: 8px; margin: 4px 0; }
+    textarea { width: 100%; background: #333; color: #eee; border: 1px solid #555; }
+    button { background: #4a9eff; color: white; border: none; cursor: pointer; }
+    button:hover { background: #3a8eef; }
+    .status { padding: 8px; margin: 8px 0; border-radius: 4px; }
+    .status.active { background: #2d5a2d; }
+    .status.inactive { background: #5a2d2d; }
+  </style>
+</head>
+<body>
+  <h1>Mock Proctor Test Page</h1>
+  <p>This page simulates a proctored test environment. It captures keystrokes, tab switches, paste events, and screenshot attempts.</p>
+
+  <div class="status" id="focusStatus">Page Focus: <span id="focusState">Active</span></div>
+
+  <h2>Test Input Area</h2>
+  <textarea id="input" rows="4" placeholder="Type here to simulate coding..."></textarea>
+  
+  <div>
+    <button id="screenshotBtn">Simulate Screenshot Upload</button>
+    <button id="clearBtn">Clear Log</button>
+  </div>
+
+  <h2>Captured Events (sent to /log endpoint)</h2>
+  <div id="log"></div>
+
+  <script>
+    const logDiv = document.getElementById('log');
+    const focusState = document.getElementById('focusState');
+    const focusStatus = document.getElementById('focusStatus');
+    
+    function sendEvent(type, data) {
+      const payload = { 
+        type, 
+        data, 
+        ts: new Date().toISOString(),
+        url: window.location.href,
+        userAgent: navigator.userAgent
+      };
+      
+      // Display locally
+      logDiv.textContent += JSON.stringify(payload, null, 2) + "\n\n";
+      logDiv.scrollTop = logDiv.scrollHeight;
+      
+      // Send to capture endpoint (this is what capture.js will see)
+      fetch('/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(err => console.log('Log endpoint not available:', err));
+    }
+
+    // Keystroke capture
+    document.getElementById('input').addEventListener('keydown', e => {
+      sendEvent('keydown', { 
+        key: e.key, 
+        code: e.code,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        metaKey: e.metaKey
+      });
+    });
+
+    // Tab visibility / focus tracking
+    document.addEventListener('visibilitychange', () => {
+      const isVisible = document.visibilityState === 'visible';
+      focusState.textContent = isVisible ? 'Active' : 'Hidden';
+      focusStatus.className = 'status ' + (isVisible ? 'active' : 'inactive');
+      sendEvent('visibilitychange', { 
+        state: document.visibilityState,
+        hidden: document.hidden
+      });
+    });
+
+    // Window focus/blur
+    window.addEventListener('focus', () => {
+      focusState.textContent = 'Active';
+      focusStatus.className = 'status active';
+      sendEvent('window_focus', { focused: true });
+    });
+
+    window.addEventListener('blur', () => {
+      focusState.textContent = 'Blurred';
+      focusStatus.className = 'status inactive';
+      sendEvent('window_blur', { focused: false });
+    });
+
+    // Paste detection
+    document.addEventListener('paste', e => {
+      sendEvent('paste', { 
+        clipboardData: e.clipboardData.getData('text').slice(0, 100) // First 100 chars
+      });
+    });
+
+    // Copy detection
+    document.addEventListener('copy', e => {
+      sendEvent('copy', { 
+        selection: window.getSelection().toString().slice(0, 100)
+      });
+    });
+
+    // Screenshot simulation
+    document.getElementById('screenshotBtn').addEventListener('click', () => {
+      // Simulate what a proctoring service might do
+      sendEvent('screenshot_attempt', {
+        method: 'canvas_capture',
+        timestamp: Date.now(),
+        screen: {
+          width: window.screen.width,
+          height: window.screen.height,
+          availWidth: window.screen.availWidth,
+          availHeight: window.screen.availHeight
+        },
+        window: {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          outerHeight: window.outerHeight
+        }
+      });
+      
+      // Also try to actually capture if possible
+      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        navigator.mediaDevices.getDisplayMedia({ video: true })
+          .then(stream => {
+            sendEvent('screenshot_granted', { streamId: stream.id });
+            stream.getTracks().forEach(t => t.stop());
+          })
+          .catch(err => {
+            sendEvent('screenshot_denied', { error: err.message });
+          });
+      }
+    });
+
+    // Clear log
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      logDiv.textContent = '';
+    });
+
+    // Periodic heartbeat (simulates proctoring keepalive)
+    setInterval(() => {
+      sendEvent('heartbeat', {
+        timestamp: Date.now(),
+        documentState: document.readyState,
+        visibilityState: document.visibilityState
+      });
+    }, 30000); // Every 30 seconds
+
+    // Initial load event
+    sendEvent('page_load', {
+      url: window.location.href,
+      referrer: document.referrer,
+      timestamp: Date.now()
+    });
+  </script>
+</body>
+</html>

@@ -314,6 +314,10 @@ class WindowManager {
         // Additional macOS flags for better always-on-top behavior
         ...(process.platform === 'darwin' && {
           type: 'panel',
+          // Never take keyboard focus: clicking Settings must not make it the
+          // key window and blur the proctored page. Typing into Settings goes
+          // through the keystroke-capture mode (see main.js capture helper).
+          focusable: false,
           acceptFirstMouse: true,
           disableAutoHideCursor: true
         })
@@ -335,6 +339,9 @@ class WindowManager {
         level: process.platform === 'darwin' ? 'floating' : undefined,
         ...(process.platform === 'darwin' && {
           type: 'panel',
+          // Same as settings: clicks must never make the wizard key and blur
+          // the proctored page; typing flows through keystroke-capture mode.
+          focusable: false,
           acceptFirstMouse: true,
           disableAutoHideCursor: true
         })
@@ -411,12 +418,16 @@ class WindowManager {
         ...(process.platform === 'darwin' && {
           // Non-activating panel: clicking chat must not activate the app.
           // A regular window click activates even an accessory app and
-          // would blur the proctored page. Panels still accept keyboard
-          // input by becoming key without app activation (Spotlight model),
-          // exactly like the settings window.
+          // would blur the proctored page. focusable:false goes further:
+          // the chat window can NEVER become the key window, so no click
+          // can ever transfer keyboard focus away from the proctored page.
+          // Typing reaches chat exclusively through keystroke-capture mode
+          // (global hotkey → event tap → sendInputEvent), never via key
+          // status.
           type: 'panel',
           titleBarStyle: 'hiddenInset',
           trafficLightPosition: { x: -100, y: -100 },
+          focusable: false,
           acceptFirstMouse: true
         }),
         level: process.platform === 'darwin' ? 'floating' : undefined,

@@ -1450,7 +1450,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       'dsa': 'This appears to be a data structures and algorithms problem. Consider breaking it down into smaller components and identifying the appropriate algorithm or data structure to use.',
       'system-design': 'For this system design question, consider scalability, reliability, and the trade-offs between different architectural approaches.',
       'programming': 'This looks like a programming challenge. Focus on understanding the requirements, edge cases, and optimal time/space complexity.',
-      'default': 'I can help analyze this content. Please ensure your LLM provider API key is properly configured for detailed analysis.'
+      'default': 'The AI provider returned no answer for this request (the response may have been cut off by its output limit, or the request failed after retries). Try again, use a smaller screen region, or check the provider status.'
     };
 
     const response = fallbackResponses[activeSkill] || fallbackResponses.default;

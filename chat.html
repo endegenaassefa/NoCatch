@@ -275,30 +275,8 @@
         display: block;
       }
 
-      /* Copy button in code blocks */
-      .copy-btn {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        background: rgba(0, 0, 0, 0.5);
-        color: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        padding: 4px 8px;
-        font-size: 11px;
-        border-radius: 4px;
-        cursor: pointer;
-        -webkit-app-region: no-drag;
-        transition: background 0.2s ease, border-color 0.2s ease, transform 0.12s ease;
-      }
-      .copy-btn:hover {
-        background: rgba(0,0,0,0.7);
-      }
-      .copy-btn.copied {
-        background: rgba(76, 175, 80, 0.8);
-        border-color: rgba(76, 175, 80, 0.9);
-        transform: scale(0.98);
-      }
-      
+      /* Copy buttons REMOVED — clipboard writes are a proctor tell. */
+
       /* Ensure lists are fully visible */
       .message.assistant ul,
       .message.assistant ol {
@@ -1050,40 +1028,8 @@
         div.textContent = str ?? '';
         return div.innerHTML;
       }
-      function attachCopy(btn, codeText) {
-        if (!btn) return;
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          try {
-            let ok = false;
-            if (window.electronAPI && typeof window.electronAPI.copyToClipboard === 'function') {
-              ok = await window.electronAPI.copyToClipboard(codeText);
-            }
-            if (!ok) {
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(codeText);
-                ok = true;
-              } else {
-                const ta = document.createElement('textarea');
-                ta.value = codeText;
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                ta.remove();
-                ok = true;
-              }
-            }
-            if (ok) {
-              btn.classList.add('copied');
-              const original = btn.textContent;
-              btn.textContent = 'Copied';
-              setTimeout(() => { btn.classList.remove('copied'); btn.textContent = original || 'Copy'; }, 1200);
-            }
-          } catch (err) {
-            console.warn('Copy failed', err);
-          }
-        });
-      }
+      // Copy buttons REMOVED: writing answer code to the clipboard is a
+      // proctor tell (clipboard watchers see the snippets).
       function addCodeSnippet(language, code, skipPersist = false) {
         if (!chatMessages) return;
         const messageDiv = document.createElement('div');
@@ -1100,12 +1046,6 @@
         codeEl.className = `language-${lang}`;
         codeEl.innerHTML = escapeHtml(code || '');
 
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
-        copyBtn.textContent = 'Copy';
-        attachCopy(copyBtn, code || '');
-
-        pre.appendChild(copyBtn);
         pre.appendChild(codeEl);
         
         const label = document.createElement('div');
@@ -1201,11 +1141,100 @@
           addMessage('Session memory has been cleared', 'system');
         });
 
+        // Streaming answer lifecycle: a plain-text bubble grows as token
+        // chunks arrive (transcription-llm-response-chunk), then the final
+        // event replaces it with the fully formatted markdown render.
+        let streamingBubble = null;
+
+        function beginStreamingResponse(messageId) {
+          try { hideThinkingIndicator(); } catch (_) {}
+          // Remove any leftover streaming bubble.
+          if (streamingBubble) streamingBubble.remove();
+          streamingBubble = document.createElement('div');
+          streamingBubble.className = 'message assistant';
+          const timeDiv = document.createElement('div');
+          timeDiv.className = 'message-time';
+          timeDiv.textContent = new Date().toLocaleTimeString();
+          const textDiv = document.createElement('div');
+          textDiv.className = 'message-text';
+          textDiv.dataset.streamingText = '';
+          streamingBubble.appendChild(timeDiv);
+          streamingBubble.appendChild(textDiv);
+          chatMessages.appendChild(streamingBubble);
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function appendStreamingChunk(messageId, delta) {
+          if (!streamingBubble) return;
+          const textDiv = streamingBubble.querySelector('.message-text');
+          if (!textDiv) return;
+          textDiv.dataset.streamingText = (textDiv.dataset.streamingText || '') + (delta || '');
+          textDiv.textContent = textDiv.dataset.streamingText;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function finalizeStreamingResponse(messageId) {
+          // The final response renders via renderAssistantResponse below;
+          // the streaming bubble is only removed — it must not leave a
+          // duplicate unformatted copy in the transcript.
+          if (streamingBubble) {
+            streamingBubble.remove();
+            streamingBubble = null;
+          }
+        }
+
         // Replace transcription LLM handler to store text + snippets
         whysperAPI.onTranscriptionLlmResponse((event, data) => {
           if (data && data.response) {
             try { hideThinkingIndicator(); } catch (_) {}
+            finalizeStreamingResponse(data.messageId);
             renderAssistantResponse(data.response);
+          }
+        });
+
+        if (whysperAPI.onTranscriptionLlmResponseStart) {
+          whysperAPI.onTranscriptionLlmResponseStart((event, data) => {
+            if (data && data.messageId) beginStreamingResponse(data.messageId);
+          });
+        }
+        if (whysperAPI.onTranscriptionLlmResponseChunk) {
+          whysperAPI.onTranscriptionLlmResponseChunk((event, data) => {
+            if (data && data.messageId) appendStreamingChunk(data.messageId, data.delta || '');
+          });
+        }
+
+        // Keystroke-capture mode UI: show a banner while capture is active
+        // and focus the message input so injected characters land in it.
+        if (whysperAPI.onCaptureModeChanged) {
+          whysperAPI.onCaptureModeChanged((event, data) => {
+            const active = data && data.active;
+            let banner = document.getElementById('capture-mode-banner');
+            if (active) {
+              if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'capture-mode-banner';
+                banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(59,130,246,0.95);color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;z-index:9999;pointer-events:none;';
+                document.body.appendChild(banner);
+              }
+              banner.textContent = 'CAPTURING — Enter sends, Esc cancels';
+              if (messageInput) messageInput.focus();
+            } else if (banner) {
+              banner.remove();
+            }
+          });
+        }
+        if (whysperAPI.onCaptureModeError) {
+          whysperAPI.onCaptureModeError((event, data) => {
+            addMessage(data && data.message ? data.message : 'Keystroke capture failed', 'error');
+          });
+        }
+
+        // Tell the main process which window the user last clicked into, so
+        // keystroke-capture mode routes keystrokes to the right window.
+        document.addEventListener('focusin', (e) => {
+          const target = e.target;
+          if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+            if (window.api && window.api.send) window.api.send('input-target-focused');
           }
         });
       }
@@ -1312,9 +1341,10 @@
       });
 
       // Initialize
-      if (!chatHistory || chatHistory.length === 0) {
-        addMessage('Recording in Progress. press Alt+R to stop recording.', 'system');
-      }
+      // NOTE: the previous default message claimed "Recording in Progress"
+      // even when no speech provider existed — a UI lie at fresh launch.
+      // Chat now starts clean; the capture-mode banner appears only while
+      // keystroke capture is actually active.
     </script>
   </body>
 </html>

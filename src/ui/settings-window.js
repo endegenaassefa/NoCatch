@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const llmProviderSelect = document.getElementById('llmProvider');
     const deepseekKeyInput = document.getElementById('deepseekKey');
     const windowGapInput = document.getElementById('windowGap');
+    const captureHotkeyInput = document.getElementById('captureHotkey');
     const codingLanguageSelect = document.getElementById('codingLanguage');
     const activeSkillSelect = document.getElementById('activeSkill');
     const iconGrid = document.getElementById('iconGrid');
@@ -93,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (llmProviderSelect) llmProviderSelect.value = settings.llmProvider || 'gemini';
         if (deepseekKeyInput) deepseekKeyInput.value = settings.deepseekKey || '';
         if (windowGapInput) windowGapInput.value = settings.windowGap || '';
+        if (captureHotkeyInput) captureHotkeyInput.value = settings.captureHotkey || '';
 
         // Set C++ as default if no coding language is specified
         if (codingLanguageSelect) {
@@ -155,6 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (llmProviderSelect) settings.llmProvider = llmProviderSelect.value;
         if (deepseekKeyInput) settings.deepseekKey = deepseekKeyInput.value;
         if (windowGapInput) settings.windowGap = windowGapInput.value;
+        if (captureHotkeyInput && captureHotkeyInput.value.trim()) settings.captureHotkey = captureHotkeyInput.value.trim();
         if (codingLanguageSelect) settings.codingLanguage = codingLanguageSelect.value;
         if (activeSkillSelect) settings.activeSkill = activeSkillSelect.value;
         
@@ -204,7 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
         whisperSegmentMsInput,
         geminiKeyInput,
         deepseekKeyInput,
-        windowGapInput
+        windowGapInput,
+        captureHotkeyInput
     ];
 
     inputs.forEach(input => {
@@ -363,6 +367,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             window.api.send('close-settings');
+        }
+    });
+
+    // Tell the main process when the user clicks into an input, so the
+    // keystroke-capture mode routes keystrokes to this window.
+    document.addEventListener('focusin', (e) => {
+        const target = e.target;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+            if (window.api && window.api.send) window.api.send('input-target-focused');
         }
     });
 }); 

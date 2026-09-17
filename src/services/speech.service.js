@@ -471,7 +471,13 @@ class SpeechService extends EventEmitter {
       const subscriptionKey = this._getSetting('azureKey') || process.env.AZURE_SPEECH_KEY;
       const region = this._getSetting('azureRegion') || process.env.AZURE_SPEECH_REGION;
 
-      if (!subscriptionKey || !region) {
+      // Treat placeholder values (your_*_here) as missing — they used to
+      // count as valid credentials, which showed a fake mic button and a
+      // false "configured" status in first-run (R1/R2 audit finding).
+      const isPlaceholder = (value) =>
+        !value || /^your[_ ]/i.test(value || '') || /_here$/i.test(value || '');
+
+      if (!subscriptionKey || !region || isPlaceholder(subscriptionKey) || isPlaceholder(region)) {
         const reason = 'Azure Speech credentials not found. Speech recognition disabled.';
         logger.warn('Speech service disabled (missing Azure credentials)');
         this.emit('status', reason);

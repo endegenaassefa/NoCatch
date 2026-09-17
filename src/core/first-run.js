@@ -87,14 +87,40 @@ class FirstRunManager {
     const env = this._readEnv();
     const gemini = (env.GEMINI_API_KEY || '').trim();
     const deepseek = (env.DEEPSEEK_API_KEY || '').trim();
+
+    // Placeholder values (your_*_here) are NOT real configuration — the
+    // previous logic counted them as configured, which made the app believe
+    // speech was set up when it wasn't (R1/R2 audit finding).
+    const isPlaceholder = (value) =>
+      !value || /^your[_ ]/i.test(value) || /_here$/i.test(value) || /your.+here/i.test(value);
+
+    const azureKey = (env.AZURE_SPEECH_KEY || '').trim();
+    const azureRegion = (env.AZURE_SPEECH_REGION || '').trim();
+
+    const whisperCommandRaw = (env.WHISPER_COMMAND || '').trim();
+    const whisperConfigured = (() => {
+      if (!whisperCommandRaw || isPlaceholder(whisperCommandRaw)) return false;
+      // Absolute paths must exist; bare commands must be findable on PATH.
+      const fs = require('fs');
+      const path = require('path');
+      if (path.isAbsolute(whisperCommandRaw)) {
+        return fs.existsSync(whisperCommandRaw);
+      }
+      const firstToken = whisperCommandRaw.split(/\s+/)[0];
+      const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+      return dirs.some((dir) => {
+        try { return fs.existsSync(path.join(dir, firstToken)); } catch (_) { return false; }
+      });
+    })();
+
     return {
       envExists: fs.existsSync(this.envPath),
       sentinelExists: fs.existsSync(this.sentinelPath),
-      geminiConfigured: !!gemini && gemini !== 'your_gemini_api_key_here',
-      deepseekConfigured: !!deepseek && deepseek !== 'your_deepseek_api_key_here',
+      geminiConfigured: !!gemini && !isPlaceholder(gemini),
+      deepseekConfigured: !!deepseek && !isPlaceholder(deepseek),
       llmProvider: (env.LLM_PROVIDER || 'gemini').trim().toLowerCase(),
-      azureConfigured: !!(env.AZURE_SPEECH_KEY || '').trim() && !!(env.AZURE_SPEECH_REGION || '').trim(),
-      whisperConfigured: !!(env.WHISPER_COMMAND || '').trim(),
+      azureConfigured: !!azureKey && !!azureRegion && !isPlaceholder(azureKey) && !isPlaceholder(azureRegion),
+      whisperConfigured,
       needsOnboarding: this.needsOnboarding()
     };
   }

@@ -112,9 +112,22 @@ class ApplicationController {
   constructor() {
     this.isReady = false;
     this.starting = false;
-    this.activeSkill = "dsa";
-  // Default to C++ so language is enforced from first run
-  this.codingLanguage = "cpp";
+    // Persisted user preferences: saved to .env on every change and read
+    // back here so skill/language/icon/gap survive restarts (previously
+    // they were in-memory only and reset on every launch).
+    const validSkills = ["behavioral", "dsa", "mcq", "ood", "programming", "system-design"];
+    this.activeSkill = validSkills.includes(process.env.ACTIVE_SKILL)
+      ? process.env.ACTIVE_SKILL
+      : "dsa";
+    const validLanguages = ["cpp", "c", "python", "java", "javascript"];
+    this.codingLanguage = validLanguages.includes(process.env.CODING_LANGUAGE)
+      ? process.env.CODING_LANGUAGE
+      : "cpp";
+    this.appIcon = ["terminal", "activity", "settings"].includes(process.env.APP_ICON)
+      ? process.env.APP_ICON
+      : null;
+    const persistedGap = Number(process.env.WINDOW_GAP);
+    this.windowGap = Number.isFinite(persistedGap) ? persistedGap : null;
     this.speechAvailable = false;
 
     // Utterance coalescing: VAD emits a transcript per natural pause, but a
@@ -153,6 +166,231 @@ class ApplicationController {
 
     this.setupStealth();
     this.setupEventHandlers();
+  }
+
+  /**
+   * Keystroke-capture mode (macOS).
+   *
+   * Design (ADR-worthy, see plan): chat/settings/onboarding are focusable:false
+   * panels, so clicks can never make them the macOS key window (which would
+   * blur the proctored page). The trade-off is that they can never receive
+   * real keyboard input — so a global hotkey toggles this mode, under which a
+   * CGEventTap helper process swallows ALL keystrokes system-wide and reports
+   * them to us; we inject them into the target window with
+   * webContents.sendInputEvent (which bypasses OS focus entirely).
+   *
+   * Enter sends/commits and exits the mode; Esc cancels and exits.
+   * While the mode is OFF the event tap does not exist at all, so keystrokes
+   * meant for the exam page are never touched.
+   */
+  _captureMode = false;
+  _captureHelper = null;
+  _captureTarget = null; // 'chat' | 'settings' | 'onboarding'
+  _captureHotkey = null;
+
+  getCaptureHotkey() {
+    return String(process.env.CAPTURE_MODE_HOTKEY || "CommandOrControl+Shift+Space").trim();
+  }
+
+  resolveCaptureHelperPath() {
+    const path = require("path");
+    const fs = require("fs");
+    const candidates = [
+      // Packaged app: electron-builder copies resources/bin → Contents/Resources/bin
+      path.join(process.resourcesPath || "", "bin", "keystroke-capture"),
+      // Dev: built into the repo by scripts/build-capture-helper.sh
+      path.join(__dirname, "resources", "bin", "keystroke-capture"),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+
+    // Dev convenience: compile on first use if swiftc is available.
+    try {
+      const { spawnSync } = require("child_process");
+      const out = path.join(__dirname, "resources", "bin", "keystroke-capture");
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      const result = spawnSync(
+        "swiftc",
+        ["-O", path.join(__dirname, "scripts", "keystroke-capture", "main.swift"), "-o", out],
+        { timeout: 120000 }
+      );
+      if (result.status === 0 && fs.existsSync(out)) return out;
+    } catch (_) { /* fall through */ }
+    return null;
+  }
+
+  startCaptureMode() {
+    if (process.platform !== "darwin") {
+      logger.warn("Keystroke capture mode is macOS-only (CGEventTap)");
+      return false;
+    }
+    if (this._captureMode) return true;
+
+    const helperPath = this.resolveCaptureHelperPath();
+    if (!helperPath) {
+      logger.error("keystroke-capture helper binary not found and could not be compiled");
+      windowManager.broadcastToAllWindows("capture-mode-error", {
+        message: "Capture helper missing — run scripts/build-capture-helper.sh (requires Xcode CLT).",
+      });
+      return false;
+    }
+
+    // Decide the target window: the last Cluely window the user clicked into,
+    // or chat by default. The window must be visible so the user sees input.
+    const validTargets = ["chat", "settings", "onboarding"];
+    if (!validTargets.includes(this._captureTarget)) {
+      this._captureTarget = "chat";
+    }
+    const targetWindow = windowManager.getWindow(this._captureTarget);
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      this._captureTarget = "chat";
+    }
+    windowManager.switchToWindow(this._captureTarget);
+
+    try {
+      const { spawn } = require("child_process");
+      this._captureHelper = spawn(helperPath, [], { stdio: ["ignore", "pipe", "pipe"] });
+      this._captureMode = true;
+
+      let stderrBuf = "";
+      this._captureHelper.stderr.on("data", (chunk) => {
+        stderrBuf += String(chunk);
+        if (stderrBuf.includes("EVENT_TAP_CREATE_FAILED")) {
+          logger.error("Event tap creation failed — Input Monitoring permission not granted");
+          this.stopCaptureMode();
+          windowManager.broadcastToAllWindows("capture-mode-error", {
+            message:
+              "macOS blocked global key capture. Grant Input Monitoring to this app in System Settings → Privacy & Security → Input Monitoring (it appears as its disguise name), then retry.",
+          });
+        }
+      });
+
+      this._captureHelper.stdout.on("data", (chunk) => {
+        for (const line of String(chunk).split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            this.handleCapturedKey(JSON.parse(trimmed));
+          } catch (_) { /* skip malformed lines */ }
+        }
+      });
+
+      this._captureHelper.on("exit", (code) => {
+        if (this._captureMode) {
+          // Helper died unexpectedly (or we killed it in stopCaptureMode).
+          logger.warn("keystroke-capture helper exited", { code });
+          this._captureMode = false;
+          this._captureHelper = null;
+          windowManager.broadcastToAllWindows("capture-mode-changed", {
+            active: false,
+            target: this._captureTarget,
+          });
+        }
+      });
+
+      windowManager.broadcastToAllWindows("capture-mode-changed", {
+        active: true,
+        target: this._captureTarget,
+      });
+      logger.info("Keystroke capture mode ON", { target: this._captureTarget, hotkey: this.getCaptureHotkey() });
+      return true;
+    } catch (error) {
+      logger.error("Failed to start capture helper", { error: error.message });
+      this._captureMode = false;
+      return false;
+    }
+  }
+
+  stopCaptureMode() {
+    if (!this._captureMode) {
+      this._captureMode = false;
+      this._captureHelper = null;
+      return false;
+    }
+    const wasActive = true;
+    const target = this._captureTarget;
+    if (this._captureHelper) {
+      try { this._captureHelper.kill("SIGTERM"); } catch (_) { /* already dead */ }
+    }
+    this._captureHelper = null;
+    this._captureMode = false;
+    windowManager.broadcastToAllWindows("capture-mode-changed", { active: false, target });
+    logger.info("Keystroke capture mode OFF", { target });
+    return wasActive;
+  }
+
+  toggleCaptureMode() {
+    if (this._captureMode) {
+      this.stopCaptureMode();
+    } else {
+      this.startCaptureMode();
+    }
+    return this._captureMode;
+  }
+
+  /**
+   * Route a swallowed key from the event tap into the capture-target window
+   * via sendInputEvent (bypasses OS focus — the window is focusable:false).
+   * Keycode reference (macOS virtual keycodes):
+   *   36 Return · 48 Tab · 49 Space · 51 Delete/Backspace · 53 Escape
+   *   115 Home · 117 Forward Delete · 119 End · 123-126 arrows
+   */
+  handleCapturedKey(keyEvent) {
+    if (!this._captureMode || !keyEvent || keyEvent.t !== "down") return;
+
+    const win = windowManager.getWindow(this._captureTarget);
+    if (!win || win.isDestroyed()) {
+      this.stopCaptureMode();
+      return;
+    }
+    const wc = win.webContents;
+    if (!wc || wc.isDestroyed()) {
+      this.stopCaptureMode();
+      return;
+    }
+
+    const code = Number(keyEvent.code);
+    const char = String(keyEvent.char || "");
+
+    // Esc: cancel and exit capture mode without forwarding.
+    if (code === 53) {
+      this.stopCaptureMode();
+      return;
+    }
+
+    // Enter: let the target handle it (chat sends, inputs commit), then exit.
+    if (code === 36) {
+      wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+      wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+      this.stopCaptureMode();
+      return;
+    }
+
+    const specialKeyMap = {
+      48: "Tab",
+      51: "Backspace",
+      115: "Home",
+      117: "Delete",
+      119: "End",
+      123: "Left",
+      124: "Right",
+      125: "Down",
+      126: "Up",
+    };
+    if (specialKeyMap[code]) {
+      wc.sendInputEvent({ type: "keyDown", keyCode: specialKeyMap[code] });
+      wc.sendInputEvent({ type: "keyUp", keyCode: specialKeyMap[code] });
+      return;
+    }
+
+    // Printable characters (modifier effects already folded in by the helper).
+    if (char) {
+      wc.sendInputEvent({ type: "char", keyCode: char });
+      return;
+    }
+
+    // Anything else (unknown keys, modifier combos) is swallowed and dropped.
   }
 
   setupStealth() {
@@ -259,6 +497,19 @@ class ApplicationController {
         : "production",
       platform: process.platform,
     });
+
+    // Apply persisted preferences that were read in the constructor:
+    // window gap and the disguised app icon/name survive restarts now.
+    try {
+      if (this.windowGap !== null && windowManager.setWindowGap) {
+        windowManager.setWindowGap(this.windowGap);
+      }
+      if (this.appIcon && this.updateAppIcon) {
+        this.updateAppIcon(this.appIcon);
+      }
+    } catch (error) {
+      logger.warn("Failed to apply persisted preferences", { error: error.message });
+    }
 
     try {
       this.setupPermissions();
@@ -369,16 +620,13 @@ class ApplicationController {
       callback({ requestHeaders: details.requestHeaders });
     });
     
-    // Handle certificate errors for Google APIs
-    ses.setCertificateVerifyProc((request, callback) => {
-      if (request.hostname === 'generativelanguage.googleapis.com') {
-        callback(0); // Trust Google's certificates
-      } else {
-        callback(-2); // Use default verification
-      }
-    });
+    // NOTE: the previous setCertificateVerifyProc that blindly trusted
+    // generativelanguage.googleapis.com (callback(0) = trust any cert) was
+    // REMOVED. Disabling TLS verification is a network-level stealth and
+    // security liability; default certificate verification now applies to
+    // every host.
     
-    logger.debug('Network configuration applied for Gemini API');
+    logger.debug('Network configuration applied');
   }
 
   setupPermissions() {
@@ -464,6 +712,28 @@ class ApplicationController {
       const success = globalShortcut.register(accelerator, handler);
       logger.debug("Global shortcut registered", { accelerator, success });
     });
+
+    // Keystroke-capture hotkey (configurable via CAPTURE_MODE_HOTKEY).
+    // Registered separately so a settings change can unregister/re-register
+    // it live without touching the static shortcut map.
+    this.registerCaptureHotkey();
+  }
+
+  registerCaptureHotkey() {
+    if (process.platform !== "darwin") return;
+    try {
+      if (this._captureHotkey) {
+        globalShortcut.unregister(this._captureHotkey);
+      }
+      this._captureHotkey = this.getCaptureHotkey();
+      const success = globalShortcut.register(this._captureHotkey, () => this.toggleCaptureMode());
+      logger.info("Capture hotkey registered", {
+        accelerator: this._captureHotkey,
+        success,
+      });
+    } catch (error) {
+      logger.warn("Failed to register capture hotkey", { error: error.message });
+    }
   }
 
   setupServiceEventHandlers() {
@@ -509,19 +779,12 @@ class ApplicationController {
   ipcMain.handle("take-screenshot", () => this.triggerScreenshotOCR());
   ipcMain.handle("list-displays", () => captureService.listDisplays());
   ipcMain.handle("capture-area", (event, options) => captureService.captureAndProcess(options));
-    
-    // Provide reliable clipboard write via main process
-    ipcMain.handle("copy-to-clipboard", (event, text) => {
-      try {
-        const { clipboard } = require("electron");
-        clipboard.writeText(String(text ?? ""));
-        return true;
-      } catch (e) {
-        logger.error("Failed to write to clipboard", { error: e.message });
-        return false;
-      }
-    });
-    
+
+    // NOTE: the old copy-to-clipboard handler was REMOVED deliberately —
+    // writing answer code to the system clipboard is a proctor tell
+    // (clipboard watchers see the snippets), and the Copy buttons that
+    // used it were removed from chat.html and llm-response.html.
+
     ipcMain.handle("get-speech-availability", () => {
       return speechService.isAvailable ? speechService.isAvailable() : false;
     });
@@ -649,6 +912,103 @@ class ApplicationController {
 
     ipcMain.handle("get-session-history", () => {
       return sessionManager.getOptimizedHistory();
+    });
+
+    // Orphaned preload channels from the R2 audit — now handled.
+    ipcMain.handle("get-llm-session-history", () => {
+      try {
+        return sessionManager.getFullConversationHistory();
+      } catch (error) {
+        logger.warn("get-llm-session-history failed", { error: error.message });
+        return [];
+      }
+    });
+
+    ipcMain.handle("format-session-history", () => {
+      try {
+        const events = sessionManager.getFullConversationHistory();
+        return events
+          .map((event) => {
+            const role = event && event.role ? event.role : "event";
+            const content = event && event.content ? String(event.content) : JSON.stringify(event || {});
+            return `${role.toUpperCase()}: ${content}`;
+          })
+          .join("\n\n");
+      } catch (error) {
+        logger.warn("format-session-history failed", { error: error.message });
+        return "";
+      }
+    });
+
+    ipcMain.handle("hide-settings", () => {
+      windowManager.hideSettings();
+      return { success: true };
+    });
+
+    // Keystroke-capture target tracking: the last Cluely window the user
+    // clicked into an input field. window-loaded / toggle-* channels from
+    // preload's api.send are handled here too (they were orphans).
+    ipcMain.on("input-target-focused", (event) => {
+      try {
+        const { BrowserWindow } = require("electron");
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (!win) return;
+        for (const [type, candidate] of windowManager.windows.entries()) {
+          if (candidate === win && ["chat", "settings", "onboarding"].includes(type)) {
+            if (this._captureTarget !== type) {
+              this._captureTarget = type;
+              logger.debug("Capture target updated", { target: type });
+            }
+            return;
+          }
+        }
+      } catch (error) {
+        logger.warn("input-target-focused handler failed", { error: error.message });
+      }
+    });
+
+    ipcMain.on("toggle-recording", () => {
+      this.toggleSpeechRecognition();
+    });
+
+    ipcMain.on("toggle-interaction-mode", () => {
+      windowManager.toggleInteraction();
+    });
+
+    ipcMain.on("window-loaded", () => {
+      // No-op by design: the channel exists for renderer lifecycle logging.
+      logger.debug("Renderer reported window loaded");
+    });
+
+    ipcMain.handle("get-capture-mode", () => {
+      return { active: this._captureMode, target: this._captureTarget };
+    });
+
+    ipcMain.handle("synthetic-input", (event, command) => {
+      // TEST-HARNESS ONLY: synthesize real OS input (mouse clicks/keys) for
+      // the automated stealth matrix. Disabled unless the app is launched
+      // with CLUELY_TEST_HARNESS=1 so production launches carry no remote
+      // input surface. Keyboard synthesis needs the Accessibility grant on
+      // this app; mouse synthesis needs no permission.
+      if (process.env.CLUELY_TEST_HARNESS !== "1") {
+        logger.warn("synthetic-input blocked: CLUELY_TEST_HARNESS not set");
+        return { success: false, reason: "test harness disabled" };
+      }
+      try {
+        const helperPath = this.resolveCaptureHelperPath();
+        if (!helperPath) return { success: false, reason: "helper missing" };
+        const { spawn } = require("child_process");
+        const child = spawn(helperPath, ["post"], { stdio: ["pipe", "ignore", "pipe"] });
+        child.stdin.write(JSON.stringify(command || {}) + "\n");
+        child.stdin.end(); // helper exits on stdin EOF
+        child.on("error", (error) => {
+          logger.warn("synthetic-input helper error", { error: error.message });
+        });
+        return { success: true, command };
+      } catch (error) {
+        logger.warn("synthetic-input failed", { error: error.message });
+        return { success: false, reason: error.message };
+      }
     });
 
     ipcMain.handle("clear-session-memory", () => {
@@ -1083,6 +1443,7 @@ class ApplicationController {
       "mcq",
       "system-design",
       "behavioral",
+      "programming",
     ];
 
     const currentIndex = availableSkills.indexOf(this.activeSkill);
@@ -1594,15 +1955,18 @@ class ApplicationController {
     if (!this.isReady && !this.starting) {
       this.onAppReady();
     } else if (this.isReady) {
-      // When app is activated, ensure windows appear on current desktop
+      // When app is activated, ensure windows appear on current desktop.
+      // Every window access is guarded against destruction: the historical
+      // "Object has been destroyed" crash (18 rapid restarts in the Sep 17
+      // forensics) came from calling isVisible() on destroyed windows here.
       const mainWindow = windowManager.getWindow("main");
-      if (mainWindow && mainWindow.isVisible()) {
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
         windowManager.showOnCurrentDesktop(mainWindow);
       }
 
       // Also handle other visible windows
       windowManager.windows.forEach((window, type) => {
-        if (window.isVisible()) {
+        if (window && !window.isDestroyed() && window.isVisible()) {
           windowManager.showOnCurrentDesktop(window);
         }
       });
@@ -1613,6 +1977,11 @@ class ApplicationController {
 
   onWillQuit() {
     globalShortcut.unregisterAll();
+    if (this._captureHelper) {
+      try { this._captureHelper.kill("SIGTERM"); } catch (_) { /* already dead */ }
+      this._captureHelper = null;
+    }
+    this._captureMode = false;
     speechService.shutdown();
     windowManager.destroyAllWindows();
 
@@ -1662,6 +2031,7 @@ class ApplicationController {
       geminiKey: process.env.GEMINI_API_KEY || "",
       llmProvider: process.env.LLM_PROVIDER || "gemini",
       deepseekKey: process.env.DEEPSEEK_API_KEY || "",
+      captureHotkey: this.getCaptureHotkey(),
 
       azureConfigured: !!process.env.AZURE_SPEECH_KEY && !!process.env.AZURE_SPEECH_REGION,
       speechAvailable: this.speechAvailable
@@ -1738,6 +2108,54 @@ class ApplicationController {
       }
       if (settings.llmProvider === "gemini" || settings.llmProvider === "deepseek") {
         envUpdates.LLM_PROVIDER = settings.llmProvider;
+      }
+
+      // ── Persist the previously in-memory-only preferences ──
+      // codingLanguage / activeSkill / appIcon / windowGap used to reset on
+      // every restart (R2 audit finding). They now round-trip through .env.
+      const validSkills = ["behavioral", "dsa", "mcq", "ood", "programming", "system-design"];
+      const validLanguages = ["cpp", "c", "python", "java", "javascript"];
+      const validIcons = ["terminal", "activity", "settings"];
+      if (settings.codingLanguage && validLanguages.includes(settings.codingLanguage)) {
+        envUpdates.CODING_LANGUAGE = settings.codingLanguage;
+      }
+      if (settings.activeSkill && validSkills.includes(settings.activeSkill)) {
+        envUpdates.ACTIVE_SKILL = settings.activeSkill;
+      }
+      const iconKey = settings.selectedIcon || settings.appIcon;
+      if (iconKey && validIcons.includes(iconKey)) {
+        envUpdates.APP_ICON = iconKey;
+      }
+      if (settings.windowGap !== undefined && settings.windowGap !== null && settings.windowGap !== "") {
+        const gap = Number(settings.windowGap);
+        if (Number.isFinite(gap)) {
+          envUpdates.WINDOW_GAP = String(Math.max(0, Math.min(100, gap)));
+        }
+      }
+      if (settings.captureHotkey && typeof settings.captureHotkey === "string") {
+        const hotkey = settings.captureHotkey.trim();
+        if (hotkey) {
+          envUpdates.CAPTURE_MODE_HOTKEY = hotkey;
+          // Re-register the capture hotkey live so the change applies
+          // without a restart.
+          try {
+            const { globalShortcut } = require("electron");
+            const oldHotkey = this._captureHotkey;
+            if (oldHotkey) globalShortcut.unregister(oldHotkey);
+            this._captureHotkey = hotkey;
+            const ok = globalShortcut.register(hotkey, () => this.toggleCaptureMode());
+            if (!ok) {
+              // Roll back to the previous hotkey if the new one is taken.
+              this._captureHotkey = oldHotkey;
+              if (oldHotkey) globalShortcut.register(oldHotkey, () => this.toggleCaptureMode());
+              logger.warn("Capture hotkey registration failed; kept previous", { hotkey });
+            } else {
+              logger.info("Capture hotkey updated", { hotkey });
+            }
+          } catch (error) {
+            logger.warn("Failed to re-register capture hotkey", { error: error.message });
+          }
+        }
       }
 
       // Capture the previous whisper command BEFORE persisting — persistEnvUpdates

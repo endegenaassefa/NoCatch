@@ -18,17 +18,39 @@ const path = require('path');
 
 const PORT = process.argv[2] || 3000;
 
-// Auto-save every received event to this JSONL file
+// Auto-save every received event to these JSONL files.
+// Heartbeats (periodic keepalives) go to a SEPARATE file from real proctor
+// tells (window_blur / visibilitychange / keydown / paste / copy / ...), so
+// log growth no longer reads as "caught" and real events are easy to diff.
 const LOG_DIR = path.join(__dirname, '..', 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'mock-proctor-events.jsonl');
+const HEARTBEAT_FILE = path.join(LOG_DIR, 'mock-proctor-heartbeats.jsonl');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
-function saveEvent(body) {
+function appendToFile(filePath, line) {
   try {
-    fs.appendFileSync(LOG_FILE, body + '\n');
+    fs.appendFileSync(filePath, line + '\n');
   } catch (e) {
     console.error('Could not write log file:', e.message);
   }
+}
+
+function saveEvent(body) {
+  let isHeartbeat = false;
+  try {
+    const parsed = JSON.parse(body);
+    isHeartbeat = parsed && parsed.type === 'heartbeat';
+  } catch (_) { /* raw body — treat as a real event */ }
+  appendToFile(isHeartbeat ? HEARTBEAT_FILE : LOG_FILE, body);
+}
+
+function saveMarker(note) {
+  const marker = JSON.stringify({
+    type: 'marker',
+    data: { note: String(note || '') },
+    ts: new Date().toISOString()
+  });
+  appendToFile(LOG_FILE, marker);
 }
 
 const server = http.createServer((req, res) => {
@@ -66,7 +88,7 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
       const timestamp = new Date().toISOString();
-      saveEvent(body); // auto-save to logs/mock-proctor-events.jsonl
+      saveEvent(body); // heartbeats → heartbeats file, real events → events file
       console.log(`\n[${timestamp}] CAPTURED EVENT:`);
       try {
         const parsed = JSON.parse(body);
@@ -77,6 +99,21 @@ const server = http.createServer((req, res) => {
       
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ received: true, timestamp }));
+    });
+    return;
+  }
+
+  // Marker endpoint - stamps a run boundary into the REAL-events file so
+  // automated test matrices can attribute events to specific actions.
+  if (url.pathname === '/marker' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      let note = '';
+      try { note = JSON.parse(body).note || ''; } catch (_) { note = body; }
+      saveMarker(note);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ marked: true, note, timestamp: new Date().toISOString() }));
     });
     return;
   }

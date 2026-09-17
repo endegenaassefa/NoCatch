@@ -25,7 +25,7 @@ class MainWindowUI {
         
         // Define available skills for navigation
         this.availableSkills = [
-            'dsa'
+            'dsa', 'ood', 'mcq', 'system-design', 'behavioral', 'programming'
         ];
         
         this.init();
@@ -272,6 +272,7 @@ class MainWindowUI {
         this.micButton = document.getElementById('micButton');
     this.infoButton = document.getElementById('infoButton');
     this.shortcutsPopover = document.getElementById('shortcutsPopover');
+    this.captureIndicator = document.getElementById('captureIndicator'); // Optional
 
         // NEW: Screenshot button is the first .command-item without id
         const commandItems = document.querySelectorAll('.command-item');
@@ -288,10 +289,14 @@ class MainWindowUI {
             }
         });
 
-        // Skill indicator click handler toggles DSA skill
+        // Skill indicator click handler CYCLES through skills (previously
+        // hardcoded to always reset to 'dsa' — R2 audit finding).
         this.skillIndicator.addEventListener('click', () => {
             if (!this.isInteractive) return;
-            const newSkill = 'dsa';
+            const skillOrder = ['dsa', 'ood', 'mcq', 'system-design', 'behavioral', 'programming'];
+            const current = (this.currentSkill || 'dsa');
+            const currentIndex = skillOrder.indexOf(current);
+            const newSkill = skillOrder[(currentIndex + 1) % skillOrder.length];
             if (window.electronAPI && window.electronAPI.updateActiveSkill) {
                 window.electronAPI.updateActiveSkill(newSkill).then(() => {
                     this.handleSkillActivated(newSkill);
@@ -443,6 +448,23 @@ class MainWindowUI {
                 this.speechAvailable = !!(data && data.available);
                 this.applyMicVisibility();
             });
+
+            // Keystroke-capture mode indicator on the overlay bar.
+            if (window.electronAPI.onCaptureModeChanged && this.captureIndicator) {
+                window.electronAPI.onCaptureModeChanged((event, data) => {
+                    const active = !!(data && data.active);
+                    this.captureIndicator.style.display = active ? '' : 'none';
+                    if (active) this.captureIndicator.classList.add('active');
+                    else this.captureIndicator.classList.remove('active');
+                });
+            }
+            if (window.electronAPI.onCaptureModeError) {
+                window.electronAPI.onCaptureModeError((event, data) => {
+                    if (data && data.message) {
+                        logger.error('Capture mode error', { error: data.message });
+                    }
+                });
+            }
 
             // Listen for coding language changes from other windows
             window.electronAPI.onCodingLanguageChanged((event, data) => {

@@ -80,15 +80,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   expandLlmWindow: (contentMetrics) => ipcRenderer.invoke('expand-llm-window', contentMetrics),
   resizeLlmWindowForContent: (contentMetrics) => ipcRenderer.invoke('resize-llm-window-for-content', contentMetrics),
 
-  // Clipboard helper for reliable copy actions
-  copyToClipboard: (text) => {
-    try {
-      return ipcRenderer.invoke('copy-to-clipboard', String(text ?? ''));
-    } catch (e) {
-      console.error('copyToClipboard failed:', e);
-      return false;
-    }
-  },
+  // NOTE: copyToClipboard was REMOVED — clipboard writes are a proctor tell
+  // and the Copy buttons were removed from the renderers.
+  
+  // Window binding / gap (previously handler-exists but not exposed here)
+  setWindowBinding: (enabled) => ipcRenderer.invoke('set-window-binding', enabled),
+  toggleWindowBinding: () => ipcRenderer.invoke('toggle-window-binding'),
+  getWindowBindingStatus: () => ipcRenderer.invoke('get-window-binding-status'),
+  setWindowGap: (gap) => ipcRenderer.invoke('set-window-gap', gap),
+
+  // Keystroke-capture mode (focusless typing)
+  getCaptureMode: () => ipcRenderer.invoke('get-capture-mode'),
+  // TEST-HARNESS ONLY: synthesize real OS input for the stealth matrix.
+  // The main process rejects every call unless the app was launched with
+  // CLUELY_TEST_HARNESS=1, so normal launches carry no input surface.
+  syntheticInput: (command) => ipcRenderer.invoke('synthetic-input', command),
   
   // Display management
   listDisplays: () => ipcRenderer.invoke('list-displays'),
@@ -118,6 +124,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onRecordingStopped: (callback) => ipcRenderer.on('recording-stopped', callback),
   onCodingLanguageChanged: (callback) => ipcRenderer.on('coding-language-changed', callback),
   onMainWindowShown: (callback) => ipcRenderer.on('main-window-shown', callback),
+  onCaptureModeChanged: (callback) => ipcRenderer.on('capture-mode-changed', callback),
+  onCaptureModeError: (callback) => ipcRenderer.on('capture-mode-error', callback),
   
   // Generic receive method
   receive: (channel, callback) => ipcRenderer.on(channel, callback),
@@ -135,7 +143,8 @@ contextBridge.exposeInMainWorld('api', {
             'toggle-recording',
             'toggle-interaction-mode',
             'update-skill',
-            'window-loaded'
+            'window-loaded',
+            'input-target-focused'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);

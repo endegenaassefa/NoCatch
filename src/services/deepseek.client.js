@@ -104,7 +104,15 @@ class DeepSeekClient {
     const body = {
       model: this.model,
       messages: DeepSeekClient.toChatMessages(geminiRequest),
-      stream
+      stream,
+      // Disable DeepSeek's hidden reasoning phase. Without this, reasoning
+      // tokens are spent before any answer content is emitted, and on image
+      // requests the reasoning alone can consume the whole max_tokens budget
+      // — the API then ends with finish_reason "length" and ZERO answer
+      // content. (Validated live: thinking disabled returns content in ~36
+      // tokens instead of burning the entire cap.) The reasoning text was
+      // never surfaced in the UI anyway, so this is pure latency/cost saved.
+      thinking: { type: 'disabled' }
     };
 
     if (gen.temperature !== undefined && gen.temperature !== null) {
@@ -142,6 +150,16 @@ class DeepSeekClient {
   // Execution
   // ─────────────────────────────────────────────────────────────────────
 
+  /**
+   * Deterministic-empty errors (no content, or the API hit its output cap
+   * before emitting any content) are NOT retryable: the request completed,
+   * the response was just empty. Retrying burns ~20s per attempt and delays
+   * the honest fallback. Only transport/overload errors retry.
+   */
+  static isDeterministicEmpty(error) {
+    return /Empty (streamed )?response|finish_reason.?=.?length/i.test(error && error.message ? error.message : '');
+  }
+
   async executeNonStreaming(geminiRequest) {
     const modelsToTry = [this.model, ...(this.fallbackModels || [])];
     let lastError = null;
@@ -165,12 +183,17 @@ class DeepSeekClient {
         } catch (error) {
           lastError = error;
           const isUnavailable = /503|overloaded|busy|rate.?limit|insufficient_quota/i.test(error.message);
+          const deterministic = DeepSeekClient.isDeterministicEmpty(error);
           logger.warn(`DeepSeek attempt ${attempt} failed for model ${modelName}`, {
             error: error.message,
             remainingAttempts: this.maxRetries - attempt,
-            model: modelName
+            model: modelName,
+            retryable: !deterministic
           });
 
+          if (deterministic) {
+            break; // empty-but-complete responses never improve on retry
+          }
           if (isUnavailable && modelName !== modelsToTry[modelsToTry.length - 1]) {
             break; // try the next fallback model
           }
@@ -208,12 +231,17 @@ class DeepSeekClient {
         } catch (error) {
           lastError = error;
           const isUnavailable = /503|overloaded|busy|rate.?limit|insufficient_quota/i.test(error.message);
+          const deterministic = DeepSeekClient.isDeterministicEmpty(error);
           logger.warn(`DeepSeek streaming attempt ${attempt} failed for model ${modelName}`, {
             error: error.message,
             remainingAttempts: this.maxRetries - attempt,
-            model: modelName
+            model: modelName,
+            retryable: !deterministic
           });
 
+          if (deterministic) {
+            break;
+          }
           if (isUnavailable && modelName !== modelsToTry[modelsToTry.length - 1]) {
             break;
           }
@@ -260,7 +288,13 @@ class DeepSeekClient {
               return;
             }
             const json = JSON.parse(data);
-            const text = json?.choices?.[0]?.message?.content || '';
+            const choice = json?.choices?.[0] || {};
+            const text = choice?.message?.content || '';
+            const finishReason = choice?.finish_reason || '';
+            if (!text.trim() && finishReason === 'length') {
+              reject(new Error('Response cut off by token limit before any content was produced (finish_reason=length)'));
+              return;
+            }
             resolve(text.trim());
           } catch (parseError) {
             reject(new Error(`Failed to parse DeepSeek response: ${parseError.message}`));
@@ -307,6 +341,7 @@ class DeepSeekClient {
 
         let fullText = '';
         let buffer = '';
+        let finishReason = '';
 
         res.setEncoding('utf8');
         res.on('data', (chunk) => {
@@ -327,6 +362,9 @@ class DeepSeekClient {
             }
             try {
               const json = JSON.parse(payload);
+              if (json?.choices?.[0]?.finish_reason) {
+                finishReason = json.choices[0].finish_reason;
+              }
               const piece = DeepSeekClient.extractSSEDelta(json);
               if (piece) {
                 fullText += piece;
@@ -340,7 +378,13 @@ class DeepSeekClient {
           }
         });
 
-        res.on('end', () => resolve(fullText.trim()));
+        res.on('end', () => {
+          if (!fullText.trim() && finishReason === 'length') {
+            reject(new Error('Response cut off by token limit before any content was produced (finish_reason=length)'));
+            return;
+          }
+          resolve(fullText.trim());
+        });
         res.on('error', (error) => reject(new Error(`DeepSeek stream error: ${error.message}`)));
       });
 

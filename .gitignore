@@ -7,3 +7,5 @@ dist/
 bin/
 .DS_Store
 *.log
+.Rhistory
+logs/mock-proctor-heartbeats.jsonl

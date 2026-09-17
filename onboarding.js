@@ -710,3 +710,13 @@
     }).catch(() => {});
   }
 })();
+
+// Keystroke-capture target reporting: the wizard is a focusable:false panel,
+// so typing reaches it only through capture mode. Tell the main process when
+// the user clicks into an input so keystrokes route to this window.
+document.addEventListener('focusin', (e) => {
+  const target = e.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+    if (window.api && window.api.send) window.api.send('input-target-focused');
+  }
+});

@@ -1,4 +1,4 @@
-const { BrowserWindow, screen, desktopCapturer, shell } = require('electron');
+const { BrowserWindow, screen, desktopCapturer, shell, app } = require('electron');
 const path = require('path');
 const logger = require('../core/logger').createServiceLogger('WINDOW');
 const config = require('../core/config');
@@ -8,6 +8,12 @@ class WindowManager {
     this.windows = new Map();
     this.activeWindow = 'main';
     this.isInteractive = true; // default to interactive so windows are clickable/drag-able
+
+    // macOS accessory-mode tracking: overlay windows must never steal focus
+    // from the proctored page. focusForKeyboardInput()/revertToAccessory()
+    // temporarily switch to 'regular' only when keyboard input is needed.
+    this._accessoryMode = process.platform === 'darwin' && config.get('stealth.hideFromDock') !== false;
+    this._inputActivationActive = false;
     this.isVisible = false;
     this.currentDisplay = null;
     this.screenWatcher = null;
@@ -42,7 +48,7 @@ class WindowManager {
         height: 35,
         useContentSize: true,
         file: 'index.html',
-        title: 'OpenCluely'
+        title: 'Terminal'
       },
       chat: {
         width: 500,
@@ -78,7 +84,7 @@ class WindowManager {
         width: 560,
         height: 680,
         file: 'onboarding.html',
-        title: 'Welcome to OpenCluely',
+        title: 'Welcome',
         frame: false,
         titleBarStyle: 'hidden',
         transparent: true,
@@ -147,9 +153,9 @@ class WindowManager {
     // Immediate always-on-top enforcement for main window
     if (process.platform === 'darwin') {
       try {
-        mainWindow.setAlwaysOnTop(true, 'screen-saver', 2);
-      } catch (error) {
         mainWindow.setAlwaysOnTop(true, 'floating', 2);
+      } catch (error) {
+        mainWindow.setAlwaysOnTop(true);
       }
     } else {
       mainWindow.setAlwaysOnTop(true);
@@ -164,9 +170,9 @@ class WindowManager {
     if (!mainWindow.isDestroyed()) {
       if (process.platform === 'darwin') {
         try {
-          mainWindow.setAlwaysOnTop(true, 'screen-saver', 2);
-        } catch (error) {
           mainWindow.setAlwaysOnTop(true, 'floating', 2);
+        } catch (error) {
+          mainWindow.setAlwaysOnTop(true);
         }
       } else {
         mainWindow.setAlwaysOnTop(true);
@@ -191,9 +197,9 @@ class WindowManager {
     // show — it persists into the future showOnCurrentDesktop call.
     if (process.platform === 'darwin') {
       try {
-        window.setAlwaysOnTop(true, 'screen-saver', 2);
-      } catch (error) {
         window.setAlwaysOnTop(true, 'floating', 2);
+      } catch (error) {
+        window.setAlwaysOnTop(true);
       }
     } else {
       window.setAlwaysOnTop(true);
@@ -211,9 +217,9 @@ class WindowManager {
           if (!window.isDestroyed()) {
             if (process.platform === 'darwin') {
               try {
-                window.setAlwaysOnTop(true, 'screen-saver', 2);
-              } catch (error) {
                 window.setAlwaysOnTop(true, 'floating', 2);
+              } catch (error) {
+                window.setAlwaysOnTop(true);
               }
             } else {
               window.setAlwaysOnTop(true);
@@ -358,8 +364,9 @@ class WindowManager {
         hasShadow: false,
         useContentSize: windowConfig.useContentSize || false,
         thickFrame: false,
-        focusable: true,
+        focusable: false, // Never take keyboard focus: prevents focus theft from the proctored page
         ...(process.platform === 'darwin' && {
+          type: 'panel', // Non-activating panel: clicks never activate the app
           titleBarStyle: 'hiddenInset',
           trafficLightPosition: { x: -100, y: -100 },
           acceptFirstMouse: true,
@@ -381,7 +388,9 @@ class WindowManager {
         closable: false,
         hasShadow: false,
         thickFrame: false,
+        focusable: false, // Read-only display: never steal keyboard focus
         ...(process.platform === 'darwin' && {
+          type: 'panel', // Non-activating panel: clicks never activate the app
           titleBarStyle: 'hiddenInset',
           trafficLightPosition: { x: -100, y: -100 },
           acceptFirstMouse: true
@@ -544,10 +553,9 @@ class WindowManager {
       try {
         // Try the most aggressive levels first
         const levels = [
-          'screen-saver',    // Highest level
+          'floating',        // Preferred: above normal apps, below screen-saver
           'pop-up-menu',     // Menu level
           'modal-panel',     // Modal panel level
-          'floating',        // Floating level
           'normal'           // Fallback to normal with alwaysOnTop
         ];
         
@@ -639,13 +647,9 @@ class WindowManager {
       if (!window.isDestroyed()) {
         try {
           if (process.platform === 'darwin') {
-            // Try multiple levels on macOS
+            // Single assertion at 'floating': above normal windows without
+            // the screen-saver level churn that occludes other apps.
             window.setAlwaysOnTop(true, 'floating', 1);
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'screen-saver', 1);
-              }
-            }, 50);
           } else {
             window.setAlwaysOnTop(true);
           }
@@ -656,12 +660,8 @@ class WindowManager {
     };
     
     // Event-based enforcement
-    window.on('blur', () => {
-      setTimeout(enforceAlwaysOnTop, 50);
-      setTimeout(enforceAlwaysOnTop, 200);
-      setTimeout(enforceAlwaysOnTop, 500);
-    });
-    
+    // NOTE: no 'blur' re-assertion here — re-asserting on blur fights the
+    // OS window manager and aggravates focus churn on the proctored page.
     window.on('show', () => {
       setTimeout(enforceAlwaysOnTop, 50);
       setTimeout(enforceAlwaysOnTop, 200);
@@ -675,15 +675,10 @@ class WindowManager {
       setTimeout(enforceAlwaysOnTop, 50);
     });
     
-    // Periodic enforcement every 3 seconds (more frequent)
-    const periodicEnforcement = setInterval(() => {
-      if (window.isDestroyed()) {
-        clearInterval(periodicEnforcement);
-        return;
-      }
-      enforceAlwaysOnTop();
-    }, 3000);
-    
+    // NOTE: the periodic 3-second always-on-top re-assertion was removed —
+    // constant level churn triggers occlusion/visibility detection in other
+    // apps (the proctored page reported visibilitychange: hidden). The level
+    // is set once at creation and re-asserted only on show/restore/focus.
     logger.debug('Applied enhanced stealth measures with aggressive always-on-top', {
       type,
       platform: process.platform,
@@ -696,17 +691,42 @@ class WindowManager {
   positionWindow(window, type) {
     const display = this.currentDisplay || screen.getPrimaryDisplay();
     const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
-    
+
     if (this.bindWindows && (type === 'main' || type === 'llmResponse')) {
       // Position bound windows together
       this.positionBoundWindows();
       return;
     }
-    
+
+    if (type === 'adjacent-to-test') {
+      // Position the overlay directly beside the test window to minimize eye movement.
+      // Detect the test window via cursor position or active display.
+      const cursorPoint = screen.getCursorScreenPoint();
+      const cursorDisplay = screen.getDisplayNearestPoint(cursorPoint);
+      const { x: cDisplayX, y: cDisplayY, width: cScreenWidth, height: cScreenHeight } = cursorDisplay.workArea;
+
+      const [windowWidth, windowHeight] = window.getSize();
+
+      // Place overlay on the right side of the screen, vertically centered
+      const position = {
+        x: cDisplayX + cScreenWidth - windowWidth - 20,
+        y: cDisplayY + Math.round((cScreenHeight - windowHeight) / 2)
+      };
+
+      window.setPosition(position.x, position.y);
+
+      logger.debug('Positioned window adjacent to test', {
+        type,
+        position: `${position.x},${position.y}`,
+        display: cursorDisplay.id || 'primary'
+      });
+      return;
+    }
+
     // All windows positioned at top of screen with small margin
     const topMargin = 20;
     const [windowWidth] = window.getSize();
-    
+
     const positions = {
       main: { x: displayX + 50, y: displayY + topMargin },
       chat: { x: displayX + screenWidth - windowWidth - 50, y: displayY + topMargin },
@@ -837,11 +857,10 @@ class WindowManager {
       const setMacOSAlwaysOnTop = () => {
         if (win.isDestroyed()) return;
         try {
-          win.setAlwaysOnTop(true, 'screen-saver', 2);
+          win.setAlwaysOnTop(true, 'floating', 2);
         } catch {
           try { win.setAlwaysOnTop(true, 'pop-up-menu', 2); }
-          catch { try { win.setAlwaysOnTop(true, 'floating', 2); }
-          catch { win.setAlwaysOnTop(true); }}
+          catch { win.setAlwaysOnTop(true); }
         }
       };
 
@@ -849,8 +868,7 @@ class WindowManager {
 
       setTimeout(() => {
         if (win.isDestroyed()) return;
-        win.show();
-        win.focus();
+        win.showInactive(); // Non-activating show: never steal focus
         setMacOSAlwaysOnTop();
         setTimeout(() => { if (!win.isDestroyed()) setMacOSAlwaysOnTop(); }, 100);
         // Keep LLM window visible across workspaces; others revert
@@ -866,8 +884,7 @@ class WindowManager {
       // Linux/Windows
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       win.setAlwaysOnTop(true);
-      win.show();
-      win.focus();
+      win.showInactive(); // Non-activating show: never steal focus
       setTimeout(() => {
         if (win.isDestroyed()) return;
         if (!isLLM) {
@@ -882,6 +899,42 @@ class WindowManager {
       windowId: win.id,
       isDestroyed: win.isDestroyed()
     });
+  }
+
+  // macOS only: temporarily switch the app to 'regular' activation so the
+  // user can type into chat/settings/onboarding. Accessory apps cannot
+  // become frontmost for keyboard input. revertToAccessory() undoes this
+  // when the typing window stops being key (see setupWindowEventHandlers).
+  focusForKeyboardInput(win) {
+    if (!win || win.isDestroyed()) return;
+    if (process.platform === 'darwin') {
+      try {
+        if (this._accessoryMode) {
+          app.setActivationPolicy('regular');
+          app.focus({ steal: true });
+        }
+        win.show();
+        win.focus();
+        this._inputActivationActive = true;
+      } catch (error) {
+        logger.warn('Failed to activate app for keyboard input', { error: error.message });
+      }
+    } else {
+      win.focus();
+    }
+  }
+
+  revertToAccessory() {
+    if (!this._inputActivationActive) return;
+    this._inputActivationActive = false;
+    if (process.platform === 'darwin' && this._accessoryMode) {
+      try {
+        app.setActivationPolicy('accessory');
+        logger.debug('Reverted to accessory activation policy');
+      } catch (error) {
+        logger.warn('Failed to revert to accessory activation policy', { error: error.message });
+      }
+    }
   }
   
   setupWindowEventHandlers() {
@@ -901,6 +954,14 @@ class WindowManager {
         // Only log, don't force focus back
         logger.debug('Window blurred', { type });
       });
+
+      // Typing windows temporarily escalate the app to 'regular' so keyboard
+      // input works; revert to accessory as soon as they stop being key.
+      if (type === 'chat' || type === 'settings' || type === 'onboarding') {
+        window.on('blur', () => {
+          this.revertToAccessory();
+        });
+      }
 
       window.on('show', () => {
         logger.debug('Window shown', { type });
@@ -1059,16 +1120,15 @@ class WindowManager {
     }
 
     this.windows.forEach((window, type) => {
+      if (window.isDestroyed()) return;
       if (type !== 'llmResponse') { // Don't show LLM response unless it has content
         this.showOnCurrentDesktop(window);
       }
     });
     
     this.isVisible = true;
-    const activeWindow = this.windows.get(this.activeWindow);
-    if (activeWindow) {
-      activeWindow.focus();
-    }
+    // NOTE: no .focus() here — focusing would steal focus from the
+    // proctored page. Windows are shown with showInactive() above.
     
     logger.info('All windows shown on current desktop', { 
       activeWindow: this.activeWindow,
@@ -1078,6 +1138,7 @@ class WindowManager {
 
   hideAllWindows() {
     this.windows.forEach((window, type) => {
+      if (window.isDestroyed()) return;
       if (type !== 'llmResponse') {
         window.hide();
       }
@@ -1139,20 +1200,9 @@ class WindowManager {
       if (!window.isDestroyed()) {
         try {
           if (process.platform === 'darwin') {
-            // Try multiple levels for macOS
-            window.setAlwaysOnTop(true, 'pop-up-menu', 1);
-            
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'floating', 1);
-              }
-            }, 100);
-            
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'screen-saver', 1);
-              }
-            }, 200);
+            // Single assertion at 'floating' — avoid the screen-saver level
+            // churn that occludes other applications.
+            window.setAlwaysOnTop(true, 'floating', 1);
           } else {
             // Windows and Linux
             window.setAlwaysOnTop(true);
@@ -1205,7 +1255,7 @@ class WindowManager {
           
           if (process.platform === 'darwin') {
             // Test different levels on macOS
-            window.setAlwaysOnTop(true, 'screen-saver', 2);
+            window.setAlwaysOnTop(true, 'floating', 2);
             setTimeout(() => {
               if (!window.isDestroyed()) {
                 window.setAlwaysOnTop(true, 'pop-up-menu', 2);
@@ -1355,6 +1405,7 @@ class WindowManager {
     if (settingsWindow) {
       settingsWindow.hide();
     }
+    this.revertToAccessory();
   }
 
   async showOnboarding() {
@@ -1374,7 +1425,9 @@ class WindowManager {
 
     this.showOnCurrentDesktop(onboardingWindow);
     this.centerWindow(onboardingWindow);
-    onboardingWindow.focus();
+    // Onboarding requires keyboard input (API keys): temporarily escalate
+    // the app to 'regular' activation; it reverts on window blur.
+    this.focusForKeyboardInput(onboardingWindow);
     logger.info('Onboarding window displayed');
     return onboardingWindow;
   }
@@ -1392,6 +1445,7 @@ class WindowManager {
       onboardingWindow.close();
     }
     this.windows.delete('onboarding');
+    this.revertToAccessory();
   }
 
   expandLLMWindow(contentMetrics = null) {
@@ -1665,7 +1719,7 @@ class WindowManager {
         
         // Ensure always-on-top is maintained after moving
         if (process.platform === 'darwin') {
-          window.setAlwaysOnTop(true, 'screen-saver', 1);
+          window.setAlwaysOnTop(true, 'floating', 1);
         } else {
           window.setAlwaysOnTop(true);
         }
@@ -1790,6 +1844,7 @@ class WindowManager {
       chatWindow.hide();
       logger.debug('Chat window hidden');
     }
+    this.revertToAccessory();
   }
 
   handleRecordingStarted() {

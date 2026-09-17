@@ -55,7 +55,7 @@ function formatEnvValue(raw) {
 // exhaust the X11 client limit, producing "Maximum number of clients reached".
 //
 // Disabling hardware acceleration and the GPU subprocess forces Chromium to
-// render via the CPU (SwiftShader). OpenCluely's UI is light enough that
+// render via the CPU (SwiftShader). The overlay UI is light enough that
 // this is imperceptible, and it eliminates the GPU crash entirely.
 if (process.platform === "linux") {
   app.disableHardwareAcceleration();
@@ -136,7 +136,7 @@ class ApplicationController {
       // any directory). ENV_PATH is the same file dotenv loaded at startup
       // and that persistEnvUpdates() writes to.
       envPath: ENV_PATH,
-      sentinelPath: path.join(app.getPath("userData"), ".opencluely-firstrun-completed"),
+      sentinelPath: path.join(app.getPath("userData"), ".sru-firstrun-completed"),
     });
     // Lazily-initialised in getWhisperInstaller() so tests can mock
     // the constructor without polluting main-process startup.
@@ -145,7 +145,7 @@ class ApplicationController {
 
     // Window configurations for reference
     this.windowConfigs = {
-      main: { title: "OpenCluely" },
+      main: { title: "Terminal" },
       chat: { title: "Chat" },
       llmResponse: { title: "AI Response" },
       settings: { title: "Settings" },
@@ -197,7 +197,6 @@ class ApplicationController {
           }
           windowManager.showAllWindows();
           windowManager.showOnCurrentDesktop(mainWindow);
-          mainWindow.focus();
           return;
         }
 
@@ -228,6 +227,26 @@ class ApplicationController {
     // Force stealth mode IMMEDIATELY when app is ready
     app.setName("Terminal ");
     process.title = "Terminal ";
+
+    // macOS: run as an accessory app so clicking overlay windows never
+    // activates the app (which would steal focus from the proctored page).
+    // The app has no Dock icon; keyboard input paths temporarily switch to
+    // 'regular' via windowManager.focusForKeyboardInput() and revert on blur.
+    if (
+      process.platform === "darwin" &&
+      config.get("stealth.hideFromDock") !== false
+    ) {
+      try {
+        app.setActivationPolicy("accessory");
+        logger.info(
+          "Activation policy set to 'accessory' (stealth.hideFromDock)"
+        );
+      } catch (error) {
+        logger.warn("Failed to set accessory activation policy", {
+          error: error.message,
+        });
+      }
+    }
 
     logger.info("Application starting", {
       version: config.get("app.version"),
@@ -267,6 +286,32 @@ class ApplicationController {
 
       this.starting = false;
       this.isReady = true;
+
+      // Startup stealth self-check: report the state of each privacy flag.
+      // Deferred so windows finish showing and always-on-top re-assertion
+      // has run at least once before we query live state.
+      setTimeout(() => {
+        try {
+          const allWindows = Array.from(windowManager.windows.values()).filter(
+            (w) => w && !w.isDestroyed()
+          );
+          const contentProtection = allWindows.length > 0; // setContentProtection(true) applied at creation
+          const alwaysOnTop =
+            allWindows.length > 0 && allWindows.every((w) => w.isAlwaysOnTop());
+          // Click-through capability is wired when the manager exposes the
+          // toggle (Cmd+Shift+I / Alt+A). Windows start interactive by design,
+          // so we report the feature as active rather than the current toggle.
+          const clickThrough =
+            typeof windowManager.setInteractive === "function" &&
+            typeof windowManager.toggleInteraction === "function";
+          const processDisguise = process.title === "Terminal ";
+          logger.info(
+            `[STEALTH] contentProtection=${contentProtection}, alwaysOnTop=${alwaysOnTop}, clickThrough=${clickThrough}, processDisguise=${processDisguise}`
+          );
+        } catch (e) {
+          logger.warn("Stealth self-check failed", { error: e.message });
+        }
+      }, 1500);
 
       // Launch the onboarding wizard if this is the first run.
       if (this.isFirstRun) {
@@ -391,6 +436,7 @@ class ApplicationController {
   setupGlobalShortcuts() {
     const shortcuts = {
       "CommandOrControl+Shift+S": () => this.triggerScreenshotOCR(),
+      "CommandOrControl+Shift+Q": () => this.triggerScreenshotOCR(),
       "CommandOrControl+Shift+V": () => windowManager.toggleVisibility(),
       "CommandOrControl+Shift+I": () => windowManager.toggleInteraction(),
       "CommandOrControl+Shift+C": () => windowManager.switchToWindow("chat"),
@@ -863,10 +909,9 @@ class ApplicationController {
 
     ipcMain.handle("close-window", (event) => {
       const webContents = event.sender;
-      const window = windowManager.windows.forEach((win, type) => {
-        if (win.webContents === webContents) {
+      windowManager.windows.forEach((win, type) => {
+        if (!win.isDestroyed() && win.webContents === webContents) {
           win.hide();
-          return true;
         }
       });
       return { success: true };
@@ -1030,6 +1075,10 @@ class ApplicationController {
   navigateSkill(direction) {
     const availableSkills = [
       "dsa",
+      "ood",
+      "mcq",
+      "system-design",
+      "behavioral",
     ];
 
     const currentIndex = availableSkills.indexOf(this.activeSkill);
@@ -1087,7 +1136,7 @@ class ApplicationController {
       // Use image directly with LLM and active skill; do not send chat messages here
       const sessionHistory = sessionManager.getOptimizedHistory();
 
-      const skillsRequiringProgrammingLanguage = ['dsa'];
+      const skillsRequiringProgrammingLanguage = ['dsa', 'ood'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
       this._responseSeq = (this._responseSeq || 0) + 1;
@@ -1153,7 +1202,7 @@ class ApplicationController {
       sessionManager.addUserInput(text, 'llm_input');
 
       // Check if current skill needs programming language context
-      const skillsRequiringProgrammingLanguage = ['dsa'];
+      const skillsRequiringProgrammingLanguage = ['dsa', 'ood'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
       this._responseSeq = (this._responseSeq || 0) + 1;
@@ -1322,7 +1371,7 @@ class ApplicationController {
       });
 
       // Check if current skill needs programming language context
-      const skillsRequiringProgrammingLanguage = ['dsa'];
+      const skillsRequiringProgrammingLanguage = ['dsa', 'ood'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
       // Stream the answer progressively to the configured speech target.
@@ -1607,6 +1656,8 @@ class ApplicationController {
       whisperResponseTarget: process.env.WHISPER_RESPONSE_TARGET || "both",
       whisperSegmentMs: process.env.WHISPER_SEGMENT_MS || "4000",
       geminiKey: process.env.GEMINI_API_KEY || "",
+      llmProvider: process.env.LLM_PROVIDER || "gemini",
+      deepseekKey: process.env.DEEPSEEK_API_KEY || "",
 
       azureConfigured: !!process.env.AZURE_SPEECH_KEY && !!process.env.AZURE_SPEECH_REGION,
       speechAvailable: this.speechAvailable
@@ -1678,6 +1729,12 @@ class ApplicationController {
       if (settings.geminiKey !== undefined) {
         envUpdates.GEMINI_API_KEY = settings.geminiKey;
       }
+      if (settings.deepseekKey !== undefined) {
+        envUpdates.DEEPSEEK_API_KEY = settings.deepseekKey;
+      }
+      if (settings.llmProvider === "gemini" || settings.llmProvider === "deepseek") {
+        envUpdates.LLM_PROVIDER = settings.llmProvider;
+      }
 
       // Capture the previous whisper command BEFORE persisting — persistEnvUpdates
       // mutates process.env in place, so comparing afterwards would always read
@@ -1687,17 +1744,20 @@ class ApplicationController {
 
       const persistedKeys = this.persistEnvUpdates(envUpdates);
 
-      // If the Gemini key was just saved, reinitialize the LLM service
-      // so the new client picks up the key. Without this, the test-
+      // If an LLM key or provider was just saved, reinitialize the LLM service
+      // so the new client picks up the key/provider. Without this, the test-
       // connection button in the onboarding wizard fails with
       // "Service not initialized" because the client was first created
       // at app startup, before any key was set.
-      if (settings.geminiKey !== undefined && envUpdates.GEMINI_API_KEY !== undefined) {
+      const llmConfigChanged = settings.geminiKey !== undefined ||
+        settings.deepseekKey !== undefined ||
+        settings.llmProvider !== undefined;
+      if (llmConfigChanged) {
         try {
           llmService.initializeClient();
-          logger.info("LLM service reinitialized after Gemini key update");
+          logger.info("LLM service reinitialized after LLM config update");
         } catch (e) {
-          logger.warn("Failed to reinitialize LLM service after Gemini key update", {
+          logger.warn("Failed to reinitialize LLM service after LLM config update", {
             error: e.message
           });
         }

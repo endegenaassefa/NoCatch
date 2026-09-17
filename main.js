@@ -1982,7 +1982,16 @@ class ApplicationController {
       const { app } = require("electron");
 
       // Force update process title for Activity Monitor stealth - CRITICAL
-      process.title = appName;
+      // WARNING: assigning process.title on macOS makes LaunchServices
+      // re-register the app as a Foreground app ~700 ms later, silently
+      // undoing the accessory activation policy (verified empirically:
+      // NSRunningApplication.activationPolicy flips accessory -> regular).
+      // Skip no-op assignments (the common case: the title is already the
+      // stealth name) and re-assert the accessory policy after the refresh
+      // timers when the title genuinely changes (icon/name switch).
+      if (process.title !== appName) {
+        process.title = appName;
+      }
 
       // Set app name in dock (macOS) - this affects the dock and Activity Monitor
       if (process.platform === "darwin") {
@@ -2020,7 +2029,9 @@ class ApplicationController {
       const refreshTimes = [50, 100, 200, 500];
       refreshTimes.forEach((delay) => {
         setTimeout(() => {
-          process.title = appName;
+          if (process.title !== appName) {
+            process.title = appName;
+          }
           if (process.platform === "darwin") {
             app.setName(appName);
             // Force update bundle display name
@@ -2030,6 +2041,26 @@ class ApplicationController {
           }
         }, delay);
       });
+
+      // When the title genuinely changed above, the assignment schedules an
+      // asynchronous accessory -> regular policy flip. Re-assert accessory
+      // once the last refresh timer (500 ms) and the ~700 ms flip lag have
+      // settled. Harmless no-op when the policy never flipped.
+      if (
+        process.platform === "darwin" &&
+        config.get("stealth.hideFromDock") !== false
+      ) {
+        setTimeout(() => {
+          try {
+            app.setActivationPolicy("accessory");
+            logger.debug("Re-asserted accessory policy after name update");
+          } catch (error) {
+            logger.warn("Failed to re-assert accessory policy", {
+              error: error.message,
+            });
+          }
+        }, 1500);
+      }
 
       logger.info("App name updated for stealth mode", {
         appName,

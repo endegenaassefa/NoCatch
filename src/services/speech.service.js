@@ -1881,7 +1881,7 @@ class SpeechService extends EventEmitter {
   }
 
   async _transcribeWhisperBuffer(audioBuffer) {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencluely-whisper-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sru-whisper-'));
     const audioFilePath = path.join(tempDir, 'segment.wav');
 
     try {
@@ -1922,7 +1922,7 @@ class SpeechService extends EventEmitter {
       }
     }
 
-    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencluely-whisper-out-'));
+    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sru-whisper-out-'));
     const args = [
       ...this.whisperCommand.baseArgs,
       audioFilePath,
@@ -2013,6 +2013,69 @@ class SpeechService extends EventEmitter {
         error: error.message
       });
     }
+  }
+
+  /**
+   * Speak text using system TTS.
+   * @param {string} text - Text to speak
+   * @param {Object} options - TTS options
+   * @param {string} options.voice - Voice name (optional)
+   * @param {number} options.rate - Speech rate (optional)
+   * @returns {Promise<void>}
+   */
+  async speak(text, options = {}) {
+    const ttsEnabled = config.get('speech.ttsEnabled') || false;
+    if (!ttsEnabled) {
+      logger.debug('TTS disabled, skipping speak', { textLength: text.length });
+      return;
+    }
+
+    const voice = options.voice || config.get('speech.ttsVoice') || '';
+    const rate = options.rate || config.get('speech.ttsRate') || 200;
+
+    return new Promise((resolve, reject) => {
+      let command, args;
+
+      if (process.platform === 'darwin') {
+        command = 'say';
+        args = [];
+        if (voice) args.push('-v', voice);
+        if (rate) args.push('-r', String(rate));
+        args.push(text);
+      } else if (process.platform === 'win32') {
+        command = 'powershell';
+        args = [
+          '-Command',
+          `Add-Type -AssemblyName System.Speech; ` +
+          `$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer; ` +
+          (voice ? `$speak.SelectVoice('${voice}'); ` : '') +
+          `$speak.Rate = ${Math.round(rate / 50)}; ` +
+          `$speak.Speak('${text.replace(/'/g, "''")}');`
+        ];
+      } else {
+        // Linux
+        command = 'espeak';
+        args = [];
+        if (voice) args.push('-v', voice);
+        if (rate) args.push('-s', String(rate));
+        args.push(text);
+      }
+
+      const child = spawn(command, args, { stdio: 'ignore' });
+
+      child.on('error', (error) => {
+        logger.error('TTS failed', { error: error.message, command });
+        reject(error);
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`TTS exited with code ${code}`));
+        }
+      });
+    });
   }
 }
 

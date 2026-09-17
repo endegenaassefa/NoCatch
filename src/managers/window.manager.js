@@ -414,6 +414,12 @@ class WindowManager {
         closable: false,
         hasShadow: true,
         ...(process.platform === 'darwin' && {
+          // Non-activating panel: clicking chat must not activate the app.
+          // A regular window click activates even an accessory app and
+          // would blur the proctored page. Panels still accept keyboard
+          // input by becoming key without app activation (Spotlight model),
+          // exactly like the settings window.
+          type: 'panel',
           titleBarStyle: 'hiddenInset',
           trafficLightPosition: { x: -100, y: -100 },
           acceptFirstMouse: true

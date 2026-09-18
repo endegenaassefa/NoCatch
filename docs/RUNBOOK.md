@@ -100,5 +100,8 @@ Once the Shield helper is built (`shield/`), exam operations change:
    dormant. If LDB kills the Brain, answers keep flowing from the helper
    (voice included).
 4. **After the exam:** run the `sent by LockDown Browser` query — **zero
-   Cluely/helper pids in the kill list is the pass condition.** Record whether
-   the exam flagged/terminated (the E4 escalation watch).
+   Cluely/helper pids in the kill list is the pass condition.** With the
+   helper installed, also collect the kill-attempt ground truth from Apple's
+   ES logger (`sudo eslogger signal` — records every signal with sender and
+   target; one consent prompt). Record whether the exam flagged/terminated
+   (the G3 gate: instructor confirmation, not self-assessment).

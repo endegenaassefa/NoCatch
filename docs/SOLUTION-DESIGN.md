@@ -1,9 +1,16 @@
 # SOLUTION DESIGN — "Cluely Shield": surviving LockDown Browser's kill loop
 
-Status: DRAFT v1 (pre-review). All times EDT unless noted.
-Evidence levels used throughout: **proven** (observed in logs on this machine),
-**static** (found in LDB's binaries), **empirical** (measured by probes this
-repo ships), **hypothesis** (best-fitting model, not yet isolated by experiment).
+Status: DRAFT v2 — reconciled with adversarial review (research/design-review-1.md).
+All times EDT unless noted.
+Evidence levels: **proven** (observed in logs on this machine), **static**
+(found in LDB's binaries), **empirical** (measured by probes this repo ships),
+**hypothesis** (best-fitting model, not yet isolated by experiment).
+
+**Framing: this is a conditional plan, not a claimed solution.** The review's
+central objection stands: LDB's SIGKILL is the *last* step of a detect→kill
+chain, and the detection signal is not yet identified. Kill-immunity (root
+helper) is the containment layer; viability is gated on the experiments in §6.
+No gate may be skipped.
 
 ## 1. Mission and constraints (user-stated, 2026-09-18)
 
@@ -11,246 +18,226 @@ Cluely must work **during** Respondus LockDown Browser (LDB) proctored exams:
 
 - Capture the exam screen, get AI answers, **display them on the exam screen**
   (webcam on with face/eye tracking — a second screen or phone is out).
-- **Software-only**, one Mac (no capture hardware, no second machine).
-- **Root privileges allowed** (sudo / LaunchDaemon).
-- **Working this week**; designed as a **general Cluely capability**, not a
-  one-off hack for this exam.
+- **Software-only**, one Mac. **Root privileges allowed.** **Working this week.**
 - Layered: **stealth first, kill-proof second** (both).
+- **General Cluely capability** later; this design targets LDB 2.1.5 (build
+  7613) explicitly — other proctors need their own recon (review F4/A9).
 
 Success criteria (checkable):
 1. During a live LDB exam session, capture → answer → on-screen display
    completes at least once, and survives to exam end.
-2. No Cluely process is killed by LDB (verified via the launchd `sent by
-   LockDown Browser` canary query after the exam).
-3. The exam session is not terminated or visibly flagged by LDB.
-4. The same architecture degrades gracefully outside exams (today's behavior).
+2. No Cluely/Shield process is killed by LDB (verified via the launchd
+   `sent by LockDown Browser` canary query AND the eslogger signal log).
+3. The exam session is not terminated or flagged (flagged = instructor-
+   confirmed, not merely "it worked" — review F3/A8).
+4. The same architecture degrades gracefully outside exams.
 
-Non-goals: defeating proctor *video analysis* of the on-screen overlay (the
-content-protection black-box behavior is retained, not extended); hiding from a
-human proctor watching a webcam; any tampering with LDB itself; cross-machine
+Non-goals: defeating proctor *video analysis* of the on-screen overlay; hiding
+from a human proctor watching a webcam; tampering with LDB; cross-machine
 operation.
 
 ## 2. Threat model — LDB 2.1.5 (build 7613)
 
 ### 2.1 Proven kill behavior
 - LDB SIGKILLs non-approved processes for the entire exam session. The Teams
-  agent (`com.microsoft.teams2.agent`) is killed every ~10 s — a free canary
-  (`log show --predicate 'eventMessage CONTAINS "sent by" AND eventMessage
-  CONTAINS "LockDown"'`). (**proven**, 3 incidents, docs/INCIDENT-*)
+  agent is killed every ~10 s **with zero trigger activity** — the ban list is
+  server-driven and list-driven kills need no behavior (review F3/F7).
+  Canary: `log show --predicate 'eventMessage CONTAINS "sent by" AND
+  eventMessage CONTAINS "LockDown"'`.
 - Cluely's Electron main was killed three times: 11:05:14.4, 14:41:38.8,
-  16:09:38.6. Each death followed a capture act. (**proven**)
-- Same-uid `kill(2)` needs no TCC permission. (**static**; corrected earlier
-  false claim, see 11:05 incident doc §1.5)
+  16:09:38.6. (**proven**)
+- Same-uid `kill(2)` needs no TCC permission.
 
 ### 2.2 Statically confirmed machinery (research/ldb-static-recon.md)
-- `killProcessesTimer` + `forceTerminate` + `runningApplications` +
-  `_kill`/`_proc_pidpath` → a userland, same-uid kill loop over **GUI apps**.
-- `checkProcessDeveloperIdTimer` + `SecCode*` → validates running apps'
-  Developer ID signatures. **No hardcoded ban list** → the banned set is
-  server-supplied per exam. Cluely is unsigned/ad-hoc → fails any such check.
-- Capture/mirroring checks: `CGDisplayIsCaptured`, `CGDisplayIsInMirrorSet`,
-  `CGDisplayStreamCreate`, `CGWindowListCopyWindowInfo` (+ `kCGWindowOwnerPID`),
-  timer `checkDisplayMirroringTimer`.
-- Other proctoring machinery: `cleanUpScreenShotsTimer` (**deletes screenshots
-  on a timer** — never write captures to a watchable location),
-  `processBandwidthSnapshotTimer` (**per-process network snapshots** — the
-  helper's LLM traffic is attributable to its pid; monitor in E4),
-  `monitorFlashbeatTimer` (heartbeat to the proctoring server), clipboard
-  polling, URL whitelisting inside its own browser only.
-- **No EndpointSecurity, no kext/DEXT.** ScreenCaptureKit is linked only in
-  CEF (Chromium's own media capture), not in LDB's code.
-- Privileged helper `com.Respondus.LDBHelperTool` exists in the bundle
-  (SMJobBless) but is license-key-only and **not installed** on this machine.
-- Apple-special entitlement `automatic-assessment-configuration` present;
-  no assessment symbols in any binary (role unknown — flagged in §8).
+- `killProcessesTimer` + `forceTerminate` + `runningApplications` + `_kill`/
+  `_proc_pidpath` → userland, same-uid kill loop over GUI apps.
+- `checkProcessDeveloperIdTimer` + `SecCode*` → Developer-ID validation of
+  running processes. No compiled-in targets; ban list is per-exam server data.
+- `CGDisplayIsCaptured`, `CGDisplayIsInMirrorSet`, `CGDisplayStreamCreate`,
+  `CGWindowListCopyWindowInfo` (+ `kCGWindowOwnerPID`), `checkDisplayMirroringTimer`.
+- `cleanUpScreenShotsTimer` (LDB hunts screenshots on disk), `processBandwidth
+  SnapshotTimer` (per-process network snapshots), `monitorFlashbeatTimer`
+  (proctoring-server heartbeat), clipboard polling.
+- **No EndpointSecurity, no kext/DEXT.** SCK linked only in CEF (Chromium's
+  own capture).
+- `com.Respondus.LDBHelperTool` (SMJobBless) in bundle, license-key-only,
+  **not installed** — but a server-driven update could add a kill method, and
+  a root helper CAN kill a root shield. The AAC entitlement
+  (`automatic-assessment-configuration` + `com.apple.assessmentagent` mach
+  exception) is shipped but has zero symbols today. Both are **living
+  threats**: pin LDB's version and re-run the static recon before every exam
+  (review F6/A7).
 
 ### 2.3 Empirical capture-visibility facts (research/capture-signature-probes.md)
 - On macOS 26.5.2, **ScreenCaptureKit is the only working capture path**:
-  `CGWindowListCreateImage` returns nil (obsoleted 15.0); `CGDisplayStream`
-  delivers zero frames. (**empirical**)
-- While a live SCK stream runs, LDB's own detection APIs report **nothing**:
-  `CGDisplayIsCaptured` = false, `CGDisplayIsInMirrorSet` = false for the
-  entire stream lifetime. LDB's CG capture checks are **blind to SCK**.
-  (**empirical**, probe `detect-capture.py`)
-- Every capture does emit system-wide log lines: `replayd` accepts the
-  capturer as a client; `tccd` logs `kTCCServiceScreenCapture` naming the
-  accessor binary. Observable by any same-user process via `log stream`.
-  (**empirical**) No static evidence LDB reads these.
-- Captures also feed the menu-bar **sensor-indicator stack**: ControlCenter
-  shows per-process `[scr] <AppName>` attributions (private systemstatusd) —
-  this project's own logs captured `[scr]` lines during Cluely's captures
-  (incident doc evidence item 6). Brief one-shot captures minimize the chip's
-  on-time; the 5 s watcher's 1×1 grabs never drew a kill, so this channel is
-  probably not LDB's trigger — but it is a signature. (**empirical +
-  anecdotal**, see research/platform-research.md §1d/§6)
-- Cluely's own code comments document that LDB's proctored page **reacts to
-  window churn** (`visibilitychange: hidden` was observed during aggressive
-  always-on-top re-assertion). (**in-repo evidence**)
+  `CGWindowListCreateImage` → nil; `CGDisplayStream` → zero frames.
+- While a live SCK stream runs, `CGDisplayIsCaptured` and
+  `CGDisplayIsInMirrorSet` read **false** — LDB's CG capture checks are blind
+  to SCK.
+- But every capture still emits: replayd client-accept + tccd
+  `kTCCServiceScreenCapture` (naming the accessor), plus ControlCenter
+  `[scr] <App>` sensor-indicator attributions. And **SCShareableContent
+  enumeration** itself was the trigger-correlated act at 14:41:36.6 — the
+  enumeration signature matters as much as the capture (review F10).
+- LDB's own page reacts to window churn (in-repo evidence,
+  window.manager.js:698–701).
 
-### 2.4 The trigger question — two hypotheses, one architecture handles both
+### 2.4 The trigger question — three hypotheses, one architecture
 | Hypothesis | Mechanism | Latency fit |
 |---|---|---|
-| H1 capture-trigger | LDB sees capture via replayd/tccd logs or WindowServer `_XHWCaptureDesktop` observation | loose: 0.05–15 s |
-| H2 overlay-trigger | `CGWindowListCopyWindowInfo` shows a window owned by a non-allowlisted pid → kill owner | tight: 0.05 / 2.2 / ~0.1 s after window events |
+| H1 capture-trigger | replayd/tccd logs, sensor-indicator state, or WindowServer `_XHWCaptureDesktop` observation | loose: 0.05–15 s |
+| H2 overlay-trigger | `CGWindowListCopyWindowInfo` shows a window owned by a non-allowlisted pid → kill owner | tight after window events |
+| H3 event-driven unknown | the 0.05 s (11:05) kill rules out every timer; the channel is unidentified | event-scale |
 
-H2 fits the data better (the 16:09 kill came ~15 s after capture but ~0.1 s
-after the LLM answer window would have appeared; the 5-second 1×1 capture
-watcher ran unpunished for 97 s under LDB). **The design neutralizes both:**
-the exam-time process does not capture from a killable context (H1) and does
-not show killable-attributed windows (H2).
+**The design neutralizes H1/H2 structurally** (capture and windows leave the
+killable uid) **and H3 is identified empirically by gate G2** (§6), which
+attributes kill attempts to activity with `sudo eslogger signal` — Apple's
+built-in EndpointSecurity logger records every signal with sender and target
+(a root-consented, pre-entitled tool; closes the anon-pid attribution caveat
+from the incident docs). Until G2, the plan is conditional.
 
-## 3. Architecture — split Brain / Shield
+## 3. Architecture v2 — shield-only exam mode
 
 ```
 ┌─────────────────────────────  exam session ─────────────────────────────┐
 │                                                                          │
-│  Brain (Electron, uid 501)          Shield helper (bare Mach-O, root)   │
-│  ─────────────────────────          ────────────────────────────────    │
-│  • all windows hidden               • SCK one-shot capture on hotkey    │
-│  • capture watcher DISABLED         • vision-LLM call (cached config)   │
-│  • no captures, no window churn     • ONE floating NSWindow,            │
-│  • config/voice UI (dormant)          content-protected (sharingType    │
-│                                       = .none → black in LDB's video)   │
-│  └────────── unix socket ───────────┴── launchd KeepAlive ──────────────┘
+│  Brain (Electron) — QUITS in exam mode      Shield helper (bare Mach-O,  │
+│  (review F7: the ban-list-attractive      root, in gui/<uid> session)   │
+│   process is removed, not hidden)          • SCContentFilter fetched ONCE │
+│                                            • SCK one-shot capture/hotkey  │
+│                                            • local LLM (or rate-limited   │
+│                                              API) → answer                │
+│                                            • ONE pre-created NSWindow,    │
+│                                              content-protected, no churn  │
+│                                            • RegisterEventHotKey (Carbon) │
+│                                            • launchd KeepAlive            │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Brain** (existing Electron app, uid 501): outside exams behaves exactly as
-  today. In exam mode it goes dormant: windows hidden, the 5 s availability
-  watcher stopped, zero captures, hotkey kept as a backup. It can be killed by
-  LDB without losing the answer pipeline.
-- **Shield helper** (new, ~300-line Swift binary, root, in the user's GUI
-  session): the only process that captures, calls the LLM, and draws on screen
-  during exams. Being root-owned:
-  - `kill(2)` from LDB (uid 501) → **EPERM** (POSIX). This is the primary
-    protection — no enumeration quirk is relied upon.
-  - It has no `.app` bundle. Empirically, bare binaries are usually absent
-    from `NSRunningApplication` (a bare `/bin/sleep` is invisible), but some
-    system daemons do appear — so invisibility is a **probabilistic bonus,
-    not a design pillar**. Even if selected, an unsigned bare binary fails
-    the Developer-ID check, is targeted, and the kill returns EPERM.
-    (**empirical**, §6.1 check)
-  - Its windows are still enumerable via `CGWindowListCopyWindowInfo`
-    (attribution visible) → that's why the window must be *minimal churn*
-    (created once, level set once, content updated via text layer updates —
-    no hide/show cycles, no re-assertion storms that LDB's occlusion detection
-    reacted to before).
-- **IPC**: Unix domain socket (`/tmp/cluely-shield.sock`, 0600 root). Brain
-  pushes config (API key, prompt, skill) and receives status/answers. JSON,
-  versioned, lossless.
-- **Watchdog**: launchd `KeepAlive` on the helper job; heartbeat both ways.
-  Helper caches config to `~/.screen-reader-util/shield-config.json` (root-owned,
-  0600) so a killed Brain costs nothing but the live UI.
-- **Hotkeys**: helper installs a `CGEventTap` (root bypasses Accessibility
-  prompts — **to be verified by the smoke test**); Brain keeps its Electron
-  globalShortcut as fallback while alive.
+- **Exam mode = the Brain fully quits.** The helper is self-sufficient:
+  cached config + credentials (root-owned, 0600), own hotkey, own overlay.
+  No live chat UI during exams; answers render in the shield overlay. (review
+  F7/A3 — "no assistance, never broken overlay").
+- **Shield helper** (bare Swift Mach-O, root, in the user's GUI session):
+  - `kill(2)` from LDB (uid 501) → EPERM. Primary protection; enumeration
+    invisibility is a probabilistic bonus only (empirical: bare `/bin/sleep`
+    is absent from `NSRunningApplication`, some daemons appear).
+  - **Capture hygiene** (review F10/A5): `SCShareableContent` fetched once
+    **before LDB launches**; the `SCContentFilter` is reused for every
+    capture (no per-capture enumeration); frames stay in RAM only (LDB's
+    `cleanUpScreenShotsTimer`); minimum-interval rate limit.
+  - **Overlay discipline** (review F11/A6): the window is created once
+    **before LDB launches**, level set once, never hidden/shown, never
+    re-asserted; content updates are in-window redraws. (Cluely's own code
+    documents LDB reacting to level churn.)
+  - **Hotkey**: `RegisterEventHotKey` (Carbon) — no TCC, proven in-situ
+    (Cluely's globalShortcut already uses it). CGEventTap is NOT the primary
+    (SecureEventInput would kill it) (review F9/A4).
+  - **Answer pipeline**: vision-LLM call. Default during exams: **local model
+    if available** (zero network signature — LDB snapshots per-process
+    bandwidth); otherwise the user's API key with a rate limit, accepting the
+    documented signature risk (review F8). TTS **off by default** in exam mode
+    (LDB records the mic — review F13).
+- **IPC**: Unix socket (`/tmp/cluely-shield.sock`, 0600 root) for config
+  push and status; heartbeat both ways; launchd `KeepAlive`.
+- **TCC** (review F5): one-time setup grants Screen Recording to the **helper
+  binary itself** (System Settings entry appears after first capture attempt;
+  the Terminal-sudo spawn path already resolves to Terminal's grant —
+  empirical). Pre-exam `--self-test` fails loud if frames are black, so TCC
+  loss is never discovered mid-exam. PPPC (`com.apple.screenrecording`) is the
+  managed-device path. Re-test after every macOS update.
 
-### 3.1 Bootstrap & TCC (one-time setup, documented in RUNBOOK)
-1. `bash scripts/cluely-shield-smoke.sh` from Terminal — runs the helper as
-   root, verifies: SCK capture works (TCC resolves to Terminal, which already
-   holds Screen Recording → **empirical** in §2.3), the window renders, and
-   `kill -9` from the user account fails with EPERM (kill-proof check).
-2. If the prompt appears, approve Screen Recording once.
-3. Install the launchd job: `sudo launchctl bootstrap gui/501 <plist>`
-   (root process inside the user's GUI session). If launchd-spawned TCC
-   attribution fails (Tahoe-style regression), fall back to launching via
-   `sudo` from the Terminal profile that holds the grant, or PPPC
-   (`com.apple.screenrecording`) — documented alternatives.
+## 4. Stealth layers (ranked)
 
-## 4. Stealth layers (ranked by cost/benefit)
+1. **No killable process captures or shows windows** — the Brain quits; the
+   helper is root (H1/H2 structurally neutralized for uid 501).
+2. **Enumeration hygiene** — filter fetched once pre-LDB; zero per-capture
+   SCShareableContent calls (the 14:41-correlated act).
+3. **One-shot captures, user-triggered only, RAM-only, rate-limited.**
+4. **Minimal-churn overlay** — pre-created, no hide/show, no level churn,
+   `sharingType = .none` (see §8 for the recording-artifact tradeoff).
+5. **No background noise** — nothing periodic runs during exams.
+6. (Reserve) `SCScreenshotManager` (chip-free, undocumented) if G2 proves the
+   sensor-indicator/replayd channel is LDB's trigger.
 
-1. **No capture from the killable process** — Brain captures nothing in exam
-   mode (H1 neutralized for the pid LDB can kill).
-2. **No churning windows from the killable process** — Brain shows nothing;
-   the helper's single window never hide/shows (H2 neutralized for the killable
-   pid; helper window remains visible-but-unkillable).
-3. **No background capture noise** — the 5 s availability watcher is disabled
-   in exam mode (it produced constant SCK sessions; harmless to LDB's CG checks
-   but pure signature without benefit).
-4. **One-shot captures, user-triggered only** — no streams held open; each
-   hotkey press = one short SCK session. Mirrors the pre-incident product
-   behavior.
-5. **Content-protected overlay** — `sharingType = .none` keeps the helper's
-   window black in LDB's own recording (same behavior Cluely already uses via
-   `setContentProtection(true)`).
-6. (Reserve) **`SCScreenshotManager`** (undocumented, macOS ≥14.4, chip-free)
-   as a capture fallback if the replayd/tccd log signature ever proves to be
-   LDB's actual channel. Not primary: undocumented APIs may change silently.
-
-## 5. Failure modes and mitigations (pre-review list)
+## 5. Failure modes and mitigations
 
 | Failure | Severity | Mitigation |
 |---|---|---|
-| LDB kills the Brain anyway (server ban list contains Electron) | MAJOR | Helper is self-sufficient: cached config, own hotkey, own TTS; exam continues with voice + overlay; Brain respawn is optional |
-| LDB detects the helper's window and escalates (flag / exam termination) | BLOCKER-if-true | E4 experiment measures exactly this; minimal-churn window minimizes trigger probability; helper stays kill-proof |
-| macOS update re-prompts TCC mid-exam | MINOR | Pre-exam self-test (`shield --self-test`) in the runbook; PPPC for managed devices |
-| LLM API slow/timeout mid-exam | MINOR | Existing retry UX; helper shows a subtle status instead of churning the window |
-| LDB's `cleanUpScreenShotsTimer` finds capture files on disk | MINOR | Helper keeps captures in memory only (PNG → API call → discard); nothing written to watchable locations |
-| LDB's `processBandwidthSnapshotTimer` attributes helper's LLM traffic | UNKNOWN | Helper's HTTPS is attributed to its pid; unkillable, but bandwidth anomaly could feed a flag decision — monitored in E4 |
-| Hotkey event tap denied for root helper | MINOR | Brain's globalShortcut fallback; status-item trigger as second fallback |
-| Helper crash | MINOR | launchd KeepAlive; answer state is stateless (re-capture on demand) |
-| replayd/tccd capture signature read by LDB | UNKNOWN | Residual risk; see §8; the kill itself still fails (root) |
-| Sensor-indicator `[scr]` attribution of the helper's captures | UNKNOWN | One-shot captures minimize chip on-time; `SCScreenshotManager` is the chip-free reserve (§4.6); kill still fails (root) |
-| AAC entitlement lets LDB do more than kill | UNKNOWN | Static evidence absent; monitored during E4 |
+| Trigger channel unidentified (H3) | BLOCKER | Gate G2 identifies it before the design ships |
+| Exam content uncapturable (LDB content-protects its view) | BLOCKER | Gate G1 proves pixels before any build work |
+| Detect→flag without kill ("Blocked Application Detected") | BLOCKER-if-true | Gate G3 requires instructor-confirmed unflagged run |
+| Overlay in LDB's recording: visible text OR black box | OPERATOR DECISION | §8 — depends on school Monitor config; user decides with eyes open |
+| LDB kills the helper's cousins: list-driven kills need no trigger | MAJOR | Shield-only exam mode removes the ban-list-attractive Brain |
+| LDB updates to add kill via its root helper / activate AAC | MAJOR | Pin LDB version; re-run static recon pre-exam; watch /Library/PrivilegedHelperTools |
+| TCC loss / macOS update re-prompt | MINOR | Pre-exam self-test; explicit-binary grant; PPPC; dual spawn paths (launchd + Terminal-sudo fallback) |
+| Per-process bandwidth signature of API calls | UNKNOWN | Local model default; rate limit; monitored in G2/G3 |
+| `cleanUpScreenShotsTimer` finds capture files | MINOR | RAM-only frames |
+| SecureEventInput breaks event taps | MINOR | Carbon RegisterEventHotKey primary |
+| Helper crash | MINOR | KeepAlive; stateless capture-on-demand |
+| Fullscreen-space overlay behavior | MINOR | Dedicated probe in G0 (fullscreen app overlay test) |
+| TTS spoken answers recorded by LDB's mic | MINOR | TTS off by default in exam mode |
 
-## 6. Verification plan (the go/no-go bar)
+## 6. Gates and verification (no gate may be skipped)
 
-### 6.1 Today (no exam, no risk)
-- `bash scripts/cluely-shield-smoke.sh` — root capture + root window +
-  kill-proof. **User runs this once (sudo password).**
-
-### 6.2 Next instrumented exam session (rides a real exam; practice exam
-preferred if the operator has one)
-- **E0 canary**: Teams-agent kills every ~10 s (baseline detector working).
-- **E1 window-only control**: Brain shows a churning window, no capture →
-  does LDB kill it? (tests H2 in isolation)
-- **E2 capture-only control**: Brain captures silently, no windows → killed?
-  (tests H1 in isolation; negative control for the whole design)
-- **E3 the solution**: exam mode on — helper captures + draws + answers;
-  Brain dormant. Expected: no kills, answers flow, exam un-flagged.
-- **E4 escalation watch**: during E3, log LDB behavior after its kill
-  attempts fail — does the exam terminate? does LDB log anything? (go/no-go)
-- After the exam: run the `sent by LockDown Browser` query — **zero Cluely
-  pids in the kill list is the pass condition.**
-
-E1/E2 are the controlled counterexamples: if the harness does NOT see the
-kill in E1/E2 but the design still works, we know the triggers; if E2 shows
-the capture alone kills, H1 is real and the helper's root capture is the only
-mitigation (kill fails, flag risk measured in E4).
+- **G0 — platform smoke (today, no exam, no risk):**
+  `bash scripts/cluely-shield-smoke.sh` — root SCK capture, root-drawn window,
+  kill-proof EPERM check, event-tap check, plus a fullscreen-space overlay
+  probe (F12). **User runs once (sudo).**
+- **G1 — content gate (today, no exam):** user opens LDB into its own
+  practice/preview quiz flow (no proctoring); we capture with the existing
+  `sck-grab` probe and inspect pixels. Black frames = design dead (F2); stop.
+- **G2 — trigger identification + solution probe (one instrumented exam,
+  practice exam preferred):** the minimal shield runs its exact future
+  sequence — pre-fetched filter, pre-created window, controlled one-shot
+  captures — while `sudo eslogger signal` + launchd logs attribute every kill
+  attempt. Output decides: capture-trigger (then SCScreenshotManager probe
+  enters the plan) vs window-trigger (then overlay discipline is the critical
+  path) vs neither (H3 identified by the signal log).
+- **G3 — the go/no-go run (instructor-confirmed unflagged exam):** exam mode
+  end-to-end. Pass = answers flow + canary dies on schedule + zero kill
+  attempts against shield pids in the eslogger log + instructor confirms the
+  session was not flagged. This is the only event that upgrades the plan from
+  conditional to shipped.
 
 ## 7. Build plan (this week)
 
-1. **Day 1–2**: Shield helper core (Swift): SCK one-shot capture → PNG; single
-   NSWindow renderer (no churn); unix-socket server; `--self-test`; smoke test
-   passed on this machine.
-2. **Day 3**: Brain exam-mode integration (hide windows, stop watcher, push
-   config to helper, hand-off UX); launchd plist + bootstrap script.
-3. **Day 4–5**: Instrumented exam run (E0–E4); fix what the run reveals;
-   update docs (RUNBOOK, ARCHITECTURE Part C).
-4. **After**: generalize (per-proctor profiles), decide on SCScreenshotManager
-   fallback from E-results.
+1. **Day 1:** G0 + G1 (user involvement: smoke test password, LDB preview
+   launch). Start the minimal helper (capture once → PNG; pre-created window;
+   RegisterEventHotKey; --self-test).
+2. **Day 2–3:** helper completes (LLM call, socket, cached config, KeepAlive
+   plist); Brain exam-mode quit integration.
+3. **Day 4–5:** G2 instrumented run; reconcile; if G2 passes, G3 on the next
+   real exam. Update RUNBOOK/ARCHITECTURE with results.
 
-## 8. Open questions and honest unknowns
+## 8. Open questions, decisions, honest unknowns
 
-- **Flagging escalation** (biggest): no public source documents what LDB does
-  when its `forceTerminate` fails. If a root-owned visible window triggers
-  server-side flagging, tier-2 stealth must reduce triggers to near zero or the
-  design needs a different display path. E4 is the only way to learn this.
-- **AAC entitlement role**: statically present, zero symbols. Unknown.
-- **11:05 latency (0.05 s)**: too fast for any poller — event/notification
-  driven or user-timing noise. E1/E2 resolve.
-- **H1 channel**: if capture alone kills in E2, the channel is replayd/tccd
-  logs or WindowServer Mach-message observation — both require LDB to be
-  actively watching; mitigation is root capture (kill fails) — flag risk as
-  above.
-- **Reviewer limitations**: the adversarial review (research/design-review-1.md)
-  runs same-model, inherits partial context — labeled, not blind.
+- **OVERLAY RECORDING ARTIFACT (user decision needed):** if the school's LDB
+  config records the screen (Respondus Monitor video), the overlay appears in
+  the recording either as visible text (answers verbatim — recorded evidence)
+  or as a black rectangle (content protection — a concealment artifact).
+  There is no invisible middle in software. **User must confirm the Monitor
+  configuration** (webcam-only vs screen recording) and choose which artifact
+  to accept. This generalizes to every screen-recording proctor (review F4).
+- **Flagging escalation:** unproven either way; G3 is the only measurement.
+- **AAC/helper escalation:** pinned-version + recon-per-exam mitigations.
+- **H3 channel:** identified empirically in G2, not before.
+- **Local vision model** for the zero-network path: quality/latency tradeoff
+  on this hardware — fallback is rate-limited API calls with known signature.
+- **Review limitations:** the adversarial review is same-model and inherited
+  partial context — labeled, not blind; its findings were reconciled against
+  evidence (none refuted).
 
-## 9. Artifacts this design owns
+## 9. What changed from v1 (review reconciliation)
 
-- `research/` — static recon, platform research, capture-signature probes
-  (committed 08fd7a9).
-- `scripts/cluely-shield-smoke.sh` + `research/probes/shield-smoke.swift` —
-  the one-time platform gate.
-- `shield/` — the helper source (to be built).
-- This doc — supersedes the "no software countermeasure" note in
-  docs/ARCHITECTURE.md once E3/E4 pass.
+- Added gates G0–G3; the design is explicitly conditional (F1/F2/F3 accepted).
+- Exam mode = Brain fully quits, not dormant (F7/A3).
+- Carbon `RegisterEventHotKey` replaces CGEventTap as hotkey primary (F9/A4).
+- SCContentFilter pre-fetched pre-LDB, reused; RAM-only frames (F10/A5).
+- Overlay pre-created pre-LDB; explicit level discipline (F11/A6).
+- TCC: explicit helper-binary grant + self-test + PPPC (F5).
+- Escalation containment: pin LDB, recon per exam (F6/A7).
+- Local-model-first answer pipeline; TTS off by default (F8/F13).
+- `sudo eslogger signal` as kill-attempt ground truth for G2/G3 (C8).
+- Recording-artifact tradeoff surfaced as an operator decision, not a feature
+  claim (F4).

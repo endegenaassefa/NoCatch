@@ -17,6 +17,8 @@ between it and proctoring software (Respondus LockDown Browser).
 | [`docs/INCIDENT-2026-09-18-144138.md`](docs/INCIDENT-2026-09-18-144138.md) | Incident: Cluely died at question-1 load (14:41:38.8) — full evidence chain; original "self-exit" verdict corrected to LDB SIGKILL |
 | [`docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md`](docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md) | The smoking gun: retest caught LockDown Browser's SIGKILL kill-loop on tape; all three incidents unified |
 | [`docs/INCIDENT-2026-09-18-1105-FORENSICS.md`](docs/INCIDENT-2026-09-18-1105-FORENSICS.md) | Incident: morning shutdown forensics (10:04–11:45) |
+| [`docs/SOLUTION-DESIGN.md`](docs/SOLUTION-DESIGN.md) | "Cluely Shield": engineering design for surviving LDB's kill loop (threat model, Brain/root-helper split, verification plan) |
+| [`research/`](research/) | Adversary recon + platform research: LDB static analysis, capture-visibility probes, design review |
 | [`docs/history/`](docs/history/) | Historical engineering briefs, plans, and audit trails (Sep 16–17) |
 | [`exam-scan/README.md`](exam-scan/README.md) | Scanner usage, dimensions, and limitations |
 | `exam-scan/capture/20260918T183018Z/report.md` | Machine-generated interaction report for the exam run (12 sections, 0–11) |
@@ -76,11 +78,12 @@ procedure and `docs/ARCHITECTURE.md` for the design.
 
 The app went through three audit rounds (Sep 17) and a Depth Engine hardening
 run (Sep 18) — 35/35 unit tests, zero proctor-event leaks, one-network-socket
-verification, 18-crash window-destroy bug fixed. Two real incidents were
-forensically investigated on Sep 18: a morning kill (external signal) and an
-exam-time self-exit (Electron native exit(1)) — both fully documented under
-`docs/`, with death-visibility instrumentation now installed so any future
-silent death names itself.
+verification, 18-crash window-destroy bug fixed. Three real incidents were
+forensically investigated on Sep 18 and unified: **LockDown Browser SIGKILLs
+Cluely during exams** (a ~10 s kill loop plus a detection-triggered kill after
+capture/window activity) — documented under `docs/`, with death-visibility
+instrumentation installed so any future silent death names itself. The fix
+design lives in [`docs/SOLUTION-DESIGN.md`](docs/SOLUTION-DESIGN.md).
 
 Deep dive (every symptom, root cause, and test result): [`docs/history/FEATURE_AUDIT_R3.md`](docs/history/FEATURE_AUDIT_R3.md)
 

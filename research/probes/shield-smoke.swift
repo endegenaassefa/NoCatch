@@ -12,6 +12,24 @@ func out(_ s: String) { print(s); fflush(stdout) }
 
 out("SMOKE_PID \(getpid()) uid=\(getuid()) euid=\(geteuid())")
 
+// --- D) event tap as root (hotkey path, without Accessibility TCC?) ---------
+let tap = CGEvent.tapCreate(
+    tap: .cgSessionEventTap,
+    place: .headInsertEventTap,
+    options: .defaultTap,
+    eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+    callback: { _, _, _, _ in nil },
+    userInfo: nil
+)
+if let tap = tap {
+    out("EVENT_TAP_OK")
+    let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+    CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+    CGEvent.tapEnable(tap: tap, enable: true)
+} else {
+    out("EVENT_TAP_FAILED (root did not bypass Accessibility TCC — hotkey fallback needed)")
+}
+
 // --- B) root-drawn window on the user's desktop ---------------------------
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

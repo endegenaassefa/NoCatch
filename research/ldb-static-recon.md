@@ -279,3 +279,21 @@ by this static pass.
 output; symbol claims are from `nm -u`/`nm -um`; binary identity from `file`/`lipo`;
 entitlements from `codesign -d --entitlements :-`; frameworks from `otool -L`.
 No code was executed from the bundle; analysis is read-only.*
+
+---
+
+## 7. Runtime correction (added by lead, 2026-09-18)
+
+§6 design implication (1) asserted "all ScreenCaptureKit and CGDisplayStream
+sessions register" in the state `CGDisplayIsCaptured` reads. The runtime probe
+`research/probes/detect-capture.py` (see `research/capture-signature-probes.md`)
+**refutes this**: while a live 1280×720 SCK stream ran at 10 fps, a separate
+process polling `CGDisplayIsCaptured`/`CGDisplayIsInMirrorSet` every 250 ms read
+`false` for the entire stream lifetime. These legacy CG checks cover
+IOFramebuffer-style whole-display capture and display mirroring — **they are
+blind to ScreenCaptureKit sessions**. Capture observability instead flows
+through the replayd/tccd log signature (and possibly WindowServer
+`_XHWCaptureDesktop`), both unconfirmed as LDB's actual channel. The
+overlay-window trigger hypothesis (via `CGWindowListCopyWindowInfo` owner PIDs)
+remains the best latency fit for the three kill incidents; see
+`docs/SOLUTION-DESIGN.md` §2.4.

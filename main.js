@@ -2,6 +2,26 @@ const path = require("path");
 const fs = require("fs");
 const { fileURLToPath } = require("url");
 const { app, BrowserWindow, globalShortcut, session, ipcMain } = require("electron");
+// Depth Engine de-0002 E9: pure mid-capture key routing (gate chain + refusal validator).
+const captureRouting = require("./src/capture-routing");
+
+// sendInputEvent keyCode strings for the editing gate; map gains PageUp/PageDown
+// (E8 pass-11 trace 15: "the map gains PageUp/PageDown").
+const SEND_KEY_MAP = {
+  48: "Tab", 51: "Backspace", 115: "Home", 116: "PageUp",
+  117: "Delete", 119: "End", 121: "PageDown",
+  123: "Left", 124: "Right", 125: "Down", 126: "Up",
+};
+const NAV_KEYS = { 123: "ArrowLeft", 124: "ArrowRight", 125: "ArrowDown", 126: "ArrowUp" };
+
+function sendModifiersFromFlags(flags) {
+  const mods = [];
+  if (flags & captureRouting.FLAG_COMMAND) mods.push("command");
+  if (flags & captureRouting.FLAG_SHIFT) mods.push("shift");
+  if (flags & captureRouting.FLAG_OPTION) mods.push("option");
+  if (flags & captureRouting.FLAG_CONTROL) mods.push("control");
+  return mods;
+}
 
 // ── Resolve a stable .env location ──
 // In packaged builds process.cwd() is unstable and frequently read-only
@@ -187,6 +207,13 @@ class ApplicationController {
   _captureHelper = null;
   _captureTarget = null; // 'chat' | 'settings' | 'onboarding'
   _captureHotkey = null;
+  _paletteOpen = false;
+  _captureReady = false;
+  _captureStartId = 0;
+  _pendingTimer = null;
+  _hotkeyUnregisteredForCapture = false;
+  _beepRiskEvents = 0;
+  _hoBHandlers = null; // render-process-gone / did-finish-load pair (Q077(5))
 
   getCaptureHotkey() {
     return String(process.env.CAPTURE_MODE_HOTKEY || "CommandOrControl+Shift+Space").trim();
@@ -246,16 +273,79 @@ class ApplicationController {
     if (!targetWindow || targetWindow.isDestroyed()) {
       this._captureTarget = "chat";
     }
-    windowManager.switchToWindow(this._captureTarget);
+    windowManager.showWindow(this._captureTarget);
+    // Re-fetch after the fallback: targetWindow above may be stale/destroyed.
+    const captureWindow = windowManager.getWindow(this._captureTarget);
 
     try {
       const { spawn } = require("child_process");
       this._captureHelper = spawn(helperPath, [], { stdio: ["ignore", "pipe", "pipe"] });
       this._captureMode = true;
+      this._captureReady = false;
+      this._paletteOpen = this._captureTarget === "chat"; // Q058: palette only for the chat target
+
+      // Q051 pending gate: identity-keyed 1s timeout until EVENT_TAP_READY.
+      const startId = ++this._captureStartId;
+      if (this._pendingTimer) clearTimeout(this._pendingTimer);
+      this._pendingTimer = setTimeout(() => {
+        if (startId === this._captureStartId && this._captureMode && !this._captureReady) {
+          logger.warn("Capture helper did not report READY within 1s — stopping (Q051)");
+          this.stopCaptureMode();
+          windowManager.broadcastToAllWindows("capture-mode-error", {
+            message: "Capture helper did not start in time. Check Input Monitoring permission, then retry.",
+          });
+        }
+      }, 1000);
+
+      // Q080 fold: the share GUARD flag (refuses llm-panel/settings/onboarding
+      // shows — guards only, NOT the hide-all screen-share flow) + the A5
+      // session-scoped geometry freeze (keyed on capture-active; boundary named L-0067).
+      windowManager.setScreenBeingShared(true);
+      windowManager.setGeometryFrozen(true);
+
+      // A2 pin: the capture hotkey is unregistered during capture — the tap is
+      // the only key path. Re-registered after helper exit + restoration (Q079(4)).
+      if (this._captureHotkey && globalShortcut.isRegistered(this._captureHotkey)) {
+        globalShortcut.unregister(this._captureHotkey);
+        this._hotkeyUnregisteredForCapture = true;
+      }
+
+      // HOLE B (Q077(5)): renderer gone → stop fail-visible; reload → re-broadcast.
+      const targetWc = captureWindow.webContents;
+      const onGone = () => {
+        if (this._captureMode) {
+          logger.warn("Renderer process gone mid-capture — stopping capture (Q077(5))");
+          this.stopCaptureMode();
+          windowManager.broadcastToAllWindows("capture-mode-error", {
+            message: "The chat window crashed — capture stopped.",
+          });
+        }
+      };
+      const onLoaded = () => {
+        if (this._captureMode) {
+          windowManager.broadcastToAllWindows("capture-mode-changed", {
+            active: true, target: this._captureTarget, paletteOpen: this._paletteOpen,
+          });
+        }
+      };
+      targetWc.on("render-process-gone", onGone);
+      targetWc.on("did-finish-load", onLoaded);
+      this._hoBHandlers = { wc: targetWc, onGone, onLoaded };
 
       let stderrBuf = "";
       this._captureHelper.stderr.on("data", (chunk) => {
         stderrBuf += String(chunk);
+        if (stderrBuf.includes("EVENT_TAP_READY")) {
+          this._captureReady = true;
+          if (this._pendingTimer) { clearTimeout(this._pendingTimer); this._pendingTimer = null; }
+          logger.info("Capture helper READY — routing armed");
+        }
+        if (stderrBuf.includes("EVENT_TAP_RESTORATION_POSTED")) {
+          logger.info("Helper posted modifier restoration (Q063(3))");
+        }
+        if (stderrBuf.includes("EVENT_TAP_ORPHANED")) {
+          logger.warn("Capture helper detected orphaned parent and exited (Q031 watchdog)");
+        }
         if (stderrBuf.includes("EVENT_TAP_CREATE_FAILED")) {
           logger.error("Event tap creation failed — Input Monitoring permission not granted");
           this.stopCaptureMode();
@@ -271,7 +361,18 @@ class ApplicationController {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
-            this.handleCapturedKey(JSON.parse(trimmed));
+            const evt = JSON.parse(trimmed);
+            if (evt && evt.t === "secure") {
+              // Q067: secure input detected mid-capture → stop fail-visible.
+              logger.warn("Secure input detected mid-capture — stopping (Q067)");
+              this._beepRiskEvents += 1;
+              this.stopCaptureMode();
+              windowManager.broadcastToAllWindows("capture-mode-error", {
+                message: "Secure input field detected — capture stopped.",
+              });
+              continue;
+            }
+            this.handleCapturedKey(evt);
           } catch (_) { /* skip malformed lines */ }
         }
       });
@@ -287,22 +388,45 @@ class ApplicationController {
             target: this._captureTarget,
           });
         }
+        // Q079(4) re-arm ordering: the helper posts the flagsChanged restoration
+        // BEFORE exiting; re-register the capture hotkey only now, after it is gone.
+        if (this._hotkeyUnregisteredForCapture) {
+          this._hotkeyUnregisteredForCapture = false;
+          this.registerCaptureHotkey();
+        }
       });
 
       windowManager.broadcastToAllWindows("capture-mode-changed", {
         active: true,
         target: this._captureTarget,
+        paletteOpen: this._paletteOpen,
       });
       logger.info("Keystroke capture mode ON", { target: this._captureTarget, hotkey: this.getCaptureHotkey() });
       return true;
     } catch (error) {
       logger.error("Failed to start capture helper", { error: error.message });
       this._captureMode = false;
+      this._paletteOpen = false;
+      windowManager.setScreenBeingShared(false);
+      windowManager.setGeometryFrozen(false);
       return false;
     }
   }
 
   stopCaptureMode() {
+    if (this._pendingTimer) { clearTimeout(this._pendingTimer); this._pendingTimer = null; }
+    this._captureStartId++; // invalidate any in-flight pending gate
+    this._captureReady = false;
+    this._paletteOpen = false;
+    windowManager.setScreenBeingShared(false);
+    windowManager.setGeometryFrozen(false);
+    if (this._hoBHandlers) {
+      try {
+        this._hoBHandlers.wc.removeListener("render-process-gone", this._hoBHandlers.onGone);
+        this._hoBHandlers.wc.removeListener("did-finish-load", this._hoBHandlers.onLoaded);
+      } catch (_) { /* window already gone */ }
+      this._hoBHandlers = null;
+    }
     if (!this._captureMode) {
       this._captureMode = false;
       this._captureHelper = null;
@@ -315,8 +439,11 @@ class ApplicationController {
     }
     this._captureHelper = null;
     this._captureMode = false;
-    windowManager.broadcastToAllWindows("capture-mode-changed", { active: false, target });
-    logger.info("Keystroke capture mode OFF", { target });
+    // The helper posts its modifier restoration (flagsChanged, cleared mask)
+    // in its SIGTERM path BEFORE exiting; the capture hotkey re-registers in
+    // the helper 'exit' handler — the Q079(4) re-arm ordering.
+    windowManager.broadcastToAllWindows("capture-mode-changed", { active: false, target, paletteOpen: false });
+    logger.info("Keystroke capture mode OFF", { target, beepRiskEvents: this._beepRiskEvents });
     return wasActive;
   }
 
@@ -332,12 +459,14 @@ class ApplicationController {
   /**
    * Route a swallowed key from the event tap into the capture-target window
    * via sendInputEvent (bypasses OS focus — the window is focusable:false).
-   * Keycode reference (macOS virtual keycodes):
-   *   36 Return · 48 Tab · 49 Space · 51 Delete/Backspace · 53 Escape
-   *   115 Home · 117 Forward Delete · 119 End · 123-126 arrows
+   * The disposition comes from the pure gate chain in src/capture-routing.js
+   * (Depth Engine de-0002 contract: family → exit-equality → drop → editing →
+   * palette → normal; L-0052..L-0067).
    */
   handleCapturedKey(keyEvent) {
     if (!this._captureMode || !keyEvent || keyEvent.t !== "down") return;
+    // Q051 pending gate: nothing routes until the helper reported READY.
+    if (!this._captureReady) return;
 
     const win = windowManager.getWindow(this._captureTarget);
     if (!win || win.isDestroyed()) {
@@ -350,47 +479,95 @@ class ApplicationController {
       return;
     }
 
-    const code = Number(keyEvent.code);
-    const char = String(keyEvent.char || "");
+    const action = captureRouting.routeCapturedKey(keyEvent, { paletteOpen: this._paletteOpen });
+    const code = Number(keyEvent.code) || 0;
+    const flags = Number(keyEvent.flags) || 0;
 
-    // Esc: cancel and exit capture mode without forwarding.
-    if (code === 53) {
-      this.stopCaptureMode();
+    switch (action.action) {
+      case "palette-toggle":
+        this._paletteOpen = !this._paletteOpen;
+        windowManager.broadcastToAllWindows("capture-mode-changed", {
+          active: true, target: this._captureTarget, paletteOpen: this._paletteOpen,
+        });
+        break;
+      case "skill-set":
+        this.applySkillFromChord(action.digit);
+        break;
+      case "exit-capture":
+        this.stopCaptureMode();
+        break;
+      case "palette-commit":
+        // Q077(1): commit selection + close palette + KEEP capture ON + refocus.
+        wc.send("palette-key", { key: "Enter" });
+        this._paletteOpen = false;
+        windowManager.broadcastToAllWindows("capture-mode-changed", {
+          active: true, target: this._captureTarget, paletteOpen: false,
+        });
+        break;
+      case "palette-nav":
+        wc.send("palette-key", { key: NAV_KEYS[code] || "ArrowDown" });
+        break;
+      case "palette-tab":
+        wc.send("palette-key", { key: "Tab" });
+        break;
+      case "palette-key":
+        // Q050/Q052: letters are gated from the draft while the palette is
+        // open — delivered on the separate palette-key channel instead.
+        wc.send("palette-key", { key: action.char });
+        break;
+      case "editing": {
+        const keyCode = SEND_KEY_MAP[code];
+        if (!keyCode) break;
+        const modifiers = sendModifiersFromFlags(flags);
+        wc.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+        wc.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+        break;
+      }
+      case "type":
+        wc.sendInputEvent({ type: "char", keyCode: action.char });
+        break;
+      case "send-exit":
+        // Q077(1): bare Enter, palette closed — forward-and-stop send gesture.
+        wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+        wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+        this.stopCaptureMode();
+        break;
+      case "drop":
+      case "consume-silent":
+      default:
+        // A7 audit counter: every consumed key that could otherwise have
+        // reached a responder chain (and raised NSBeep) is counted.
+        this._beepRiskEvents += 1;
+        break;
+    }
+  }
+
+  /**
+   * A3 chord switch: ⌃⌥⌘+digit → skill. The Q033-correct 4-step path.
+   */
+  applySkillFromChord(digit) {
+    const skills = ["behavioral", "dsa", "mcq", "ood", "programming", "system-design"];
+    this.applySkillByName(skills[Number(digit) - 1], { source: `chord-${digit}` });
+  }
+
+  /**
+   * Shared 4-step skill switch (Q033): activeSkill + sessionManager + .env
+   * persistence + broadcast. Used by the chord and the palette entry.
+   */
+  applySkillByName(skill, context = {}) {
+    if (!skill || typeof skill !== "string") {
+      logger.warn("applySkillByName: no skill", { context });
       return;
     }
-
-    // Enter: let the target handle it (chat sends, inputs commit), then exit.
-    if (code === 36) {
-      wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
-      wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
-      this.stopCaptureMode();
-      return;
+    this.activeSkill = skill;
+    try { sessionManager.setActiveSkill(skill); } catch (error) {
+      logger.warn("sessionManager.setActiveSkill failed", { error: error.message });
     }
-
-    const specialKeyMap = {
-      48: "Tab",
-      51: "Backspace",
-      115: "Home",
-      117: "Delete",
-      119: "End",
-      123: "Left",
-      124: "Right",
-      125: "Down",
-      126: "Up",
-    };
-    if (specialKeyMap[code]) {
-      wc.sendInputEvent({ type: "keyDown", keyCode: specialKeyMap[code] });
-      wc.sendInputEvent({ type: "keyUp", keyCode: specialKeyMap[code] });
-      return;
+    try { this.persistEnvUpdates({ ACTIVE_SKILL: skill }); } catch (error) {
+      logger.warn("Skill persist to .env failed", { error: error.message });
     }
-
-    // Printable characters (modifier effects already folded in by the helper).
-    if (char) {
-      wc.sendInputEvent({ type: "char", keyCode: char });
-      return;
-    }
-
-    // Anything else (unknown keys, modifier combos) is swallowed and dropped.
+    windowManager.broadcastToAllWindows("skill-changed", { skill });
+    logger.info("Skill set", { skill, ...context });
   }
 
   setupStealth() {
@@ -969,6 +1146,26 @@ class ApplicationController {
 
     ipcMain.on("toggle-recording", () => {
       this.toggleSpeechRecognition();
+    });
+
+    // ── de-0002 E9: capture palette channels ──
+    ipcMain.on("toggle-capture-mode", () => {
+      this.toggleCaptureMode();
+    });
+
+    ipcMain.on("palette-set-skill", (_event, data) => {
+      this.applySkillByName(data && data.skill);
+    });
+
+    ipcMain.on("hide-llm-response", () => {
+      windowManager.hideLLMResponse();
+    });
+
+    ipcMain.on("show-shortcuts-popover", () => {
+      const mainWin = windowManager.getWindow("main");
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send("toggle-shortcuts-popover");
+      }
     });
 
     ipcMain.on("toggle-interaction-mode", () => {
@@ -2145,25 +2342,34 @@ class ApplicationController {
       if (settings.captureHotkey && typeof settings.captureHotkey === "string") {
         const hotkey = settings.captureHotkey.trim();
         if (hotkey) {
-          envUpdates.CAPTURE_MODE_HOTKEY = hotkey;
-          // Re-register the capture hotkey live so the change applies
-          // without a restart.
-          try {
-            const { globalShortcut } = require("electron");
-            const oldHotkey = this._captureHotkey;
-            if (oldHotkey) globalShortcut.unregister(oldHotkey);
-            this._captureHotkey = hotkey;
-            const ok = globalShortcut.register(hotkey, () => this.toggleCaptureMode());
-            if (!ok) {
-              // Roll back to the previous hotkey if the new one is taken.
-              this._captureHotkey = oldHotkey;
-              if (oldHotkey) globalShortcut.register(oldHotkey, () => this.toggleCaptureMode());
-              logger.warn("Capture hotkey registration failed; kept previous", { hotkey });
-            } else {
-              logger.info("Capture hotkey updated", { hotkey });
+          // Q079(1): settings refuses any capture-hotkey binding whose chord has
+          // a pinned mid-capture role (family members, editing-class chords,
+          // bare Esc/Enter/Tab/arrows). The default exit chord stays legal.
+          const refusal = captureRouting.validateCaptureHotkey(hotkey);
+          if (refusal.refused) {
+            logger.warn("Capture hotkey refused by contract validation", { hotkey, reason: refusal.reason });
+            windowManager.broadcastToAllWindows("capture-hotkey-refused", { hotkey, reason: refusal.reason });
+          } else {
+            envUpdates.CAPTURE_MODE_HOTKEY = hotkey;
+            // Re-register the capture hotkey live so the change applies
+            // without a restart.
+            try {
+              const { globalShortcut } = require("electron");
+              const oldHotkey = this._captureHotkey;
+              if (oldHotkey) globalShortcut.unregister(oldHotkey);
+              this._captureHotkey = hotkey;
+              const ok = globalShortcut.register(hotkey, () => this.toggleCaptureMode());
+              if (!ok) {
+                // Roll back to the previous hotkey if the new one is taken.
+                this._captureHotkey = oldHotkey;
+                if (oldHotkey) globalShortcut.register(oldHotkey, () => this.toggleCaptureMode());
+                logger.warn("Capture hotkey registration failed; kept previous", { hotkey });
+              } else {
+                logger.info("Capture hotkey updated", { hotkey });
+              }
+            } catch (error) {
+              logger.warn("Failed to re-register capture hotkey", { error: error.message });
             }
-          } catch (error) {
-            logger.warn("Failed to re-register capture hotkey", { error: error.message });
           }
         }
       }

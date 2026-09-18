@@ -27,6 +27,7 @@
 
 import Cocoa
 import ApplicationServices
+import Carbon
 import Foundation
 
 // ─────────────────────────────────────────────────────────────────────
@@ -182,12 +183,39 @@ func emit(_ object: [String: Any]) {
 let keyDownMask = CGEventMask(1) << CGEventType.keyDown.rawValue
 let flagsChangedMask = CGEventMask(1) << CGEventType.flagsChanged.rawValue
 
+// Track the last-seen modifier mask so the stop-time restoration (Q063(3)/Q064:
+// flagsChanged-typed post carrying the cleared mask, posted BEFORE the tap
+// dies) can clear any modifiers whose releases were swallowed mid-capture.
+var lastFlags = CGEventFlags()
+var secureEmitted = false
+
+func postModifierRestoration() {
+    let mods: [CGEventFlags.Element] = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+    var cleared = lastFlags
+    for m in mods { cleared.remove(m) }
+    if cleared == lastFlags { return } // nothing held — no restoration needed
+    guard let ev = CGEvent(keyboardEventSource: nil, virtualKey: 56, keyDown: true) else { return }
+    ev.type = .flagsChanged
+    ev.flags = cleared
+    ev.post(tap: .cghidEventTap)
+    FileHandle.standardError.write("EVENT_TAP_RESTORATION_POSTED\n".data(using: .utf8)!)
+}
+
 guard let tap = CGEvent.tapCreate(
     tap: .cgSessionEventTap,
     place: .headInsertEventTap,
     options: .defaultTap,
     eventsOfInterest: keyDownMask | flagsChangedMask,
     callback: { (_ proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, _ refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? in
+        lastFlags = event.flags
+
+        // Secure-input probe (Q067): if the system enters secure input while
+        // capture runs, tell the parent once so it can stop fail-visible.
+        if !secureEmitted && IsSecureEventInputEnabled() {
+            secureEmitted = true
+            emit(["t": "secure"])
+        }
+
         // Swallow modifier-only events: the unicode string of the keyDown
         // already reflects the modifier state.
         if type == .flagsChanged {
@@ -210,7 +238,10 @@ guard let tap = CGEvent.tapCreate(
             ? String(utf16CodeUnits: units, count: actualLength)
             : ""
 
-        emit(["t": "down", "code": code, "char": chars])
+        // flags + repeat ride the line (L-0040 per-line flags pin; Q065
+        // repeat gates need the autorepeat bit).
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        emit(["t": "down", "code": code, "char": chars, "flags": event.flags.rawValue, "repeat": isRepeat])
         return nil // nil = swallow the event
     },
     userInfo: nil
@@ -228,5 +259,26 @@ CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
 FileHandle.standardError.write("EVENT_TAP_READY\n".data(using: .utf8)!)
 
-// Run until SIGTERM.
+// Stop control: SIGTERM sets a flag; the runloop timer performs the
+// restoration post + exit on the runloop (async-signal-safe). The same timer
+// is the Q031 watchdog: if the parent process is gone, self-exit so the tap
+// can never outlive the app.
+var stopRequested = false
+signal(SIGTERM) { _ in stopRequested = true }
+signal(SIGINT) { _ in stopRequested = true }
+
+let stopTimer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 0.1, 0.1, 0, 0) { _ in
+    if stopRequested {
+        postModifierRestoration()
+        exit(0)
+    }
+    if getppid() == 1 {
+        FileHandle.standardError.write("EVENT_TAP_ORPHANED\n".data(using: .utf8)!)
+        postModifierRestoration()
+        exit(0)
+    }
+}
+CFRunLoopAddTimer(CFRunLoopGetCurrent(), stopTimer, .commonModes)
+
+// Run until stop.
 CFRunLoopRun()

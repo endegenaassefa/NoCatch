@@ -16,6 +16,7 @@ class WindowManager {
     this.lastActiveSpace = null;
     this.screenCaptureAvailabilityWatcher = null;
     this.isScreenBeingShared = false;
+    this.geometryFrozen = false; // A5 session-scoped freeze (de-0002, keyed on capture-active — L-0067 boundary)
     this.wasVisibleBeforeSharing = false;
     this.screenCaptureStatus = {
       available: null,
@@ -766,6 +767,7 @@ class WindowManager {
 
   // New method to position bound windows (vertical column layout) - Always at top
   positionBoundWindows() {
+    if (this.geometryFrozen) return; // A5: no geometry mutation during capture
     const mainWindow = this.windows.get('main');
     const llmWindow = this.windows.get('llmResponse');
     
@@ -1054,6 +1056,31 @@ class WindowManager {
       this.isScreenBeingShared = true;
       this.wasVisibleBeforeSharing = this.isVisible;
       this.handleScreenSharingStarted();
+    }
+  }
+
+  /**
+   * de-0002 Q080 fold: set ONLY the share GUARD flag — the four visibility
+   * guards (llm panel / settings / onboarding shows) fire, but the hide-all
+   * screen-share flow does NOT run. Wired to capture mode in main.js.
+   */
+  setScreenBeingShared(value) {
+    if (this.isScreenBeingShared !== Boolean(value)) {
+      this.isScreenBeingShared = Boolean(value);
+      logger.info('Screen-share guard flag set from capture mode', { isScreenBeingShared: this.isScreenBeingShared });
+    }
+  }
+
+  /**
+   * de-0002 A5/Q076(6): the geometry freeze suppresses ALL window geometry
+   * mutation while a session is active (implemented keyed on capture-active;
+   * boundary named in L-0067). Gates positionBoundWindows / centerWindow /
+   * expandLLMWindow.
+   */
+  setGeometryFrozen(value) {
+    if (this.geometryFrozen !== Boolean(value)) {
+      this.geometryFrozen = Boolean(value);
+      logger.info('Geometry freeze toggled', { geometryFrozen: this.geometryFrozen });
     }
   }
 
@@ -1453,7 +1480,7 @@ class WindowManager {
 
   expandLLMWindow(contentMetrics = null) {
     const llmWindow = this.windows.get('llmResponse');
-    if (!llmWindow || this.isScreenBeingShared) return;
+    if (!llmWindow || this.isScreenBeingShared || this.geometryFrozen) return;
 
     const optimalSize = this.calculateOptimalWindowSize(contentMetrics);
     
@@ -1499,6 +1526,7 @@ class WindowManager {
   }
 
   centerWindow(window) {
+    if (this.geometryFrozen) return; // A5: no geometry mutation during capture
     const display = this.currentDisplay || screen.getPrimaryDisplay();
     const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
     const [windowWidth, windowHeight] = window.getSize();
@@ -1838,6 +1866,21 @@ class WindowManager {
     if (chatWindow && !chatWindow.isDestroyed()) {
       this.showOnCurrentDesktop(chatWindow);
       logger.debug('Chat window shown');
+    }
+  }
+
+  showWindow(windowType) {
+    // Unconditional show (no toggle) — used by keystroke-capture mode so the
+    // user can always see where their keystrokes are landing.
+    const targetWindow = this.windows.get(windowType);
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      // E9-S-001 fold: if the target is already visible, showing again would
+      // run the hide→showInactive dance (a visible flash mid-share). No-op.
+      if (targetWindow.isVisible()) {
+        return;
+      }
+      this.showOnCurrentDesktop(targetWindow);
+      logger.debug('Window shown for capture', { windowType });
     }
   }
 

@@ -1205,9 +1205,79 @@
 
         // Keystroke-capture mode UI: show a banner while capture is active
         // and focus the message input so injected characters land in it.
+        // de-0002 E9: banner now carries the palette state (Q075/Q076 pin),
+        // and the capture-bound 18-item palette is rendered here.
+        let paletteVisible = false;
+        let paletteIndex = 0;
+
+        // The 18-item capture-bound palette (Q077(7)) — commit handlers reuse
+        // existing app paths (Q071 tags: no new globals, no capture-time surface).
+        const PALETTE_ITEMS = [
+          { label: 'Open chat', run: () => window.electronAPI.switchToChat() },
+          { label: 'Stop capture', run: () => window.api.send('toggle-capture-mode') },
+          { label: 'Skill: Behavioral', run: () => window.api.send('palette-set-skill', { skill: 'behavioral' }) },
+          { label: 'Skill: DSA', run: () => window.api.send('palette-set-skill', { skill: 'dsa' }) },
+          { label: 'Skill: MCQ', run: () => window.api.send('palette-set-skill', { skill: 'mcq' }) },
+          { label: 'Skill: OOD', run: () => window.api.send('palette-set-skill', { skill: 'ood' }) },
+          { label: 'Skill: Programming', run: () => window.api.send('palette-set-skill', { skill: 'programming' }) },
+          { label: 'Skill: System Design', run: () => window.api.send('palette-set-skill', { skill: 'system-design' }) },
+          { label: 'Language: C++', run: () => window.api.send('save-settings', { codingLanguage: 'cpp' }) },
+          { label: 'Language: C', run: () => window.api.send('save-settings', { codingLanguage: 'c' }) },
+          { label: 'Language: Python', run: () => window.api.send('save-settings', { codingLanguage: 'python' }) },
+          { label: 'Language: Java', run: () => window.api.send('save-settings', { codingLanguage: 'java' }) },
+          { label: 'Language: JavaScript', run: () => window.api.send('save-settings', { codingLanguage: 'javascript' }) },
+          { label: 'OCR screenshot', run: () => window.electronAPI.takeScreenshot() },
+          { label: 'Screenshot', run: () => window.electronAPI.takeScreenshot() },
+          { label: 'Toggle speech', run: () => window.api.send('toggle-recording') },
+          { label: 'Shortcuts popover', run: () => window.api.send('show-shortcuts-popover') },
+          { label: 'Close answer window', run: () => window.api.send('hide-llm-response') },
+        ];
+
+        function renderPalette() {
+          let box = document.getElementById('capture-palette');
+          if (!paletteVisible) { if (box) box.remove(); return; }
+          if (!box) {
+            box = document.createElement('div');
+            box.id = 'capture-palette';
+            box.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);background:rgba(17,24,39,0.96);color:#e5e7eb;border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:6px;z-index:9998;max-height:60vh;overflow:auto;min-width:230px;box-shadow:0 10px 30px rgba(0,0,0,0.5);';
+            document.body.appendChild(box);
+          }
+          box.innerHTML = PALETTE_ITEMS.map((item, i) => {
+            const hl = i === paletteIndex
+              ? 'background:rgba(59,130,246,0.9);color:#fff;'
+              : 'background:transparent;color:#e5e7eb;';
+            return '<div data-palette-item="' + i + '" style="padding:6px 10px;border-radius:6px;font-size:13px;cursor:default;' + hl + '">' + item.label + '</div>';
+          }).join('');
+        }
+
+        function paletteNavigate(key) {
+          if (key === 'ArrowDown' || key === 'Down') { paletteIndex = (paletteIndex + 1) % PALETTE_ITEMS.length; renderPalette(); }
+          else if (key === 'ArrowUp' || key === 'Up') { paletteIndex = (paletteIndex - 1 + PALETTE_ITEMS.length) % PALETTE_ITEMS.length; renderPalette(); }
+          else if (key === 'Tab') { paletteIndex = (paletteIndex + 1) % PALETTE_ITEMS.length; renderPalette(); }
+          else if (key === 'Enter') {
+            const item = PALETTE_ITEMS[paletteIndex];
+            paletteVisible = false; renderPalette();
+            if (item) { try { item.run(); } catch (e) { console.warn('palette action failed', e); } }
+          } else if (key && key.length === 1) {
+            const lower = key.toLowerCase();
+            const idx = PALETTE_ITEMS.findIndex((it, i) => i > paletteIndex && it.label.toLowerCase().startsWith(lower));
+            const wrap = PALETTE_ITEMS.findIndex((it) => it.label.toLowerCase().startsWith(lower));
+            const next = idx >= 0 ? idx : wrap;
+            if (next >= 0) { paletteIndex = next; renderPalette(); }
+          }
+        }
+
+        if (whysperAPI.onPaletteKey) {
+          whysperAPI.onPaletteKey((event, data) => {
+            if (data && data.key) paletteNavigate(data.key);
+          });
+        }
+
         if (whysperAPI.onCaptureModeChanged) {
           whysperAPI.onCaptureModeChanged((event, data) => {
             const active = data && data.active;
+            paletteVisible = !!(active && data && data.paletteOpen);
+            if (paletteVisible) { paletteIndex = 0; renderPalette(); } else { renderPalette(); }
             let banner = document.getElementById('capture-mode-banner');
             if (active) {
               if (!banner) {
@@ -1216,7 +1286,9 @@
                 banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(59,130,246,0.95);color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;z-index:9999;pointer-events:none;';
                 document.body.appendChild(banner);
               }
-              banner.textContent = 'CAPTURING — Enter sends, Esc cancels';
+              banner.textContent = paletteVisible
+                ? 'CAPTURING — menu open · ↑↓ choose · Enter commits · Esc exits'
+                : 'CAPTURING — Enter sends, Esc exits';
               if (messageInput) messageInput.focus();
             } else if (banner) {
               banner.remove();

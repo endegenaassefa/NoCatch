@@ -126,6 +126,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMainWindowShown: (callback) => ipcRenderer.on('main-window-shown', callback),
   onCaptureModeChanged: (callback) => ipcRenderer.on('capture-mode-changed', callback),
   onCaptureModeError: (callback) => ipcRenderer.on('capture-mode-error', callback),
+  onPaletteKey: (callback) => ipcRenderer.on('palette-key', callback),
+  onCaptureHotkeyRefused: (callback) => ipcRenderer.on('capture-hotkey-refused', callback),
+  onToggleShortcutsPopover: (callback) => ipcRenderer.on('toggle-shortcuts-popover', callback),
   
   // Generic receive method
   receive: (channel, callback) => ipcRenderer.on(channel, callback),
@@ -144,7 +147,11 @@ contextBridge.exposeInMainWorld('api', {
             'toggle-interaction-mode',
             'update-skill',
             'window-loaded',
-            'input-target-focused'
+            'input-target-focused',
+            'toggle-capture-mode',
+            'palette-set-skill',
+            'hide-llm-response',
+            'show-shortcuts-popover'
         ];
         if (validChannels.includes(channel)) {
             ipcRenderer.send(channel, data);

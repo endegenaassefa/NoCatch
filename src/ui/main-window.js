@@ -380,6 +380,14 @@ class MainWindowUI {
 
         // Info button / shortcuts popover
         if (this.infoButton && this.shortcutsPopover) {
+            // de-0002 E9: palette "Shortcuts popover" entry toggles it
+            // without any cursor travel (Q071: reuses the existing handler).
+            if (window.electronAPI && window.electronAPI.onToggleShortcutsPopover) {
+                window.electronAPI.onToggleShortcutsPopover(() => {
+                    if (this.isInteractive) this.toggleShortcutsPopover();
+                });
+            }
+
             this.infoButton.addEventListener('click', (e) => {
                 if (!this.isInteractive) return;
                 e.stopPropagation();

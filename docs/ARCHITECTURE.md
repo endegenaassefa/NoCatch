@@ -69,7 +69,7 @@ during a proctored exam: an interaction forensics recorder, not a business app.
 | File | Role |
 |---|---|
 | `live-capture.sh` (647 lines) | Orchestrator. bash-3.2 portable (no assoc arrays, no `setsid`). Census + 16 stream collectors, sudo branch, detach mode, clean shutdown |
-| `analyze.py` (764 lines) | Merges streams → `report.md` + `merged-events.jsonl`; generation registry, coverage manifest, coincidence windows |
+| `analyze.py` (770 lines) | Merges streams → `report.md` + `merged-events.jsonl`; generation registry, coverage manifest, coincidence windows |
 | `dtrace/signals.d` | `proc:::signal-send / exec-success / exit` — **BLOCKED by SIP on this machine** (honest MISSING) |
 | `probe/secureinput.swift` | `IsSecureEventInputEnabled()` probe, compiled at capture start |
 | `probe/exit-hook-test.js` | Validation harness for Cluely's death-watch hooks |

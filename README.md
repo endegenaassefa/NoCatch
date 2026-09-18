@@ -18,7 +18,7 @@ between it and proctoring software (Respondus LockDown Browser).
 | [`docs/INCIDENT-2026-09-18-1105-FORENSICS.md`](docs/INCIDENT-2026-09-18-1105-FORENSICS.md) | Incident: morning shutdown forensics (10:04–11:45) |
 | [`docs/history/`](docs/history/) | Historical engineering briefs, plans, and audit trails (Sep 16–17) |
 | [`exam-scan/README.md`](exam-scan/README.md) | Scanner usage, dimensions, and limitations |
-| `exam-scan/capture/20260918T183018Z/report.md` | Machine-generated interaction report for the exam run (11 sections) |
+| `exam-scan/capture/20260918T183018Z/report.md` | Machine-generated interaction report for the exam run (12 sections, 0–11) |
 
 ---
 

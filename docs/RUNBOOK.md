@@ -64,3 +64,16 @@ ls -t ~/.screen-reader-util/logs/console-*.log | head -1
   `gzip` after each run if it re-bloats (follower EOF-tracking fix is pending).
 - Never commit `.env`, `capture.json(l)`, or anything under `exam-scan/capture/`
   — the `.gitignore` already covers them.
+
+## 6. Known adversary behavior (LDB — discovered 2026-09-18 16:09)
+- **LockDown Browser SIGKILLs non-approved apps during the whole exam.**
+  Verify per incident:
+  `log show --predicate 'eventMessage CONTAINS "sent by" AND eventMessage CONTAINS "LockDown"'`
+  (launchd records each kill with sender + victim; the Teams agent is a free canary).
+- Cluely screen-capture while LDB runs is the confirmed trigger
+  (detection→kill 0.05–15 s across all three incidents). Treat capture during
+  the exam as fatal until proven otherwise.
+- The 16:09:38.6 retest validated the recorder chain end-to-end: shim SIGKILL
+  line in the tee'd console log + `exit-status.txt` + death-watch silence
+  (correct for SIGKILL). **Always launch via `bash cluely-safe-start.sh`,
+  never bare `npm start`.**

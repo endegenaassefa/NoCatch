@@ -69,7 +69,7 @@ npm logs, zsh session files, and the incident reports in `docs/`.
 | 14:38:35 | LDB Microphone → **ALLOWED** | TCC verdict |
 | 14:37:50–14:42:45 | LDB frontmost continuously; SecureEventInput OFF the whole run (152 probes) | focus + secureinput streams |
 | 14:41:36.6 | Cluely's last act: SCK enumeration of LDB's fullscreen windows | unified log |
-| **14:41:38.84** | **Cluely self-exits with code 1** — all 7 processes gone; npm log records `exit 1`, no signal | `~/.npm/_logs/2026-09-18T18_36_19_416Z-debug-0.log`; WindowServer "Process death" |
+| **14:41:38.84** | **Cluely's Electron main dies** — logged as `exit 1`, no signal (see §9 retraction: that signature is ALSO what an LDB SIGKILL produces) | `~/.npm/_logs/2026-09-18T18_36_19_416Z-debug-0.log`; WindowServer "Process death" |
 | 14:42:45 | LDB quits; last encrypted session-log write (`1789756668914.dat`, 3.8 MB, born 14:37:48) | `ldb-files` stream |
 | 14:43:07 | Recorder stopped cleanly (`pkill -TERM`) | `capture-state.jsonl` |
 | 14:52 | `analyze.py` → `report.md` + 70,772-event `merged-events.jsonl` | mtimes |
@@ -81,7 +81,7 @@ Full findings: `docs/EXAM-CAPTURE-2026-09-18.md` and
 
 | Time | Event | Evidence |
 |---|---|---|
-| 15:05–15:17 | `/investigate`: mechanism proven — Electron main **self-exit(1)** at 14:41:38.84 (npm exit-code proof; LDB/user/agents/scanner/jetsam all excluded) | `docs/INCIDENT-2026-09-18-144138.md` |
+| 15:05–15:17 | `/investigate`: mechanism judged self-exit(1) at 14:41:38.84 (npm exit-code proof; LDB/user/agents/scanner/jetsam all excluded) — **verdict later overturned, see §9** | `docs/INCIDENT-2026-09-18-144138.md` |
 | 15:15 | `cluely-safe-start.sh` created (console tee + exit-status capture) | file mtime |
 | 15:17 | `main.js` death-watch hooks (exit code, render/child-process-gone) | `git diff` |
 | 15:15:48–15:16 | Smoke test: armored launch + SIGTERM → shim records `exited with signal SIGTERM`; wrapper writes `exit_code=1` | `console-20260918-151548.log`, `exit-status.txt` |
@@ -92,6 +92,20 @@ Full findings: `docs/EXAM-CAPTURE-2026-09-18.md` and
 | Time | Event |
 |---|---|
 | — | This documentation set created under `docs/`; historical audits relocated to `docs/history/`; branch `docs/project-documentation` created; capture artifacts gitignored; 8.8 GB winston-follow flood compressed (reversible, evidence preserved). |
+
+## 9. Test run — LDB caught in the act (Sep 18, 16:00–16:10)
+
+| Time | Event | Evidence |
+|---|---|---|
+| 16:00:21 | **Armored test run**: Cluely launched via `cluely-safe-start.sh` (pid 15985, console → `console-20260918-160021.log`) | console log |
+| 16:05:48 | First SCK capture burst (LDB not running yet) — no kill | tccd/replayd ScreenCapture requests |
+| 16:07:27 | **LDB 2.1.5 (build 7613) launches** (pid 16220); brings itself frontmost | launchservicesd CHECKIN |
+| 16:07:46 → | **LDB kill-loop live**: launchd logs Teams-agent `exited due to SIGKILL | sent by LockDown Browser[16220]` every ~10 s | unified log |
+| 16:08:30 | LDB camera + mic active (webcam proctoring) | ControlCenter sensor-indicators; AVCaptureDALDevice |
+| 16:09:23.6 | Cluely screen-capture burst (replayd TCC, ALLOWED) | tccd msgID 730.3360+ |
+| **16:09:38.5–63** | **Cluely's Electron main SIGKILLed** — shim prints `exited with signal SIGKILL`; WindowServer "Process death pid 15985" 16:09:38.633797; death-watch correctly silent (SIGKILL uncatchable) | `console-20260918-160021.log`, `exit-status.txt` |
+| 16:10:37 | LDB exits (exam closed) | launchd teardown of LDB children |
+| 16:09–16:11 | **Verdict reversal**: `electron/cli.js` prints signals to console only → all three Cluely deaths (11:05, 14:41, 16:09) are LDB SIGKILLs | `docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md` |
 
 ---
 

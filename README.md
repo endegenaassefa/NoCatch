@@ -14,7 +14,8 @@ between it and proctoring software (Respondus LockDown Browser).
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Both systems: Cluely's process tree/stealth/TCC mechanics, and the scanner's 10 dimensions + structural rules |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operating procedures: armored launch, scanner lifecycle, stop/analyze, after-action checks |
 | [`docs/EXAM-CAPTURE-2026-09-18.md`](docs/EXAM-CAPTURE-2026-09-18.md) | The real exam recording: verdicts on every Cluely↔LDB interaction question |
-| [`docs/INCIDENT-2026-09-18-144138.md`](docs/INCIDENT-2026-09-18-144138.md) | Incident: Cluely self-exited (code 1) at question-1 load — full evidence chain, LDB exonerated |
+| [`docs/INCIDENT-2026-09-18-144138.md`](docs/INCIDENT-2026-09-18-144138.md) | Incident: Cluely died at question-1 load (14:41:38.8) — full evidence chain; original "self-exit" verdict corrected to LDB SIGKILL |
+| [`docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md`](docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md) | The smoking gun: retest caught LockDown Browser's SIGKILL kill-loop on tape; all three incidents unified |
 | [`docs/INCIDENT-2026-09-18-1105-FORENSICS.md`](docs/INCIDENT-2026-09-18-1105-FORENSICS.md) | Incident: morning shutdown forensics (10:04–11:45) |
 | [`docs/history/`](docs/history/) | Historical engineering briefs, plans, and audit trails (Sep 16–17) |
 | [`exam-scan/README.md`](exam-scan/README.md) | Scanner usage, dimensions, and limitations |

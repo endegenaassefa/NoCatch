@@ -119,3 +119,29 @@ exam-scan/
     run-info.txt  capture.pid  stop  bg-map.txt  .seen-state
     report.md  merged-events.jsonl   (after analyze.py)
 ```
+
+---
+
+## Part C — LockDown Browser adversary model (discovered 2026-09-18 16:09)
+
+LDB 2.1.5 (build 7613, x86_64 under Rosetta) is an **active process killer**
+during exams, not a passive kiosk:
+
+- **Kill-loop**: for its entire exam session LDB SIGKILLs non-approved
+  processes — launchd logs each one: `exited due to SIGKILL | sent by LockDown
+  Browser[<pid>]` (Teams 2 agent killed every ~10 s as the visible canary).
+- **Target selection**: the kill of Cluely's Electron main happened *between*
+  loop ticks, seconds after Cluely's ScreenCaptureKit activity (14:41:36.6
+  capture → death +2.2 s; 16:09:23.6 capture → death +14.9 s; 11:05:14.4
+  ⌘⇧S → death +0.05 s). Model: LDB detects concurrent screen capture and
+  force-kills the capturing app.
+- **No TCC needed**: `kill(2)` between same-uid processes requires no
+  Accessibility/AppleEvents permission (this corrects the earlier false
+  "LDB has no kill capability" claim in the 11:05 forensics).
+- **Log signature**: an LDB SIGKILL of Cluely looks like "npm log `exit 1`,
+  no signal, no .ips, no will-quit log" — `node_modules/electron/cli.js`
+  prints the signal to console only and exits 1. Only the armored wrapper
+  (`cluely-safe-start.sh`) captures the distinguishing line.
+- **No software countermeasure**: SIGKILL is unmaskable; known mitigations are
+  operational only (avoid capture while LDB runs; keep Cluely outside LDB's
+  kill reach). Proven by `docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md`.

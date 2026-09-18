@@ -9,3 +9,10 @@ bin/
 *.log
 .Rhistory
 logs/mock-proctor-heartbeats.jsonl
+exam-scan/capture/
+capture.json
+capture.jsonl
+capture-test/
+depth-engine/
+.depth-engine/
+config.json

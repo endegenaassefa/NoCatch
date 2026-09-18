@@ -118,6 +118,26 @@ process.on("unhandledRejection", (reason) => {
   });
 });
 
+// ── Death-visibility instrumentation (2026-09-18 14:41:38.8 incident) ──
+// The app once exited with code 1 leaving zero trace (no will-quit log, no
+// crash report, no signal message from the npm shim). These hooks write a
+// dedicated death-watch log so any future silent death self-diagnoses.
+// NOTE: process.on("SIGINT"/"SIGTERM") handlers do NOT fire in Electron main
+// on this machine (Chromium owns the signal disposition; validated 2026-09-18
+// by smoke test). Signal deaths are captured by cluely-safe-start.sh instead:
+// the shim prints "exited with signal X" into the tee'd console log.
+const DEATH_LOG = path.join(require("os").homedir(), ".screen-reader-util", "logs", "death-watch.log");
+function _deathNote(msg) {
+  try { fs.appendFileSync(DEATH_LOG, new Date().toISOString() + " " + msg + "\n"); } catch (_) { /* never crash the app over a log write */ }
+}
+process.on("exit", (code) => { _deathNote("process exit event, code=" + code); });
+app.on("render-process-gone", (_event, _wc, details) => {
+  _deathNote("render-process-gone reason=" + (details && details.reason) + " exitCode=" + (details && details.exitCode));
+});
+app.on("child-process-gone", (_event, details) => {
+  _deathNote("child-process-gone type=" + (details && details.type) + " reason=" + (details && details.reason) + " exitCode=" + (details && details.exitCode));
+});
+
 // Services
 // Screen capture (image-based)
 const captureService = require("./src/services/capture.service");

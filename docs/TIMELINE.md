@@ -61,7 +61,7 @@ npm logs, zsh session files, and the incident reports in `docs/`.
 | 14:30:18 | **Run 2** `20260918T183018Z` launched — the real recording | `run-info.txt` |
 | 14:30–14:33 | `fs_usage -w -f filesys` floods ~2.6 GB at ~50 MB/s → user kills it, deletes stream (filesystem channel lost; `ldb-files` channel survived) | transcript; stream mtimes |
 | 14:36:10 | New Terminal window; 14:36:19 `npm start` → **Cluely launches** (main pid 78031, disguised "Terminal ") | census/lifecycle |
-| 14:36:26 | Cluely Screen Recording + Microphone TCC: **ALLOWED** (attributed to `com.apple.Terminal`) | unified log |
+| 14:36:26 | Cluely Screen Recording TCC: **ALLOWED** (attributed to `com.apple.Terminal`); Cluely's own Microphone request: **DENIED** (`authValue=1` — voice stayed off, app logged "Local Whisper unavailable") | unified log |
 | 14:37:42 | **LockDown Browser launches** (pid 5590) | lifecycle |
 | 14:37:49 | LDB camera granted; video/hand-pose pipeline starts | unified log |
 | 14:37:52 | LDB "Alerts" helper (close-apps prompt) | lifecycle |

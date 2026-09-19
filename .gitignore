@@ -8,7 +8,7 @@ bin/
 .DS_Store
 *.log
 .Rhistory
-logs/mock-proctor-heartbeats.jsonl
+logs/
 exam-scan/capture/
 capture.json
 capture.jsonl
@@ -16,6 +16,8 @@ capture-test/
 depth-engine/
 .depth-engine/
 config.json
+test-proctor.html
+vision-test-image.png
 research/probes/sck-grab
 research/probes/sck-hold
 research/probes/cgwindow-grab

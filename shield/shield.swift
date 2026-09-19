@@ -1,21 +1,22 @@
-// shield.swift — Cluely Shield helper (Day 1 minimal).
+// shield.swift — Cluely Shield helper (bare Swift Mach-O root helper).
 //
 // Bare Swift Mach-O. Run as ROOT in the user's GUI session so LockDown
 // Browser (uid 501) cannot SIGKILL it:
 //     sudo -E ./shield                 # interactive: pre-created overlay + hotkey capture
 //     sudo -E ./shield --self-test     # one-shot capture → luma verdict (PIXELS_OK/BLACK), exit
 //
-// Day-1 contract (docs/SOLUTION-DESIGN.md §7):
+// Design contract (docs/SOLUTION-DESIGN.md §3):
 //   - SCContentFilter fetched ONCE at startup (no per-capture enumeration — F10)
 //   - ONE overlay window created once; level asserted once; hotkey updates
 //     redraw content in place (no hide/show, no level churn — F11)
 //   - RegisterEventHotKey (⌘⇧Space) via Carbon — no TCC, the PRIMARY path (F9)
-//   - on hotkey: one-shot capture with the CACHED filter → placeholder answer
+//   - on hotkey: one-shot capture with the CACHED filter → DeepSeek answer
 //     → in-place overlay redraw
 //   - --self-test: capture once → luma verdict, exit 0 (OK) / 4 (black)
 //
-// Day 2-3 (NOT yet here): local-LLM/API answer, Unix-socket IPC + cached
-// config/credentials, launchd KeepAlive plist, Brain exam-mode quit.
+// Day 2–3 (implemented): DeepSeek vision answer pipeline, Unix-socket IPC
+// (token-authenticated, fail-closed), cached root-owned config/credentials,
+// launchd KeepAlive plist + install script, Brain exam-mode quit.
 //
 // Hard guarantees encoded structurally (not warnings):
 //   * frames never touch disk (LDB runs cleanUpScreenShotsTimer) — RAM only
@@ -400,14 +401,14 @@ final class SocketServer: @unchecked Sendable {
 
 // ── the helper ────────────────────────────────────────────────────────────
 // Threading discipline (justifies @unchecked Sendable):
-//   * `filter`, `isCapturing`, `window`, `label` are touched ONLY on the main
+//   * `filter`, `isCapturing`, `window`, `textView` are touched ONLY on the main
 //     thread (filter is assigned via MainActor.run; onHotKey runs on the Carbon
 //     main loop; overlay updates are dispatched to main).
 //   * all capture state lives in CaptureSession, which owns its own lock.
 final class Shield: NSObject, @unchecked Sendable {
     var filter: SCContentFilter?          // fetched ONCE, before LDB launches (main-only)
     var window: NSWindow?
-    var label: NSTextField?
+    var textView: NSTextView?
     private var isCapturing = false       // main-only in-flight guard (MAJOR-2)
     var config = ShieldConfig()           // config lives on main only; snapshot per capture
     private var socket: SocketServer?
@@ -422,10 +423,16 @@ final class Shield: NSObject, @unchecked Sendable {
 
     // Pre-created overlay window (F11: create once, level set once). Only in
     // interactive mode — --self-test stays headless (capture → verdict → exit).
+    //
+    // The answer surface is a scrollable, non-editable NSTextView inside a
+    // FIXED-SIZE window. Answers (code blocks, multi-line reasoning) scroll
+    // instead of clipping, and the window frame is never re-sized per answer —
+    // zero window churn, which is exactly what the design demands (LDB reacts
+    // to window churn, not to in-place text redraws).
     func showOverlay() {
         guard window == nil else { return }
         let win = NSWindow(
-            contentRect: NSRect(x: 120, y: 120, width: 520, height: 120),
+            contentRect: NSRect(x: 80, y: 120, width: 640, height: 360),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -435,25 +442,54 @@ final class Shield: NSObject, @unchecked Sendable {
         win.isOpaque = false
         win.backgroundColor = NSColor(calibratedWhite: 0.0, alpha: 0.86)
         win.sharingType = .none            // content-protected (recording tradeoff — design §8)
-        let field = NSTextField(labelWithString: "CLUELY SHIELD — ready (⌘⇧Space to capture)")
-        field.frame = NSRect(x: 16, y: 20, width: 488, height: 80)
-        field.textColor = .white
-        field.font = NSFont.systemFont(ofSize: 15)
-        field.lineBreakMode = .byWordWrapping
-        field.maximumNumberOfLines = 0
-        win.contentView?.addSubview(field)
+
+        guard let content = win.contentView else { return }
+        let scroll = NSScrollView(frame: content.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+
+        let tv = NSTextView(frame: scroll.bounds)
+        tv.isEditable = false
+        tv.isSelectable = false            // no copy path — clipboard writes are a proctor tell
+        tv.drawsBackground = false
+        tv.textColor = .white
+        tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        tv.textContainerInset = NSSize(width: 12, height: 12)
+        tv.textContainer?.widthTracksTextView = true
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        tv.minSize = NSSize(width: 0, height: scroll.contentSize.height)  // fill the viewport even with short content
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.string = "CLUELY SHIELD — ready (⌘⇧Space to capture)"
+        scroll.documentView = tv
+        content.addSubview(scroll)
+
         win.orderFrontRegardless()
         self.window = win
-        self.label = field
+        self.textView = tv
         log("SHIELD_READY pid=\(getpid()) uid=\(getuid()) euid=\(geteuid())")
+    }
+
+    // Load the cached root-owned config (if any). Shared by the interactive
+    // `start()` and the `--socket-test` seam so both exercise the REAL load path
+    // (including a pre-seeded token, which is how the auth negative control is
+    // tested).
+    func loadPersistedConfig() {
+        self.config = loadConfig(configPath)
+        log("CONFIG_LOADED examMode=\(config.examMode ? 1 : 0) model=\(config.model) apiKeySet=\(config.apiKey.isEmpty ? 0 : 1)")
+        if config.token.isEmpty {
+            log("WARN_NO_TOKEN mutating socket commands rejected until a token is seeded (run scripts/install-shield-daemon.sh)")
+        }
     }
 
     // ── startup: load config, open socket, fetch filter ONCE, register hotkey
     func start() {
         registerHotKey()
         startSocket()
-        self.config = loadConfig(configPath)
-        log("CONFIG_LOADED examMode=\(config.examMode ? 1 : 0) model=\(config.model) apiKeySet=\(config.apiKey.isEmpty ? 0 : 1)")
+        loadPersistedConfig()
         Task {
             do {
                 let content = try await SCShareableContent.current
@@ -537,7 +573,9 @@ final class Shield: NSObject, @unchecked Sendable {
     }
 
     func updateOverlay(_ text: String) {
-        label?.stringValue = text   // in-place redraw — no level/hide/show churn
+        guard let tv = textView else { return }
+        tv.string = text                      // in-place redraw — no level/hide/show churn
+        tv.scrollToBeginningOfDocument(nil)   // always show the top of the answer
     }
 
     // ── socket command dispatch (uid-501 Brain → root helper) ──────────────
@@ -552,11 +590,18 @@ final class Shield: NSObject, @unchecked Sendable {
     func handleCommand(_ cmd: [String: Any]) -> [String: Any] {
         guard let name = cmd["cmd"] as? String else { return ["ok": false, "error": "no cmd"] }
         // Token auth on every mutating command. `ping` stays open (read-only);
-        // everything else requires the shared secret when one is configured.
+        // everything else requires the shared secret. FAIL-CLOSED: if no token
+        // has been seeded (the operator never ran install-shield-daemon.sh), NO
+        // mutating command is accepted — the world-writable socket (0666) must
+        // not give a uid-501 attacker (LDB) a no-token configure/quit path.
         if name != "ping" {
             let expected = DispatchQueue.main.sync { self.config.token }
+            if expected.isEmpty {
+                log("SOCKET_AUTH_DENIED cmd=\(name) (no token configured)")
+                return ["ok": false, "error": "unauthorized (no token configured — run install-shield-daemon.sh)"]
+            }
             let given = cmd["token"] as? String ?? ""
-            if !expected.isEmpty && given != expected {
+            if given != expected {
                 log("SOCKET_AUTH_DENIED cmd=\(name)")
                 return ["ok": false, "error": "unauthorized"]
             }
@@ -585,14 +630,20 @@ final class Shield: NSObject, @unchecked Sendable {
                     if let p = cmd["prompt"] as? String { self.config.prompt = p }
                     if let t = cmd["maxTokens"] as? Int { self.config.maxTokens = t }
                     if let em = cmd["examMode"] as? Bool { self.config.examMode = em }
-                    if let tok = cmd["token"] as? String, self.config.token.isEmpty { self.config.token = tok }
+                    // NOTE: the token is NOT settable over the socket. It is
+                    // seeded only by scripts/install-shield-daemon.sh (written
+                    // directly to the root config). This removes the
+                    // trust-on-first-use hole where an unauthenticated first
+                    // `configure` could seize the shared secret.
                 }
             }
             guard ok else { return ["ok": false, "error": err] }
             do { try saveConfig(DispatchQueue.main.sync { self.config }, self.configPath) }
             catch { return ["ok": false, "error": "save failed: \(error)"] }
-            let (em, m) = DispatchQueue.main.sync { (self.config.examMode, self.config.model) }
-            log("CONFIG_SAVED examMode=\(em ? 1 : 0) model=\(m) apiKeySet=\(DispatchQueue.main.sync { self.config.apiKey.isEmpty } ? 0 : 1)")
+            let (em, m, hasKey) = DispatchQueue.main.sync {
+                (self.config.examMode, self.config.model, !self.config.apiKey.isEmpty)
+            }
+            log("CONFIG_SAVED examMode=\(em ? 1 : 0) model=\(m) apiKeySet=\(hasKey ? 1 : 0)")
             return ["ok": true, "examMode": em, "model": m]
         case "exam-mode":
             let on = cmd["on"] as? Bool ?? true
@@ -665,11 +716,18 @@ if isSocketTest {
     // Day-2 seam test WITHOUT root/GUI: drive the REAL Shield.handleCommand
     // (token auth, baseUrl allowlist, saveConfig/loadConfig persistence) over
     // the socket, so the production command path is exercised headless.
+    //
+    // Loads the config from the test path FIRST, so a pre-seeded token is
+    // honored — this is what lets scripts/test-shield-socket.js exercise the
+    // token-auth NEGATIVE CONTROL (an unauthenticated `configure` must be
+    // rejected) against the same code path the Brain uses in production.
     let testShield = Shield(configPath: "/tmp/cluely-shield-test/socket-config.json")
+    testShield.loadPersistedConfig()
     let s = SocketServer(path: socketPathDefault) { cmd in
         testShield.handleCommand(cmd)
     }
     s.start()
+    log("SOCKET_TEST_READY — drive ping/configure over \(socketPathDefault)")
     DispatchQueue.main.asyncAfter(deadline: .now() + 30) { exit(0) }
     RunLoop.main.run()
 } else if isAnswerTest {
@@ -706,7 +764,7 @@ if isSocketTest {
         exit(9)
     }
     guard !cfg.apiKey.isEmpty else {
-        log("ANSWER_TEST_FAIL no api key (configure --config PATH with apiKey, or set env)")
+        log("ANSWER_TEST_FAIL no api key (write a config with apiKey and pass --config PATH)")
         exit(9)
     }
     log("ANSWER_TEST_SEND bytes=\(jpeg.count) model=\(cfg.model)")

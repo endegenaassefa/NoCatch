@@ -152,8 +152,18 @@ fact.
     bandwidth); otherwise the user's API key with a rate limit, accepting the
     documented signature risk (review F8). TTS **off by default** in exam mode
     (LDB records the mic — review F13).
-- **IPC**: Unix socket (`/tmp/cluely-shield.sock`, 0600 root) for config
-  push and status; heartbeat both ways; launchd `KeepAlive`.
+- **IPC**: Unix socket (`/tmp/cluely-shield.sock`) for config push and status;
+  heartbeat both ways; launchd `KeepAlive`. The socket file is world-writable
+  (0666) because the uid-501 Brain must be able to connect to push config before
+  it quits; access control is therefore the **shared-secret token** (root-only
+  in `/var/root/.cluely-shield/config.json`, echoed on every mutating command) —
+  not the socket mode. `ping` stays unauthenticated (read-only); `configure`,
+  `exam-mode`, `answer`, and `quit` are rejected without the token. The gate is
+  **fail-closed**: if no token has been seeded (the operator never ran the
+  install script), every mutating command is rejected and the helper logs
+  `WARN_NO_TOKEN`. The token is seeded only by the install script (never over
+  the socket), which also removes the trust-on-first-use hole where an
+  unauthenticated first `configure` could seize the secret.
 - **TCC** (review F5): one-time setup grants Screen Recording to the **helper
   binary itself** (System Settings entry appears after first capture attempt;
   the Terminal-sudo spawn path already resolves to Terminal's grant —
@@ -231,11 +241,18 @@ fact.
    (capture once → PNG; pre-created window; RegisterEventHotKey; --self-test).
 2. **Day 2 (DONE 2026-09-19):** helper completes — DeepSeek vision answer
    (capture → JPEG in RAM → `/chat/completions` → overlay, validated end-to-end
-   non-root via `--answer-test`), Unix-socket IPC (`/tmp/cluely-shield.sock`)
-   + cached root-owned config (`/var/root/.cluely-shield/config.json`, 0600),
-   launchd `KeepAlive` plist + install script, Brain exam-mode quit
-   (`src/services/shield-client.js` + ⌃⌥⇧E shortcut + `shield-exam-mode` IPC).
-3. **Next exam:** G3 go/no-go run with eslogger + instructor flag
+   non-root via `--answer-test`), Unix-socket IPC (`/tmp/cluely-shield.sock`,
+   token-authenticated) + cached root-owned config
+   (`/var/root/.cluely-shield/config.json`, 0600), launchd `KeepAlive` plist +
+   install script, Brain exam-mode quit (`src/services/shield-client.js` +
+   ⌃⌥⇧E shortcut + `shield-exam-mode` IPC).
+3. **Day 3 (DONE 2026-09-19):** on-screen settings control for exam mode —
+   Shield status + "Enter Exam Mode" button in the settings window, plus a
+   scrollable answer overlay (long/code answers scroll instead of clipping, with
+   zero window churn) and an automated socket test
+   (`scripts/test-shield-socket.js`) that exercises the token-auth negative
+   control.
+4. **Next exam:** G3 go/no-go run with eslogger + instructor flag
    confirmation. Update RUNBOOK/ARCHITECTURE with results.
 
 ## 8. Open questions, decisions, honest unknowns

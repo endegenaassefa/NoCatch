@@ -15,17 +15,14 @@ The shield moves capture and the answer overlay into a root process that LDB
 
 ## Status
 
-**Day 1 — builds; gates G0/G1/G2 passed (2026-09-19); G3a kit verified locally, not yet run.**
-The helper compiles and has a `--self-test`. The G0 platform smoke
-(`scripts/cluely-shield-smoke.sh`) **passed 2026-09-19** — see
+**Day 1–3 built; gates G0/G1/G2 passed (2026-09-19); G3a practice-quiz run
+completed (2026-09-19) — root immunity + capture held, but the practice quiz
+did NOT exercise LDB's kill-loop, so the definitive go/no-go remains a real-exam
+(G3b) question.** The helper compiles and has a `--self-test`. The G0 platform
+smoke (`scripts/cluely-shield-smoke.sh`) **passed 2026-09-19** — see
 [`docs/G0-SMOKE-2026-09-19.md`](../docs/G0-SMOKE-2026-09-19.md). The G3a
-go/no-go experiment kit (rig + canary + runbook) is at
-[`docs/G3A-RUNBOOK.md`](../docs/G3A-RUNBOOK.md) — verified locally
-(compiles on Swift 6.3; mock state-machine run end-to-end; expose probe and
-canary live-tested; arm script dry-run) and adversarially reviewed, then
-hardened (uid-501 canary spawn, Teams-agent gate, hotkey gate, quiz-live
-anchor). It must still be **run against an LDB practice quiz** before any
-Day 2–3 work. See
+go/no-go kit (rig + canary + runbook) is at
+[`docs/G3A-RUNBOOK.md`](../docs/G3A-RUNBOOK.md). See
 [`docs/SOLUTION-DESIGN.md`](../docs/SOLUTION-DESIGN.md) §6 for the full gate
 list.
 
@@ -44,7 +41,8 @@ The compiled binary `shield/shield` is gitignored — never commit it.
 sudo -E ./shield/shield              # interactive: overlay + hotkey capture + socket IPC
 sudo -E ./shield/shield --self-test  # one-shot capture -> luma verdict, exit 0/4
 ./shield/shield --answer-test IMG    # NON-root: fixture image -> DeepSeek -> print answer
-./shield/shield --socket-test        # NON-root: socket IPC round-trip (30 s)
+./shield/shield --socket-test        # NON-root: stand up the socket (drive it externally)
+node scripts/test-shield-socket.js   # NON-root: automated socket test incl. token-auth negative control
 ```
 
 ## Design contract (Day 1)
@@ -67,17 +65,22 @@ sudo -E ./shield/shield --self-test  # one-shot capture -> luma verdict, exit 0/
 - **Unix-socket IPC:** `/tmp/cluely-shield.sock`, newline-delimited JSON.
   Commands: `ping`, `configure`, `exam-mode`, `answer`, `quit`. The Brain
   (`src/services/shield-client.js`) pushes config and flips `examMode` on, then
-  fully quits.
+  fully quits. The socket is world-writable (0666) so the uid-501 Brain can
+  connect; mutating commands require a shared-secret token (root-only in the
+  config, echoed from `CLUELY_SHIELD_TOKEN`) — `ping` is the only unauthenticated
+  command.
 - **launchd:** `shield/com.cluely.shield.plist` + `scripts/install-shield-daemon.sh`
   (KeepAlive, auto-start, as root). See the plist's HONEST CAVEAT: the
   Terminal-sudo path is the proven one; daemon GUI-session access is unverified.
 
-## Not yet done (Day 3 / gated)
+## Not yet done (gated)
 
-- G3a/G3b go/no-go runs (operator + LDB practice/real exam) — the only thing
-  that upgrades the design from conditional to shipped.
-- A settings-pane on-screen control for exam mode (the ⌃⌥⇧E shortcut + IPC
-  already work; a button is optional polish).
+- G3b — the real-exam go/no-go run (operator + instructor flag confirmation):
+  the only thing that upgrades the design from conditional to shipped. The G3a
+  practice-quiz run showed root immunity + capture held but did NOT exercise
+  LDB's kill-loop (the practice quiz killed nothing, including Chrome), so the
+  definitive kill-loop behavior is unmeasured until a real exam.
+- A local vision model for the zero-network answer path (design §8 open item).
 
 ## Where the rest of the project lives
 

@@ -6,7 +6,10 @@
 // kill loop was alive during the run — the measurement-validity control that
 // makes a "nothing died" clean phase interpretable.
 //
-// Spawned by the root rig via `launchctl asuser <uid> g3a-canary --ttl N`.
+// Spawned by the root rig via `launchctl asuser <uid> sudo -u <uid>
+// g3a-canary --ttl N` — asuser alone does NOT setuid, so sudo -u drops to
+// uid 501 inside the user's bootstrap/audit session. It MUST run as uid 501:
+// a root canary would be unkillable and the P2 control would invert.
 // Runs at most --ttl seconds, then exits cleanly (CANARY_ALIVE_FULL_TTL).
 // Heartbeats every 1 s to stdout (the rig redirects this to /tmp/g3a-canary.log).
 // Deliberately does NOT capture, does NOT hide, does NOT resist: it must die

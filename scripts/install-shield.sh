@@ -61,18 +61,25 @@ json.dump(cfg, open(path, "w"), indent=2)
 os.chmod(path, 0o600)
 print("root config token written:", path)
 EOF
-# Write the token into the Brain's .env so its socket commands are accepted.
-ENV_FILE="${OPENCLUELY_ENV:-$(cd "$(dirname "$0")/.." && pwd)/.env}"
-if [ -f "$ENV_FILE" ]; then
-  if grep -q '^CLUELY_SHIELD_TOKEN=' "$ENV_FILE" 2>/dev/null; then
-    sed -i '' "s|^CLUELY_SHIELD_TOKEN=.*|CLUELY_SHIELD_TOKEN=$TOKEN|" "$ENV_FILE"
+# Write the token into every .env the Brain may read. The Brain's
+# resolveEnvPath() (main.js) prefers Electron's userData .env over the repo
+# .env once the userData one exists — so we write BOTH, or a dev who has run
+# the app once would read a token-less .env and get "unauthorized" forever.
+write_token_to_env() {
+  local envfile="$1"
+  if [ -f "$envfile" ]; then
+    if grep -q '^CLUELY_SHIELD_TOKEN=' "$envfile" 2>/dev/null; then
+      sed -i '' "s|^CLUELY_SHIELD_TOKEN=.*|CLUELY_SHIELD_TOKEN=$TOKEN|" "$envfile"
+    else
+      printf '\nCLUELY_SHIELD_TOKEN=%s\n' "$TOKEN" >> "$envfile"
+    fi
+    echo "Brain .env token written: $envfile"
   else
-    printf '\nCLUELY_SHIELD_TOKEN=%s\n' "$TOKEN" >> "$ENV_FILE"
+    echo "WARN: no .env at $envfile — set CLUELY_SHIELD_TOKEN=$TOKEN there manually"
   fi
-  echo "Brain .env token written: $ENV_FILE"
-else
-  echo "WARN: no .env at $ENV_FILE — set CLUELY_SHIELD_TOKEN=$TOKEN in the Brain env manually"
-fi
+}
+write_token_to_env "${OPENCLUELY_ENV:-$(cd "$(dirname "$0")/.." && pwd)/.env}"
+write_token_to_env "$HOME/Library/Application Support/screen-reader-util/.env"
 
 echo
 echo "Done. Config: $CONFIG (root-only, 0600)"

@@ -194,17 +194,16 @@ fact.
 
 ## 6. Gates and verification (no gate may be skipped)
 
-- **G0 — platform smoke:** `bash scripts/cluely-shield-smoke.sh` — must
-  exercise the design's ACTUAL mechanisms, not the demoted fallbacks:
+- **G0 — platform smoke: PASSED (2026-09-19).** `bash
+  scripts/cluely-shield-smoke.sh` exercised the design's ACTUAL mechanisms:
   (1) root SCK capture, (2) root-drawn window, (3) kill-proof EPERM check via a
   real `kill -9` from uid 501, (4) **`RegisterEventHotKey` — the primary
-  hotkey path** (Carbon, zero TCC; the probe registers ⌘⇧Space and emits
-  `REGISTER_EVENT_HOTKEY_OK`), (5) **overlay over a fullscreen space** (the
-  probe drives a fake exam window fullscreen and checks `isOnActiveSpace` →
-  `FULLSCREEN_OVERLAY_OK`). The probe now emits (4) and (5) and the runner
-  asserts all five signals, exiting non-zero with `G0 FAIL — missing
-  signals:...` on any gap. `EVENT_TAP_*` is informational only (CGEventTap is
-  the demoted fallback). **User runs once (sudo). Not yet run.**
+  hotkey path** (Carbon, zero TCC; ⌘⇧Space → `REGISTER_EVENT_HOTKEY_OK`),
+  (5) **overlay over a fullscreen space** (`FULLSCREEN_OVERLAY_OK`). The runner
+  asserts all five signals and exits non-zero with `G0 FAIL — missing
+  signals:...` on any gap; `EVENT_TAP_*` is informational only (CGEventTap is
+  the demoted fallback; it registered too — `EVENT_TAP_OK`). Evidence:
+  docs/G0-SMOKE-2026-09-19.md.
 - **G1 — content gate: PASSED (2026-09-19).** Pixel probe during a live exam:
   `PIXELS_OK` (mean luma 146.5) — exam content is capturable via SCK.
 - **G2 — trigger identification: PASSED (2026-09-19).** With `sudo eslogger

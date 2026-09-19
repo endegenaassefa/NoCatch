@@ -109,6 +109,25 @@ Full findings: `docs/EXAM-CAPTURE-2026-09-18.md` and
 
 ---
 
+## 10. Sender-attributed kill + trigger resolution (Sep 19, 13:33–13:53)
+
+Setup phase (13:33–13:49): fresh Cluely launch (13:46:08, pid 66031), presence
+poller + signal stream + eslogger recorder (after Full Disk Access grant),
+auto pixel probe armed.
+
+| Time | Event | Evidence |
+|---|---|---|
+| 13:48:30 | User hides Cluely windows (⌘⇧V); several show/hide toggles until 13:50:12 | `console-20260919-134608.log` |
+| 13:49:42 | LDB first seen | presence poller |
+| 13:50:07.47 | **LDB ban-list sweep: 16 SIGKILLs against Claude.app in one burst** (helpers, renderers, crashpad, main) | eslogger |
+| 13:50:15 → 13:52:53 | Teams agent killed every ~10.5 s (17 kills — canary) | eslogger |
+| 13:51:40–42 | **Pixel probe captures during exam: `PIXELS_OK` (mean luma 146.5)** — G1 content gate PASSED; probe never targeted | presence log, eslogger (no kill event) |
+| **13:51:48.907** | **LDB[66693] SIGKILLs Cluely's Electron[66031]** — sender-attributed via EndpointSecurity for the first time | `eslogger-20260919-134331.jsonl` |
+| ~13:53:00 | User quits LDB; `killall Dock` at 13:53:00.372 | eslogger |
+| 13:53–13:56 | **Trigger resolution**: capture → kill in 6.9–8.9 s (prior: 2.2/15 s) = capture is the trigger (H1 CONFIRMED); windows visible 96.8 s with no kill (H2 REFUTED); bare capture binaries never targeted | `docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md` |
+
+---
+
 ## Quick index of evidence locations
 
 | Artifact | Path |

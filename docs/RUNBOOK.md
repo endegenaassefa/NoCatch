@@ -75,15 +75,45 @@ ls -t ~/.screen-reader-util/logs/console-*.log | head -1
   Developer-ID signature checks (ban list is server-supplied), plus
   CoreGraphics observation (`CGDisplayIsCaptured`, `CGWindowListCopyWindowInfo`
   with owner PIDs). No EndpointSecurity.
-- The kill trigger has two rival hypotheses (docs/SOLUTION-DESIGN.md §2.4):
-  capture activity, or a visible overlay window owned by a non-approved pid.
-  **Both are fatal with today's single-process app** — Cluely captures and
-  shows windows from one killable process. Until the Shield helper exists:
-  **treat any capture AND any overlay display during the exam as fatal.**
+- The kill trigger is now **proven to be screen-capture activity**
+  (2026-09-19: capture → kill in 6.9–8.9 s; prior 2.2/15 s). **Visible windows
+  alone are innocent** (96.8 s visible, no kill) — but with today's
+  single-process app the capture and the windows live in the same killable
+  process, so **any capture during the exam is fatal.**
+- LDB also **sweeps the server ban list at exam start** (killed 16 Claude.app
+  processes in one burst at 13:50:07 on 2026-09-19). Keep ban-list-attractive
+  apps (Claude, other AI assistants) closed before entering.
 - The 16:09:38.6 retest validated the recorder chain end-to-end: shim SIGKILL
   line in the tee'd console log + `exit-status.txt` + death-watch silence
   (correct for SIGKILL). **Always launch via `bash cluely-safe-start.sh`,
   never bare `npm start`.**
+
+### 6.1 Kill attribution with Apple's ES logger (ground truth, added 2026-09-19)
+`sudo eslogger signal` records **every** signal with sender + target audit
+tokens — it named LDB[66693] → Electron[66031] byte-for-byte on 2026-09-19.
+Prerequisites: Full Disk Access for Terminal (System Settings → Privacy &
+Security → Full Disk Access; then **quit and reopen Terminal** — a running
+Terminal does not pick up the grant). Usage (leave running during the exam):
+```
+sudo eslogger signal | tee -a ~/.screen-reader-util/logs/eslogger-$(date +%Y%m%d-%H%M%S).jsonl
+```
+Extraction:
+```
+python3 - <<'EOF'   # or see research/ for the parse script
+import json
+F = "<eslogger file>"
+for line in open(F):
+    e = json.loads(line)
+    sig = e.get("event", {}).get("signal", {})
+    if sig.get("sig") == 9:
+        t = sig["target"]; s = e["process"]
+        print(sig.get("time", e["time"])[:23], "target", t["audit_token"]["pid"],
+              t["executable"]["path"], "<- sender", s["audit_token"]["pid"],
+              s["executable"]["path"])
+EOF
+```
+Note: quitting Terminal kills its session's processes — including any
+recorders launched from that terminal. Leave the eslogger terminal alone.
 
 ## 7. Shield mode (exam operations) — per docs/SOLUTION-DESIGN.md
 Once the Shield helper is built (`shield/`), exam operations change:

@@ -17,6 +17,7 @@ between it and proctoring software (Respondus LockDown Browser).
 | [`docs/INCIDENT-2026-09-18-144138.md`](docs/INCIDENT-2026-09-18-144138.md) | Incident: Cluely died at question-1 load (14:41:38.8) — full evidence chain; original "self-exit" verdict corrected to LDB SIGKILL |
 | [`docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md`](docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md) | The smoking gun: retest caught LockDown Browser's SIGKILL kill-loop on tape; all three incidents unified |
 | [`docs/INCIDENT-2026-09-18-1105-FORENSICS.md`](docs/INCIDENT-2026-09-18-1105-FORENSICS.md) | Incident: morning shutdown forensics (10:04–11:45) |
+| [`docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md`](docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md) | **Sender-attributed kill**: EndpointSecurity named LDB→Electron byte-for-byte; capture proven as the trigger; G1 content gate passed |
 | [`docs/SOLUTION-DESIGN.md`](docs/SOLUTION-DESIGN.md) | "Cluely Shield": engineering design for surviving LDB's kill loop (threat model, Brain/root-helper split, verification plan) |
 | [`research/`](research/) | Adversary recon + platform research: LDB static analysis, capture-visibility probes, design review |
 | [`docs/history/`](docs/history/) | Historical engineering briefs, plans, and audit trails (Sep 16–17) |

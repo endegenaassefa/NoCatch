@@ -82,19 +82,22 @@ operation.
 - LDB's own page reacts to window churn (in-repo evidence,
   window.manager.js:698–701).
 
-### 2.4 The trigger question — three hypotheses, one architecture
-| Hypothesis | Mechanism | Latency fit |
+### 2.4 The trigger question — RESOLVED by the 2026-09-19 run
+| Hypothesis | Mechanism | Status |
 |---|---|---|
-| H1 capture-trigger | replayd/tccd logs, sensor-indicator state, or WindowServer `_XHWCaptureDesktop` observation | loose: 0.05–15 s |
-| H2 overlay-trigger | `CGWindowListCopyWindowInfo` shows a window owned by a non-allowlisted pid → kill owner | tight after window events |
-| H3 event-driven unknown | the 0.05 s (11:05) kill rules out every timer; the channel is unidentified | event-scale |
+| H1 capture-trigger | capture activity → kill of the visible non-allowlisted GUI app | **CONFIRMED** (2026-09-19: capture → kill in 6.9–8.9 s; prior: 2.2 s, 15 s) |
+| H2 overlay-trigger | visible window alone → kill | **REFUTED** (windows visible 96.8 s continuously with no kill) |
+| H3 event-driven unknown | the 0.05 s (11:05) outlier | absorbed by H1's 2–15 s processing latency; the 0.05 s figure was operator-reported, never measured |
 
-**The design neutralizes H1/H2 structurally** (capture and windows leave the
-killable uid) **and H3 is identified empirically by gate G2** (§6), which
-attributes kill attempts to activity with `sudo eslogger signal` — Apple's
-built-in EndpointSecurity logger records every signal with sender and target
-(a root-consented, pre-entitled tool; closes the anon-pid attribution caveat
-from the incident docs). Until G2, the plan is conditional.
+The exact detection channel is still unidentified (WindowServer
+`_XHWCaptureDesktop` observation is the leading candidate; LDB's own CG
+checks are blind to SCK — probe-verified). The 2026-09-19 run also proved:
+the capture probe (a bare binary) was never targeted — the kill loop selects
+apps enumerable via NSRunningApplication (Claude.app, the Teams launch agent,
+Electron.app) — and LDB swept **16 Claude.app processes at exam start** from
+the server ban list. See docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md.
+**The architecture neutralizes the confirmed trigger:** capture and windows
+leave the killable uid.
 
 ## 3. Architecture v2 — shield-only exam mode
 
@@ -180,35 +183,31 @@ from the incident docs). Until G2, the plan is conditional.
 
 ## 6. Gates and verification (no gate may be skipped)
 
-- **G0 — platform smoke (today, no exam, no risk):**
-  `bash scripts/cluely-shield-smoke.sh` — root SCK capture, root-drawn window,
-  kill-proof EPERM check, event-tap check, plus a fullscreen-space overlay
-  probe (F12). **User runs once (sudo).**
-- **G1 — content gate (today, no exam):** user opens LDB into its own
-  practice/preview quiz flow (no proctoring); we capture with the existing
-  `sck-grab` probe and inspect pixels. Black frames = design dead (F2); stop.
-- **G2 — trigger identification + solution probe (one instrumented exam,
-  practice exam preferred):** the minimal shield runs its exact future
-  sequence — pre-fetched filter, pre-created window, controlled one-shot
-  captures — while `sudo eslogger signal` + launchd logs attribute every kill
-  attempt. Output decides: capture-trigger (then SCScreenshotManager probe
-  enters the plan) vs window-trigger (then overlay discipline is the critical
-  path) vs neither (H3 identified by the signal log).
-- **G3 — the go/no-go run (instructor-confirmed unflagged exam):** exam mode
-  end-to-end. Pass = answers flow + canary dies on schedule + zero kill
-  attempts against shield pids in the eslogger log + instructor confirms the
-  session was not flagged. This is the only event that upgrades the plan from
-  conditional to shipped.
+- **G0 — platform smoke:** `bash scripts/cluely-shield-smoke.sh` — root SCK
+  capture, root-drawn window, kill-proof EPERM check, event-tap check.
+  **User runs once (sudo). Not yet run.**
+- **G1 — content gate: PASSED (2026-09-19).** Pixel probe during a live exam:
+  `PIXELS_OK` (mean luma 146.5) — exam content is capturable via SCK.
+- **G2 — trigger identification: PASSED (2026-09-19).** With `sudo eslogger
+  signal` as ground truth: **capture activity triggers the kill** (6.9–8.9 s;
+  prior 2.2/15 s), **visible windows alone do not** (96.8 s innocent), bare
+  capture binaries are never targeted, and LDB swept 16 Claude.app processes
+  at exam start (server ban list). See
+  docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md.
+- **G3 — the go/no-go run (instructor-confirmed unflagged exam):** still
+  required. Exam mode end-to-end with the helper. Pass = answers flow +
+  canary dies on schedule + zero kill attempts against shield pids +
+  instructor confirms the session was not flagged. This is the only event
+  that upgrades the plan from conditional to shipped.
 
-## 7. Build plan (this week)
+## 7. Build plan (updated after G1/G2 passed)
 
-1. **Day 1:** G0 + G1 (user involvement: smoke test password, LDB preview
-   launch). Start the minimal helper (capture once → PNG; pre-created window;
-   RegisterEventHotKey; --self-test).
+1. **Day 1:** G0 smoke test (user runs once, sudo) + start the minimal helper
+   (capture once → PNG; pre-created window; RegisterEventHotKey; --self-test).
 2. **Day 2–3:** helper completes (LLM call, socket, cached config, KeepAlive
    plist); Brain exam-mode quit integration.
-3. **Day 4–5:** G2 instrumented run; reconcile; if G2 passes, G3 on the next
-   real exam. Update RUNBOOK/ARCHITECTURE with results.
+3. **Next exam:** G3 go/no-go run with eslogger + instructor flag
+   confirmation. Update RUNBOOK/ARCHITECTURE with results.
 
 ## 8. Open questions, decisions, honest unknowns
 
@@ -221,7 +220,9 @@ from the incident docs). Until G2, the plan is conditional.
   to accept. This generalizes to every screen-recording proctor (review F4).
 - **Flagging escalation:** unproven either way; G3 is the only measurement.
 - **AAC/helper escalation:** pinned-version + recon-per-exam mitigations.
-- **H3 channel:** identified empirically in G2, not before.
+- **Detection channel (capture):** trigger proven, channel not — WindowServer
+  `_XHWCaptureDesktop` observation is the leading candidate; if it ever
+  matters, `SCScreenshotManager` is the chip-free reserve.
 - **Local vision model** for the zero-network path: quality/latency tradeoff
   on this hardware — fallback is rate-limited API calls with known signature.
 - **Review limitations:** the adversarial review is same-model and inherited

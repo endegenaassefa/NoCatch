@@ -62,7 +62,7 @@ the Day 2–3 profile: a root GUI window LDB *can* enumerate but *cannot* kill
    Full Disk Access → enable Terminal → *quit and reopen Terminal*). This was
    granted for earlier runs; the arm script's self-check will catch it if not.
 
-## Arming (one command, ~30 seconds)
+## Arming (one command, ~2 minutes)
 
 ```bash
 cd /Users/your-user/Desktop/OpenCluely
@@ -76,8 +76,13 @@ The script walks through gates, each failing loudly instead of silently:
 3. **arm-check** — one root capture now; must print `PIXELS_OK`. If it prints
    `PIXELS_BLACK`, grant Screen Recording to Terminal and re-run. TCC problems
    are found here, never mid-quiz.
-4. **eslogger self-check** — sends a test signal; the JSONL must record it.
-   If not: Full Disk Access issue (see above).
+4. **eslogger** — launched EARLY (detached) so its EndpointSecurity signal
+   subscription is warm before LDB launches. A **self-check** verifies the
+   stream is recording real signal deliveries (system kills appear within ~30s,
+   proving Full Disk Access is granted). Recording *user-sent* signals has a
+   variable ~2-5 min warmup, so kill attribution falls back to the always-on
+   `log show 'sent by LockDown Browser'` (collection step 4). If the stream
+   records nothing at all: Full Disk Access issue.
 5. **Canary pre-flight** — spawns the real canary as uid 501 via
    `launchctl asuser` + `sudo -u` for 5 s and requires its heartbeats + clean
    exit + the `uid=501` line (asuser alone does NOT setuid — the pre-flight

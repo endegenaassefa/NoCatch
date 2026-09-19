@@ -6,8 +6,11 @@
 #   2. pre-flight: LDB must NOT be running; warns about killable GUI apps
 #   3. --arm-check: one root capture -> PIXELS_OK gate (TCC verified NOW,
 #      never discovered mid-exam)
-#   4. starts `eslogger signal` detached (kill ground truth) + a live
-#      self-check that the stream actually records a test signal
+#   4. starts `eslogger signal` detached EARLY (kill ground truth) so its ES
+#      signal subscription is warm before LDB launches; a self-check verifies
+#      the stream is recording real signal deliveries (FDA OK). User-signal
+#      recording has a variable ~2-5 min warmup, so kill attribution falls back
+#      to `log show 'sent by LockDown Browser'` (always reliable).
 #   5. starts the rig detached (root, GUI session, heartbeat + phases)
 #   6. runs the exposure probe as your user (what LDB's checks can see)
 #   7. starts caffeinate (no mid-exam sleep) and prints the timeline
@@ -100,6 +103,31 @@ fi
 echo "== sudo pre-heat (you may be asked for your password) =="
 sudo -v || exit 1
 
+echo "== arming eslogger EARLY (kill ground truth, detached) =="
+# eslogger's EndpointSecurity signal subscription can take ~2-3 minutes to go
+# live; signals sent before it attaches are silently dropped (we measured this:
+# a fresh eslogger records only loginwindow sig:0 + system-daemon sig:9, and
+# drops user-sent HUP/KILL until ~2-3 min in). Launching it NOW — before the
+# arm-check and canary/rig gates — gives it warm-up time so it is recording by
+# the time LDB launches and the canary window opens. The liveness self-check
+# runs near the end of this script, after the other gates.
+# a stale eslogger from a prior aborted arm holds the single ES client slot and
+# starves this new one — clear it first.
+sudo -E pkill -x eslogger 2>/dev/null || true
+sleep 1
+mkdir -p "$HOME/.screen-reader-util/logs"
+ESLOG="$HOME/.screen-reader-util/logs/eslogger-$(date +%Y%m%d-%H%M%S).jsonl"
+sudo -E nohup eslogger signal > "$ESLOG" 2>&1 < /dev/null &
+sleep 2
+if pgrep -x eslogger > /dev/null 2>&1; then
+  echo "eslogger: running (pid $(pgrep -x eslogger)) -> $ESLOG"
+else
+  echo "ABORT: eslogger did not start. Full Disk Access is required for Terminal"
+  echo "(System Settings > Privacy & Security > Full Disk Access). Grant it,"
+  echo "QUIT and reopen Terminal, then re-run this script."
+  exit 1
+fi
+
 echo "== arm-check: one root capture now (TCC gate — fails here, not mid-exam) =="
 sudo -E "$RIG" --arm-check --log /tmp/g3a-armcheck.log
 case $? in
@@ -111,29 +139,6 @@ case $? in
      echo "Screen Recording to Terminal (quit+reopen Terminal first)."; exit 1 ;;
   *) echo "ABORT: arm-check failed (no display / capture error). See output above."; exit 1 ;;
 esac
-
-echo "== arming eslogger (kill ground truth, detached) =="
-mkdir -p "$HOME/.screen-reader-util/logs"
-ESLOG="$HOME/.screen-reader-util/logs/eslogger-$(date +%Y%m%d-%H%M%S).jsonl"
-sudo -E nohup eslogger signal > "$ESLOG" 2>&1 < /dev/null &
-sleep 3
-
-echo "== eslogger self-check: sending a test HUP that MUST appear in the stream =="
-sleep 30 &
-SPID=$!
-sleep 1
-kill -HUP "$SPID" 2>/dev/null
-sleep 3
-if grep -q "\"sig\":1" "$ESLOG" 2>/dev/null && grep "\"sig\":1" "$ESLOG" | grep -q "\"pid\":$SPID"; then
-  echo "ES_SELFCHECK_OK — stream live, test event recorded in $ESLOG"
-else
-  echo "ABORT: eslogger stream recorded nothing for the test signal."
-  echo "Grant Full Disk Access to Terminal (System Settings > Privacy & Security >"
-  echo "Full Disk Access), QUIT and reopen Terminal, then re-run this script."
-  echo "(eslogger pids still running: $(pgrep -x eslogger | tr '\n' ' ')) — kill with:"
-  echo "  sudo pkill -x eslogger"
-  exit 1
-fi
 
 echo "== canary pre-flight: real uid-501 GUI spawn via launchctl asuser =="
 echo "   (launchctl asuser alone does NOT setuid — sudo -u drops to the console"
@@ -170,6 +175,36 @@ if ! grep -q "G3A_HOTKEY_OK" "$RIGLOG" 2>/dev/null; then
 fi
 echo "rig: G3A_FILTER_READY + G3A_HOTKEY_OK"
 grep "G3A_START" "$RIGLOG"
+
+echo "== eslogger self-check: stream must be recording real signal deliveries =="
+# eslogger's ES signal subscription records SYSTEM signal deliveries (mds /
+# runningboardd sig:9, launchservicesd sig:19) within ~30s — that proves Full
+# Disk Access is granted and the stream is live. Recording USER-sent signals
+# (our bash -> sleep HUP) only begins after a VARIABLE ~2-5 min warmup (measured
+# 175s and 290s across runs), so we deliberately do NOT block arming on that.
+# Kill attribution at collection time uses the reliable launchd source
+# (`log show 'sent by LockDown Browser'`); eslogger is a best-effort cross-check
+# that will be warm long before the canary window (~+10 min).
+found=0
+for _ in $(seq 1 40); do
+  if grep -qE '"sig":[1-9]' "$ESLOG" 2>/dev/null; then
+    found=1; break
+  fi
+  sleep 3
+done
+if [ "$found" = 1 ]; then
+  echo "ES_STREAM_LIVE — eslogger is recording signal deliveries (FDA OK): $ESLOG"
+else
+  echo "ABORT: eslogger stream recorded no signal deliveries after ~2 min."
+  echo "Grant Full Disk Access to Terminal (System Settings > Privacy & Security >"
+  echo "Full Disk Access), QUIT and reopen Terminal, then re-run this script."
+  echo "(eslogger pids still running: $(pgrep -x eslogger | tr '\n' ' ')) — kill with:"
+  echo "  sudo pkill -x eslogger"
+  echo "Cleaning up the rig and caffeinate so a re-run is clean..."
+  sudo -E pkill -x g3a-rig 2>/dev/null || true
+  sudo -E pkill -x caffeinate 2>/dev/null || true
+  exit 1
+fi
 
 echo "== exposure probe (as your user — what LDB's checks can see of the rig) =="
 "$EXPOSE" --log "$RIGLOG" || echo "WARN: exposure probe failed (non-fatal — see output above)"

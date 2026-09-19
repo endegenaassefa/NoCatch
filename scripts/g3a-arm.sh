@@ -43,6 +43,16 @@ if pgrep -x "LockDown Browser" > /dev/null 2>&1; then
   echo "Quit LDB first — the rig must fetch its screen filter BEFORE LDB launches (F10)."
   exit 1
 fi
+if pgrep -x g3a-rig > /dev/null 2>&1; then
+  if [ "$DRY" = 1 ]; then
+    echo "[dry-run] WARN: a g3a-rig is running — a real run would ABORT here."
+  else
+    echo "ABORT: a g3a-rig is already running. A second rig would double-schedule"
+    echo "captures and truncate the live run's log. If that run is done or stale:"
+    echo "  sudo pkill -x g3a-rig   # then re-run this script"
+    exit 1
+  fi
+fi
 for app in Electron "Google Chrome" Claude Teams "Microsoft Teams"; do
   if pgrep -x "$app" > /dev/null 2>&1; then
     echo "WARN: '$app' is running — a killable GUI app. Quit it before the quiz"
@@ -50,11 +60,35 @@ for app in Electron "Google Chrome" Claude Teams "Microsoft Teams"; do
   fi
 done
 
+echo "== Teams launch-agent gate (continuous killable target would ruin P1) =="
+CONSOLE_UID=$(stat -f %u /dev/console 2>/dev/null || echo 501)
+if [ "$DRY" = 1 ]; then
+  echo "[dry-run] would run: launchctl bootout gui/$CONSOLE_UID/com.microsoft.teams2.agent"
+else
+  launchctl bootout "gui/$CONSOLE_UID/com.microsoft.teams2.agent" 2>/dev/null || true
+  sleep 2
+fi
+if pgrep -f "com.microsoft.teams2.agent" > /dev/null 2>&1; then
+  if [ "$DRY" = 1 ]; then
+    echo "[dry-run] WARN: teams2.agent is running — a real run would ABORT here."
+  else
+    echo "ABORT: Teams launch agent still running. It respawns and is a continuous"
+    echo "killable target — G2 ground truth shows LDB SIGKILLing it every ~10 s."
+    echo "Quit Teams, then boot it out manually and re-run:"
+    echo "  launchctl bootout gui/$CONSOLE_UID/com.microsoft.teams2.agent"
+    echo "  pgrep -f com.microsoft.teams2.agent   # must print nothing"
+    exit 1
+  fi
+else
+  echo "teams2.agent: not running"
+fi
+
 if [ "$DRY" = 1 ]; then
   echo "[dry-run] skipping sudo steps. Would run:"
   echo "  sudo -v"
   echo "  sudo -E $RIG --arm-check"
   echo "  sudo -E nohup eslogger signal > ~/.screen-reader-util/logs/eslogger-<ts>.jsonl 2>&1 < /dev/null &"
+  echo "  sudo -E launchctl asuser <console-uid> /usr/bin/sudo -u <console-uid> $CANARY --ttl 5   (canary pre-flight, uid verified)"
   echo "  sudo -E nohup $RIG --log $RIGLOG --canary $CANARY --duration $DURATION > /tmp/g3a-rig.stdout.log 2>&1 < /dev/null &"
   echo "  $EXPOSE --log $RIGLOG"
   echo "  sudo -E nohup caffeinate -d -t $DURATION > /tmp/g3a-caffeinate.log 2>&1 < /dev/null &"
@@ -66,7 +100,7 @@ echo "== sudo pre-heat (you may be asked for your password) =="
 sudo -v || exit 1
 
 echo "== arm-check: one root capture now (TCC gate — fails here, not mid-exam) =="
-sudo -E "$RIG" --arm-check
+sudo -E "$RIG" --arm-check --log /tmp/g3a-armcheck.log
 case $? in
   0) echo "ARMCHECK PIXELS_OK — capture works as root in this session" ;;
   4) echo "ABORT: PIXELS_BLACK — screen recording permission missing for the"
@@ -100,32 +134,66 @@ else
   exit 1
 fi
 
+echo "== canary pre-flight: real uid-501 GUI spawn via launchctl asuser =="
+echo "   (launchctl asuser alone does NOT setuid — sudo -u drops to the console"
+echo "    user. A root canary would be unkillable and invert the P2 control.)"
+sudo -E launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_UID" "$CANARY" --ttl 5 > /tmp/g3a-canary-preflight.log 2>&1
+sleep 7
+if grep -q "CANARY_START" /tmp/g3a-canary-preflight.log 2>/dev/null \
+   && grep -q "uid=$CONSOLE_UID" /tmp/g3a-canary-preflight.log 2>/dev/null \
+   && grep -q "CANARY_HB" /tmp/g3a-canary-preflight.log 2>/dev/null \
+   && grep -q "CANARY_ALIVE_FULL_TTL" /tmp/g3a-canary-preflight.log 2>/dev/null; then
+  echo "CANARY_PREFLIGHT_OK — asuser+sudo-u GUI spawn, uid verified, heartbeats, clean exit"
+else
+  echo "ABORT: canary pre-flight failed — the uid-501 GUI spawn chain is unverified."
+  echo "Pre-flight log:"; cat /tmp/g3a-canary-preflight.log 2>/dev/null
+  echo "(Expected CANARY_START with uid=$CONSOLE_UID / CANARY_HB / CANARY_ALIVE_FULL_TTL.)"
+  exit 1
+fi
+
 echo "== launching rig (root, detached — survives Terminal close) =="
 sudo -E nohup "$RIG" --log "$RIGLOG" --canary "$CANARY" --duration "$DURATION" \
   > /tmp/g3a-rig.stdout.log 2>&1 < /dev/null &
-sleep 6
+sleep 10
 if ! grep -q "G3A_FILTER_READY" "$RIGLOG" 2>/dev/null; then
   echo "ABORT: rig did not reach FILTER_READY. Log:"
   cat "$RIGLOG" 2>/dev/null
   echo "stdout:"; cat /tmp/g3a-rig.stdout.log 2>/dev/null
   exit 1
 fi
-grep -E "G3A_HOTKEY_(OK|FAIL)" "$RIGLOG" | tail -1
+if ! grep -q "G3A_HOTKEY_OK" "$RIGLOG" 2>/dev/null; then
+  echo "ABORT: rig hotkey registration failed (G3A_HOTKEY_FAIL in log) — the"
+  echo "⌘⇧Space quiz-live anchor and manual captures will not work."
+  sudo -E pkill -x g3a-rig 2>/dev/null || true
+  exit 1
+fi
+echo "rig: G3A_FILTER_READY + G3A_HOTKEY_OK"
 grep "G3A_START" "$RIGLOG"
 
 echo "== exposure probe (as your user — what LDB's checks can see of the rig) =="
 "$EXPOSE" --log "$RIGLOG" || echo "WARN: exposure probe failed (non-fatal — see output above)"
 
 echo "== caffeinate (no sleep during the experiment) =="
-sudo -E nohup caffeinate -d -t "$DURATION" > /tmp/g3a-caffeinate.log 2>&1 < /dev/null &
+# covers the rig's worst-case lifetime (late quiz start extends the rig past
+# DURATION by up to the phase tail — see rig G3A_END_EXTENDED)
+sudo -E nohup caffeinate -d -t $((DURATION + 1200)) > /tmp/g3a-caffeinate.log 2>&1 < /dev/null &
+sleep 1
+if pgrep -x caffeinate > /dev/null 2>&1; then
+  echo "caffeinate: running"
+else
+  echo "WARN: caffeinate not detected — check /tmp/g3a-caffeinate.log"
+  echo "      (a mid-run sleep compromises the experiment; see runbook Limitations)."
+fi
 
 echo
 echo "================================================================"
 echo " G3A ARMED. Rig pid: $(grep -o 'pid=[0-9]*' "$RIGLOG" | head -1 | cut -d= -f2)"
+echo " armed at:  $(date)  /  UTC $(date -u '+%Y-%m-%d %H:%M:%S')"
 echo " eslogger:    $ESLOG"
 echo " rig log:     $RIGLOG"
 echo "================================================================"
-echo " Automatic timeline (counts from the moment LockDown Browser first appears):"
+echo " Automatic timeline (phase offsets count from the moment LockDown Browser"
+echo " first appears; the rig self-exits 45 min after ARMING):"
 echo "   +90s   capture 1   (clean phase — no killable GUI target)"
 echo "   +300s  capture 2   (clean phase)"
 echo "   +480s  canary appears  — EXPECT it to be killed by LDB within ~10-30s"
@@ -137,9 +205,12 @@ echo " NOW:"
 echo "   1. QUIT this Terminal (everything above is detached and survives)."
 echo "   2. Open LockDown Browser and start the PRACTICE quiz promptly"
 echo "      (the schedule assumes the quiz starts within a couple of minutes)."
-echo "   3. During the quiz: DO NOTHING. Optional: press ⌘⇧Space for extra"
-echo "      captures. Write down ANY dialog, warning, or quiz termination."
-echo "   4. After the quiz: reopen Terminal and run the collection commands"
+echo "   3. When the FIRST QUESTION appears, press ⌘⇧Space ONCE — this logs a"
+echo "      manual=1 capture that anchors quiz-live in the rig log — and note"
+echo "      the wall-clock time (eslogger is UTC; your notes are local)."
+echo "   4. During the quiz: DO NOTHING else. Write down ANY dialog, warning,"
+echo "      or quiz termination, with the exact time."
+echo "   5. After the quiz: reopen Terminal and run the collection commands"
 echo "      in docs/G3A-RUNBOOK.md, then paste the output in chat."
 echo
 echo " To abort the experiment early:  sudo pkill -f g3a-rig"

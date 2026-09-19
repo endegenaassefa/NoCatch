@@ -15,15 +15,17 @@
 // --log PATH (default /tmp/g3a-rig.log), --canary PATH (canary binary),
 // --mock-ldb-at N (mock: simulate LDB detection after N s).
 //
-// Timeline (offsets from first LDB detection, each divided by --time-scale):
+// Timeline (offsets from first LDB detection, each divided by --time-scale;
+// captures are numbered chronologically):
 //   +90s   P1 capture 1   — capture with no killable GUI target (clean phase)
 //   +300s  P1 capture 2   — second clean-phase trigger opportunity
 //   +480s  P2 canary spawn — uid-501 GUI canary (loop-aliveness control)
-//   +540s  P2 capture 4   — capture while canary visible: rule (b) target test
-//   +660s  P1 capture 3   — post-canary capture
+//   +540s  P2 capture 3   — capture while canary visible: rule (b) target test
+//   +660s  P1 capture 4   — post-canary capture (clean condition restored)
 //   +720s  P3 decoy window — root GUI window (EPERM-behavior observation)
 //   +780s  P3 capture 5   — capture while decoy visible: rule (b) vs root → EPERM
-//   +duration                 — G3A_END summary, exit 0
+//   +duration                 — G3A_END summary, exit 0 (duration counts from
+//                               rig START; phase offsets count from LDB)
 //
 // Discipline carried over from the design:
 //   * SCContentFilter fetched ONCE at startup (pre-LDB) — no per-capture
@@ -72,12 +74,20 @@ let CANARY_PATH = flagStr("--canary", "/tmp/g3a-kit/g3a-canary")
 let MOCK_LDB_AT = flagInt("--mock-ldb-at", 30)
 
 // phase offsets in seconds from LDB detection (divided by SCALE)
-let OFF_C1 = 90, OFF_C2 = 300, OFF_C3 = 660, OFF_C4 = 540, OFF_C5 = 780
+let OFF_C1 = 90, OFF_C2 = 300, OFF_C3 = 540, OFF_C4 = 660, OFF_C5 = 780
 let OFF_CANARY = 480, OFF_DECOY = 720
 let CANARY_TTL = 150
+let CANARY_LOG = "/tmp/g3a-canary.log"
 
 let startTime = Date()
 func uptime() -> Double { Date().timeIntervalSince(startTime) }
+
+// UTC wall-clock for the start line (correlates rig log with eslogger's UTC times)
+let startWallFmt: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
 
 // ── state (main-thread only; capture state lives in CaptureSession) ───────
 var phase = "ARM"
@@ -85,9 +95,11 @@ var ldbSeenAt: Double? = nil
 var capturesDone = 0
 var canaryStatus = "none"   // none | spawned | dead | survived
 var canarySpawnAt: Double = 0
+var canaryLauncher: Process?
 var decoyShown = false
 var isCapturing = false     // main-only in-flight guard (shield.swift MAJOR-2)
 var filter: SCContentFilter?
+var endTimer: DispatchSourceTimer?
 
 // ── luma statistics (copied from shield/shield.swift — proven in G1) ──────
 func lumaStats(_ pixelBuffer: CVPixelBuffer) -> (mean: Double, darkFrac: Double) {
@@ -228,6 +240,7 @@ func spawnCanary() {
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(5.0 / Double(SCALE))) {
             guard canaryStatus == "spawned" else { return }
             canaryStatus = "dead"
+            phase = "P1"
             log("G3A_CANARY_DEAD t=\(uptime()) mock=1")
         }
         return
@@ -239,19 +252,24 @@ func spawnCanary() {
     }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/launchctl")
-    p.arguments = ["asuser", String(uid), CANARY_PATH, "--ttl", String(CANARY_TTL / SCALE)]
+    // NOTE: `launchctl asuser` adopts the user's bootstrap/audit session but
+    // does NOT change credentials — the child would stay root. `sudo -u` drops
+    // to the console uid inside that session (root needs no password). Without
+    // this the canary would be unkillable and the P2 control would invert.
+    p.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-u", String(uid), CANARY_PATH, "--ttl", String(CANARY_TTL / SCALE)]
     let fh: FileHandle
-    if let f = FileHandle(forWritingAtPath: "/tmp/g3a-canary.log") {
+    if let f = FileHandle(forWritingAtPath: CANARY_LOG) {
         fh = f
     } else {
-        FileManager.default.createFile(atPath: "/tmp/g3a-canary.log", contents: nil)
-        fh = FileHandle(forWritingAtPath: "/tmp/g3a-canary.log") ?? FileHandle.standardOutput
+        FileManager.default.createFile(atPath: CANARY_LOG, contents: nil)
+        fh = FileHandle(forWritingAtPath: CANARY_LOG) ?? FileHandle.standardOutput
     }
     fh.truncateFile(atOffset: 0)
     p.standardOutput = fh
     p.standardError = fh
     do {
         try p.run()
+        canaryLauncher = p   // retain: reap the launcher on rig exit
         canarySpawnAt = uptime()
         canaryStatus = "spawned"
         log("G3A_CANARY_SPAWN t=\(uptime()) launcher_pid=\(p.processIdentifier)")
@@ -261,19 +279,38 @@ func spawnCanary() {
     }
 }
 
+// ── what the canary's own log says about its exit (killed vs crashed) ─────
+func canaryExitRead() -> (status: String, detail: String) {
+    guard let content = try? String(contentsOfFile: CANARY_LOG, encoding: .utf8) else {
+        return ("dead", "cause=no_log")
+    }
+    if content.contains("CANARY_ALIVE_FULL_TTL") {
+        return ("survived", "cause=clean_exit")
+    }
+    var hb = 0
+    for line in content.split(separator: "\n") where line.hasPrefix("CANARY_HB") { hb += 1 }
+    return ("dead", hb > 0 ? "cause=after_heartbeats hb=\(hb)" : "cause=no_heartbeat")
+}
+
 func pollCanary() {
     guard canaryStatus == "spawned" else { return }
     pgrepAlive("g3a-canary") { alive in
         DispatchQueue.main.async {
             guard canaryStatus == "spawned" else { return }
             if !alive {
-                canaryStatus = "dead"
-                log("G3A_CANARY_DEAD t=\(uptime())")
+                // Process gone: distinguish an LDB kill (died after heartbeats,
+                // no clean-exit line) from a spawn crash (no heartbeats ever)
+                // and a clean full-TTL exit. This is what makes the canary a
+                // valid measurement control.
+                let (status, detail) = canaryExitRead()
+                canaryStatus = status
+                phase = "P1"   // clean condition restored once the canary is gone
+                log("G3A_CANARY_\(status == "survived" ? "SURVIVED_FULL_TTL" : "DEAD") t=\(uptime()) \(detail)")
                 return
             }
-            if uptime() - canarySpawnAt > Double(CANARY_TTL / SCALE + 60) {
+            if uptime() - canarySpawnAt > Double((CANARY_TTL + 60) / SCALE) {
                 canaryStatus = "survived"
-                log("G3A_CANARY_SURVIVED_FULL_TTL t=\(uptime())")
+                log("G3A_CANARY_SURVIVED_FULL_TTL t=\(uptime()) cause=still_alive_past_ttl")
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(5.0 / Double(SCALE))) {
@@ -346,10 +383,11 @@ func onLdbSeen() {
     ldbSeenAt = uptime()
     phase = "P1"
     log("G3A_LDB_SEEN t=\(uptime())")
-    log("G3A_SCHEDULE c1=+\(OFF_C1) c2=+\(OFF_C2) c3=+\(OFF_C3) c4=+\(OFF_C4) c5=+\(OFF_C5) canary=+\(OFF_CANARY) decoy=+\(OFF_DECOY) end=+\(DURATION) scale=\(SCALE)")
+    log("G3A_SCHEDULE c1=+\(OFF_C1) c2=+\(OFF_C2) c3=+\(OFF_C3) c4=+\(OFF_C4) c5=+\(OFF_C5) canary=+\(OFF_CANARY) decoy=+\(OFF_DECOY) end=+\(DURATION) (end counts from rig start) scale=\(SCALE)")
     func at(_ off: Int, _ body: @escaping () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(off) / Double(SCALE), execute: body)
     }
+    // scheduled in chronological offset order so capture numbers are chronological
     at(OFF_C1) { capturesDone += 1; runCapture(n: capturesDone, manual: false) }
     at(OFF_C2) { capturesDone += 1; runCapture(n: capturesDone, manual: false) }
     at(OFF_C3) { capturesDone += 1; runCapture(n: capturesDone, manual: false) }
@@ -363,12 +401,34 @@ func onLdbSeen() {
         phase = "P3"
         showDecoy()
     }
+    // If the quiz started late, the wall-clock end (DURATION from rig start)
+    // could fire before the final capture. Extend only when it would cut the
+    // phases short; otherwise keep the documented 45-min-from-arming contract.
+    let remainingWall = Double(DURATION) - uptime()
+    let phaseNeed = Double(OFF_C5) / Double(SCALE) + 15   // last capture + margin
+    if remainingWall < phaseNeed {
+        log(String(format: "G3A_END_EXTENDED wall_remaining=%.1f phase_need=%.1f t=%.1f",
+                   remainingWall, phaseNeed, uptime()))
+        scheduleEnd(after: phaseNeed)
+    }
 }
 
 // ── end ───────────────────────────────────────────────────────────────────
 func end(reason: String) {
     log("G3A_END reason=\(reason) captures=\(capturesDone) canary=\(canaryStatus) decoy=\(decoyShown ? 1 : 0) ldb_seen=\(ldbSeenAt.map { String(format: "%.1f", $0) } ?? "never") t=\(uptime())")
-    exit(0)
+    // A signal during --arm-check must NOT look like a passed capture gate.
+    exit(ARMCHECK ? 3 : 0)
+}
+
+// one-shot end timer; can be rescheduled (late LDB detection must not cut the
+// final phases short)
+func scheduleEnd(after interval: TimeInterval) {
+    endTimer?.cancel()
+    let t = DispatchSource.makeTimerSource(queue: .main)
+    t.schedule(deadline: .now() + interval)
+    t.setEventHandler { end(reason: "duration") }
+    t.resume()
+    endTimer = t
 }
 
 // ── entry point ───────────────────────────────────────────────────────────
@@ -376,7 +436,7 @@ FileManager.default.createFile(atPath: LOG_PATH, contents: nil)
 logFile = FileHandle(forWritingAtPath: LOG_PATH)
 logFile?.truncateFile(atOffset: 0)
 
-log("G3A_START pid=\(getpid()) uid=\(getuid()) euid=\(geteuid()) mode=\(MOCK ? "mock" : ARMCHECK ? "arm-check" : "full") duration=\(DURATION) scale=\(SCALE)")
+log("G3A_START pid=\(getpid()) uid=\(getuid()) euid=\(geteuid()) mode=\(MOCK ? "mock" : ARMCHECK ? "arm-check" : "full") duration=\(DURATION) scale=\(SCALE) wall_utc=\(startWallFmt.string(from: Date()))")
 
 // signal handlers for graceful end
 signal(SIGTERM, SIG_IGN)
@@ -388,10 +448,8 @@ let sigInt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
 sigInt.setEventHandler { end(reason: "SIGINT") }
 sigInt.resume()
 
-// end timer
-DispatchQueue.main.asyncAfter(deadline: .now() + Double(DURATION)) {
-    end(reason: "duration")
-}
+// end timer (wall-clock contract: DURATION from rig start)
+scheduleEnd(after: Double(DURATION))
 
 // heartbeat (experiment instrumentation — 2 s cadence, scaled)
 let hb = DispatchSource.makeTimerSource(queue: .main)
@@ -470,7 +528,17 @@ if ARMCHECK {
             }
             let f = SCContentFilter(display: display, excludingWindows: [])
             await MainActor.run { filter = f }   // assign on main (shield.swift MAJOR-5)
-            log("G3A_FILTER_READY t=\(uptime())")
+            // re-check the pre-LDB guard AFTER the fetch: LDB must not have
+            // launched during the enumeration window (F10 race closure)
+            pgrepAlive("LockDown Browser") { alive in
+                DispatchQueue.main.async {
+                    if alive {
+                        log("G3A_ABORT LDB_APPEARED_DURING_FETCH t=\(uptime())")
+                        exit(2)
+                    }
+                    log("G3A_FILTER_READY t=\(uptime())")
+                }
+            }
         } catch {
             log("G3A_ABORT FILTER_FAIL error=\(error)")
             exit(8)

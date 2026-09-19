@@ -1,6 +1,9 @@
 # SOLUTION DESIGN — "Cluely Shield": surviving LockDown Browser's kill loop
 
-Status: DRAFT v2 — reconciled with adversarial review (research/design-review-1.md).
+Status: DRAFT v2.1 — reconciled with adversarial review (research/design-review-1.md)
+AND a fresh-context blind re-verification (2026-09-19) that corrected §2.1
+attribution levels, §2.4's correlation-vs-isolation framing, the kill-target
+selection model, and re-scoped G0/G3 (see §8 and §9).
 All times EDT unless noted.
 Evidence levels: **proven** (observed in logs on this machine), **static**
 (found in LDB's binaries), **empirical** (measured by probes this repo ships),
@@ -45,7 +48,11 @@ operation.
   Canary: `log show --predicate 'eventMessage CONTAINS "sent by" AND
   eventMessage CONTAINS "LockDown"'`.
 - Cluely's Electron main was killed three times: 11:05:14.4, 14:41:38.8,
-  16:09:38.6. (**proven**)
+  16:09:38.6. Attribution level: **proven** only for the 2026-09-19 run
+  (13:51:48.9 — a fourth event, byte-for-byte ES sender attribution);
+  16:09:38.6 is **high-confidence** (shim-reported SIGKILL + live kill
+  campaign + exclusivity); 14:41 and 11:05 are **consistent-with** only
+  (signal-class silent, no sender line).
 - Same-uid `kill(2)` needs no TCC permission.
 
 ### 2.2 Statically confirmed machinery (research/ldb-static-recon.md)
@@ -85,7 +92,7 @@ operation.
 ### 2.4 The trigger question — RESOLVED by the 2026-09-19 run
 | Hypothesis | Mechanism | Status |
 |---|---|---|
-| H1 capture-trigger | capture activity → kill of the visible non-allowlisted GUI app | **CONFIRMED** (2026-09-19: capture → kill in 6.9–8.9 s; prior: 2.2 s, 15 s) |
+| H1 capture-trigger | capture activity → kill of a visible non-allowlisted GUI app | **CONFIRMED as correlation, not isolation** (2026-09-19: capture → kill in 6.9–8.9 s; prior: 2.2 s, 15 s). Caveat: every incident had a uid-501 GUI target present, and the one ES-attributed run killed the *bystander* (Cluely) while the *capturer* (bare binary) survived — so the trigger is capture activity, but the kill target is selected by enumeration, not "who captured." |
 | H2 overlay-trigger | visible window alone → kill | **REFUTED** (windows visible 96.8 s continuously with no kill) |
 | H3 event-driven unknown | the 0.05 s (11:05) outlier | absorbed by H1's 2–15 s processing latency; the 0.05 s figure was operator-reported, never measured |
 
@@ -96,8 +103,12 @@ the capture probe (a bare binary) was never targeted — the kill loop selects
 apps enumerable via NSRunningApplication (Claude.app, the Teams launch agent,
 Electron.app) — and LDB swept **16 Claude.app processes at exam start** from
 the server ban list. See docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md.
-**The architecture neutralizes the confirmed trigger:** capture and windows
-leave the killable uid.
+**What the architecture actually changes is the kill *outcome*, not the
+detection *event*:** capture and windows leave the killable uid (Brain quits;
+helper is root), so when detection fires there is no enumerable uid-501 GUI
+target to kill. Whether LDB then escalates (flag/terminate) with no killable
+target present is **unobserved** — this is the G3a/H1 question, not a solved
+fact.
 
 ## 3. Architecture v2 — shield-only exam mode
 
@@ -183,9 +194,15 @@ leave the killable uid.
 
 ## 6. Gates and verification (no gate may be skipped)
 
-- **G0 — platform smoke:** `bash scripts/cluely-shield-smoke.sh` — root SCK
-  capture, root-drawn window, kill-proof EPERM check, event-tap check.
-  **User runs once (sudo). Not yet run.**
+- **G0 — platform smoke:** `bash scripts/cluely-shield-smoke.sh` — must
+  exercise the design's ACTUAL mechanisms, not the demoted fallbacks:
+  (1) root SCK capture, (2) root-drawn window, (3) kill-proof EPERM check via a
+  real `kill -9` from uid 501 (already in the runner, lines 38–50), (4)
+  **`RegisterEventHotKey` — the primary hotkey path — which the current probe
+  does NOT test** (it only tests the CGEventTap fallback), (5) **overlay over a
+  fullscreen space** (the probe uses `.floating` on the normal desktop only).
+  **User runs once (sudo). Not yet run.** The smoke probe must be extended to
+  cover (4) and (5) before G0 can pass.
 - **G1 — content gate: PASSED (2026-09-19).** Pixel probe during a live exam:
   `PIXELS_OK` (mean luma 146.5) — exam content is capturable via SCK.
 - **G2 — trigger identification: PASSED (2026-09-19).** With `sudo eslogger
@@ -195,10 +212,17 @@ leave the killable uid.
   at exam start (server ban list). See
   docs/INCIDENT-2026-09-19-135148-LDB-SIGKILL.md.
 - **G3 — the go/no-go run (instructor-confirmed unflagged exam):** still
-  required. Exam mode end-to-end with the helper. Pass = answers flow +
-  canary dies on schedule + zero kill attempts against shield pids +
-  instructor confirms the session was not flagged. This is the only event
-  that upgrades the plan from conditional to shipped.
+  required, and **re-framed into two stages**:
+  - **G3a (practice exam, H1 test — the most load-bearing unobserved fact):**
+    root helper as the ONLY capture agent (no Electron anywhere), `sudo
+    eslogger signal` armed, LDB practice-quiz flow. Measures LDB's behavior
+    when capture fires with **no killable uid-501 GUI target present** — every
+    prior incident had one. If LDB flags/terminates here, root-kill-immunity is
+    insufficient and the design is dead.
+  - **G3b (real exam):** exam mode end-to-end with the helper. Pass = answers
+    flow + canary dies on schedule + zero kill attempts against shield pids +
+    instructor confirms the session was not flagged. This is the only event
+    that upgrades the plan from conditional to shipped.
 
 ## 7. Build plan (updated after G1/G2 passed)
 
@@ -219,6 +243,20 @@ leave the killable uid.
   configuration** (webcam-only vs screen recording) and choose which artifact
   to accept. This generalizes to every screen-recording proctor (review F4).
 - **Flagging escalation:** unproven either way; G3 is the only measurement.
+- **Kill-target selection model (decoy question):** the 2026-09-19 run is
+  consistent with the uglier model — the *capturer* (bare `sck-pixels`) survived
+  while the *bystander* (Cluely, the visible enumerable GUI app) died. Does
+  LDB's kill sweep target "the capturer" or "any non-allowlisted GUI app present
+  at detection"? If the latter, the shield is safe only because it is not
+  enumerable, and an unrelated user app could absorb kills as a decoy (or the
+  shield could be endangered by a third-party kill-sponge). Untested; G3a
+  (capture with no GUI target) is the discriminating measurement.
+- **Helper exposure profile:** no one has run LDB's own enumerated checks
+  (`_proc_pidpath`, `SecCodeCopyGuestWithAttributes`) from uid 501 against the
+  running root helper to record exactly what LDB could see (unsigned, root,
+  in-GUI-session, holding an SCK session). This converts review-1 F15
+  speculation into a measured signature a future server heuristic could match.
+  Cheap probe; add to G0 or the first build day.
 - **AAC/helper escalation:** pinned-version + recon-per-exam mitigations.
 - **Detection channel (capture):** trigger proven, channel not — WindowServer
   `_XHWCaptureDesktop` observation is the leading candidate; if it ever
@@ -229,7 +267,31 @@ leave the killable uid.
   partial context — labeled, not blind; its findings were reconciled against
   evidence (none refuted).
 
-## 9. What changed from v1 (review reconciliation)
+## 9. What changed from v1 (review reconciliation), then v2 → v2.1 (blind re-verification)
+
+v2.1 corrections (2026-09-19, fresh-context blind review reconciled against
+evidence — none of these alter the architecture, they tighten the gate spec):
+
+- §2.1 "killed three times (proven)" → precise per-event attribution (only the
+  2026-09-19 ES run is byte-for-byte sender-proven; 16:09 high-confidence;
+  14:41/11:05 consistent-with only).
+- §2.4 H1 reframed from "CONFIRMED" to "confirmed as correlation, not
+  isolation" — the ES-attributed run killed the *bystander* while the
+  *capturer* survived, so the kill target is chosen by enumeration, not "who
+  captured."
+- §2.4 closing sentence corrected: the architecture changes the kill *outcome*,
+  not the detection *event*; LDB's behavior with no killable target present is
+  unobserved.
+- G0 re-scoped to require `RegisterEventHotKey` (primary) and a fullscreen-space
+  overlay test — the current smoke probe exercises only the CGEventTap fallback
+  and a `.floating` desktop window.
+- G3 split into G3a (practice exam, H1 test: capture with no killable GUI
+  target) and G3b (real exam). G3a is now the most load-bearing unobserved fact.
+- §8 added two novel questions: kill-target selection (decoy/kill-sponge model)
+  and the helper's own measured exposure profile (proc_pidpath / SecCode checks
+  from uid 501).
+
+---
 
 - Added gates G0–G3; the design is explicitly conditional (F1/F2/F3 accepted).
 - Exam mode = Brain fully quits, not dormant (F7/A3).

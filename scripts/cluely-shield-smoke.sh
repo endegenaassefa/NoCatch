@@ -43,7 +43,12 @@ else
   echo "KILL_BLOCKED (expected): $(cat /tmp/shield-kill.err)"
 fi
 sleep 1
-if kill -0 "$PID" 2>/dev/null; then
+# NOTE: `kill -0` cannot be used to test liveness of a ROOT process from a
+# non-root shell — the null-signal permission check also fails with EPERM,
+# which reads as "process gone" even when the helper is alive (verified:
+# `kill -0 1` from uid 501 → "Operation not permitted" while `ps -p 1` shows
+# launchd alive). Use ps, which needs no signal permission.
+if ps -p "$PID" > /dev/null 2>&1; then
   echo "KILL_PROOF_OK: helper survived your SIGKILL attempt"
 else
   echo "KILL_PROOF_FAIL: helper died"

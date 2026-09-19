@@ -7,10 +7,17 @@ import AppKit
 import ScreenCaptureKit
 import CoreMedia
 import Foundation
+import Carbon
 
 func out(_ s: String) { print(s); fflush(stdout) }
 
 out("SMOKE_PID \(getpid()) uid=\(getuid()) euid=\(geteuid())")
+
+// Initialize the Cocoa app FIRST so Carbon's GetApplicationEventTarget() and
+// the CGEvent tap both have a live event target — matches the helper's
+// startup order (NSApplication.shared before registerHotKey).
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
 
 // --- D) event tap as root (hotkey path, without Accessibility TCC?) ---------
 let tap = CGEvent.tapCreate(
@@ -30,10 +37,29 @@ if let tap = tap {
     out("EVENT_TAP_FAILED (root did not bypass Accessibility TCC — hotkey fallback needed)")
 }
 
-// --- B) root-drawn window on the user's desktop ---------------------------
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+// --- F) RegisterEventHotKey (Carbon) — the PRIMARY hotkey path ------------
+// No Accessibility TCC. This is what Cluely's globalShortcut uses and what the
+// shield must use as primary (CGEventTap is the fallback; SecureEventInput can
+// kill taps). Registers ⌘⇧Space (Cluely's capture chord). Event DELIVERY is
+// exercised in the helper's --self-test; here we prove registration succeeds
+// with zero TCC.
+let hotKeyID = EventHotKeyID(signature: OSType(0x434C_5545), id: 1) // 'CLUE'
+var hotKeyRef: EventHotKeyRef?
+let hotKeyStatus = RegisterEventHotKey(
+    UInt32(kVK_Space),                  // space bar (49)
+    UInt32(cmdKey | shiftKey),          // ⌘⇧
+    hotKeyID,
+    GetApplicationEventTarget(),
+    0,
+    &hotKeyRef
+)
+if hotKeyStatus == 0 && hotKeyRef != nil {
+    out("REGISTER_EVENT_HOTKEY_OK")
+} else {
+    out("REGISTER_EVENT_HOTKEY_FAIL status=\(hotKeyStatus)")
+}
 
+// --- B) root-drawn window on the user's desktop ---------------------------
 let win = NSWindow(
     contentRect: NSRect(x: 200, y: 200, width: 420, height: 90),
     styleMask: [.borderless],
@@ -52,6 +78,30 @@ label.font = NSFont.systemFont(ofSize: 16)
 win.contentView?.addSubview(label)
 win.orderFrontRegardless()
 out("WINDOW_SHOWN")
+
+// --- E) fullscreen-space overlay test -------------------------------------
+// LDB runs fullscreen (its own space). The overlay must join that space via
+// .fullScreenAuxiliary + .canJoinAllSpaces. Simulate it: a titled "exam"
+// window goes fullscreen, then the overlay must be present on the active space.
+let examWin = NSWindow(
+    contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+    styleMask: [.titled, .resizable],
+    backing: .buffered,
+    defer: false
+)
+examWin.title = "FAKE EXAM (fullscreen space — the shield overlay should float over this)"
+examWin.collectionBehavior = [.fullScreenPrimary]
+examWin.center()
+examWin.makeKeyAndOrderFront(nil)
+examWin.toggleFullScreen(nil)
+out("FULLSCREEN_SPACE_REQUESTED")
+
+DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+    win.orderFrontRegardless()          // overlay joins the fullscreen space
+    out(win.isOnActiveSpace
+        ? "FULLSCREEN_OVERLAY_OK"
+        : "FULLSCREEN_OVERLAY_FAIL (isOnActiveSpace=false)")
+}
 
 // --- A) SCK capture under root --------------------------------------------
 final class Cap: NSObject, SCStreamOutput, SCStreamDelegate {

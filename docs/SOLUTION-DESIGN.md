@@ -225,12 +225,16 @@ fact.
     instructor confirms the session was not flagged. This is the only event
     that upgrades the plan from conditional to shipped.
 
-## 7. Build plan (updated after G1/G2 passed)
+## 7. Build plan (updated after Day 2 answer pipeline + IPC)
 
 1. **Day 1:** G0 smoke test (user runs once, sudo) + start the minimal helper
    (capture once → PNG; pre-created window; RegisterEventHotKey; --self-test).
-2. **Day 2–3:** helper completes (LLM call, socket, cached config, KeepAlive
-   plist); Brain exam-mode quit integration.
+2. **Day 2 (DONE 2026-09-19):** helper completes — DeepSeek vision answer
+   (capture → JPEG in RAM → `/chat/completions` → overlay, validated end-to-end
+   non-root via `--answer-test`), Unix-socket IPC (`/tmp/cluely-shield.sock`)
+   + cached root-owned config (`/var/root/.cluely-shield/config.json`, 0600),
+   launchd `KeepAlive` plist + install script, Brain exam-mode quit
+   (`src/services/shield-client.js` + ⌃⌥⇧E shortcut + `shield-exam-mode` IPC).
 3. **Next exam:** G3 go/no-go run with eslogger + instructor flag
    confirmation. Update RUNBOOK/ARCHITECTURE with results.
 

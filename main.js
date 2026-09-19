@@ -898,6 +898,10 @@ class ApplicationController {
         const results = windowManager.testAlwaysOnTopForAllWindows();
         logger.info('Always-on-top test triggered via shortcut', results);
       },
+      // Cluely Shield exam-mode handoff: configure the root helper, then quit
+      // the Brain (⌘⇧⌥E). Deliberately a 4-key chord so it never collides with
+      // an exam's own shortcuts.
+      "CommandOrControl+Shift+Alt+E": () => this.enterShieldExamMode(),
       // Context-sensitive shortcuts based on interaction mode
       "CommandOrControl+Up": () => this.handleUpArrow(),
       "CommandOrControl+Down": () => this.handleDownArrow(),
@@ -930,6 +934,38 @@ class ApplicationController {
       });
     } catch (error) {
       logger.warn("Failed to register capture hotkey", { error: error.message });
+    }
+  }
+
+  // ── Cluely Shield exam-mode handoff ─────────────────────────────────────
+  // Push the cached DeepSeek config/credentials to the root helper over the
+  // Unix socket, flip examMode on, then fully quit the Brain. From this point
+  // the root helper is the only capture/answer agent and LDB (uid 501) cannot
+  // kill it (EPERM proven in G0). The Brain must NOT stay dormant — it quits.
+  async enterShieldExamMode(opts = {}) {
+    try {
+      const shieldClient = require("./src/services/shield-client");
+      const apiKey = config.getApiKey("DEEPSEEK");
+      // Never quit the Brain without a key: an empty-key helper cannot answer
+      // and there is no Brain left to fix it. Fail loud and stay alive instead.
+      if (!apiKey) {
+        logger.error("Shield exam mode aborted: no DeepSeek API key");
+        return { ok: false, error: "no DeepSeek API key configured" };
+      }
+      const reply = await shieldClient.configureExamMode({
+        apiKey,
+        model: opts.model || config.get("llm.deepseek.model") || "deepseek-flash",
+        baseUrl: opts.baseUrl || config.get("llm.deepseek.baseUrl") || "https://api.deepseek.com",
+        prompt: opts.prompt || shieldClient.DEFAULT_PROMPT,
+        maxTokens: opts.maxTokens || config.get("llm.deepseek.generation.maxOutputTokens") || 4096
+      });
+      logger.info("Shield exam mode: helper configured; quitting Brain", reply);
+      // One tick so any caller's IPC reply/ack fires, then quit everything.
+      setTimeout(() => app.quit(), 150);
+      return { ok: true, examMode: reply.examMode };
+    } catch (error) {
+      logger.error("Shield exam mode handoff failed", { error: error.message });
+      return { ok: false, error: error.message };
     }
   }
 
@@ -1199,6 +1235,42 @@ class ApplicationController {
 
     ipcMain.handle("get-capture-mode", () => {
       return { active: this._captureMode, target: this._captureTarget };
+    });
+
+    // ── Cluely Shield (root helper) IPC ─────────────────────────────────
+    // Exam-mode handoff: push cached config/credentials to the root helper
+    // over the Unix socket, then FULLY quit the Brain (design F7/A3 — exam
+    // mode = Brain quits, not dormant). After this, the only capture agent is
+    // the root helper, which LDB (uid 501) cannot SIGKILL.
+    ipcMain.handle("shield-ping", async () => {
+      try {
+        const shieldClient = require("./src/services/shield-client");
+        return { ok: await shieldClient.ping() };
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle("shield-exam-mode", async (_event, opts = {}) => {
+      return await this.enterShieldExamMode(opts);
+    });
+
+    ipcMain.handle("shield-answer", async () => {
+      try {
+        const shieldClient = require("./src/services/shield-client");
+        return await shieldClient.answerNow();
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle("shield-quit", async () => {
+      try {
+        const shieldClient = require("./src/services/shield-client");
+        return await shieldClient.quit();
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
     });
 
     ipcMain.handle("synthetic-input", async (event, command) => {

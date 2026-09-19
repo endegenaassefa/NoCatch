@@ -41,8 +41,10 @@ The compiled binary `shield/shield` is gitignored — never commit it.
 ## Run
 
 ```bash
-sudo -E ./shield/shield              # interactive: overlay + hotkey capture
+sudo -E ./shield/shield              # interactive: overlay + hotkey capture + socket IPC
 sudo -E ./shield/shield --self-test  # one-shot capture -> luma verdict, exit 0/4
+./shield/shield --answer-test IMG    # NON-root: fixture image -> DeepSeek -> print answer
+./shield/shield --socket-test        # NON-root: socket IPC round-trip (30 s)
 ```
 
 ## Design contract (Day 1)
@@ -54,12 +56,28 @@ sudo -E ./shield/shield --self-test  # one-shot capture -> luma verdict, exit 0/
 - `--self-test` captures once and prints a luma verdict (`PIXELS_OK` / `BLACK`).
 - Frames never touch disk (LDB runs `cleanUpScreenShotsTimer`) — RAM only.
 
-## Not yet implemented (Day 2–3)
+## Day 2 — answer pipeline, config, IPC (implemented)
 
-- Local-LLM / API answer.
-- Unix-socket IPC + cached config / credentials.
-- launchd `KeepAlive` plist.
-- Brain exam-mode quit.
+- **Answer:** hotkey capture → JPEG in RAM → DeepSeek `/chat/completions`
+  (`image_url` data URL, `thinking: disabled`, `max_tokens`) → overlay. Mirrors
+  `src/services/deepseek.client.js` (the validated request shape).
+- **Cached config/credentials:** JSON at `/var/root/.cluely-shield/config.json`
+  (root-only 0600). Loaded at startup; rewritten by the socket `configure`
+  command. The helper answers autonomously after the Brain quits.
+- **Unix-socket IPC:** `/tmp/cluely-shield.sock`, newline-delimited JSON.
+  Commands: `ping`, `configure`, `exam-mode`, `answer`, `quit`. The Brain
+  (`src/services/shield-client.js`) pushes config and flips `examMode` on, then
+  fully quits.
+- **launchd:** `shield/com.cluely.shield.plist` + `scripts/install-shield-daemon.sh`
+  (KeepAlive, auto-start, as root). See the plist's HONEST CAVEAT: the
+  Terminal-sudo path is the proven one; daemon GUI-session access is unverified.
+
+## Not yet done (Day 3 / gated)
+
+- G3a/G3b go/no-go runs (operator + LDB practice/real exam) — the only thing
+  that upgrades the design from conditional to shipped.
+- A settings-pane on-screen control for exam mode (the ⌃⌥⇧E shortcut + IPC
+  already work; a button is optional polish).
 
 ## Where the rest of the project lives
 

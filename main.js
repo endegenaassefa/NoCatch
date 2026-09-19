@@ -961,7 +961,12 @@ class ApplicationController {
       });
       logger.info("Shield exam mode: helper configured; quitting Brain", reply);
       // One tick so any caller's IPC reply/ack fires, then quit everything.
-      setTimeout(() => app.quit(), 150);
+      // Use app.exit(0), not app.quit(): app.quit() waits for every window to
+      // close, and this app's windows can block the close (closable:false /
+      // overlay windows), which left the Brain running with the button stuck
+      // on "Entering exam mode…". The helper has already persisted the config,
+      // so a hard exit is exactly what exam mode wants — the Brain fully gone.
+      setTimeout(() => app.exit(0), 150);
       return { ok: true, examMode: reply.examMode };
     } catch (error) {
       logger.error("Shield exam mode handoff failed", { error: error.message });

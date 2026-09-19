@@ -62,6 +62,7 @@ done
 
 echo "== Teams launch-agent gate (continuous killable target would ruin P1) =="
 CONSOLE_UID=$(stat -f %u /dev/console 2>/dev/null || echo 501)
+CONSOLE_USER=$(stat -f %Su /dev/console 2>/dev/null || id -un "$CONSOLE_UID" 2>/dev/null || echo "$USER")
 if [ "$DRY" = 1 ]; then
   echo "[dry-run] would run: launchctl bootout gui/$CONSOLE_UID/com.microsoft.teams2.agent"
 else
@@ -88,7 +89,7 @@ if [ "$DRY" = 1 ]; then
   echo "  sudo -v"
   echo "  sudo -E $RIG --arm-check"
   echo "  sudo -E nohup eslogger signal > ~/.screen-reader-util/logs/eslogger-<ts>.jsonl 2>&1 < /dev/null &"
-  echo "  sudo -E launchctl asuser <console-uid> /usr/bin/sudo -u <console-uid> $CANARY --ttl 5   (canary pre-flight, uid verified)"
+  echo "  sudo -E launchctl asuser <console-uid> /usr/bin/sudo -u <console-user> $CANARY --ttl 5   (canary pre-flight, uid verified)"
   echo "  sudo -E nohup $RIG --log $RIGLOG --canary $CANARY --duration $DURATION > /tmp/g3a-rig.stdout.log 2>&1 < /dev/null &"
   echo "  $EXPOSE --log $RIGLOG"
   echo "  sudo -E nohup caffeinate -d -t $DURATION > /tmp/g3a-caffeinate.log 2>&1 < /dev/null &"
@@ -137,7 +138,7 @@ fi
 echo "== canary pre-flight: real uid-501 GUI spawn via launchctl asuser =="
 echo "   (launchctl asuser alone does NOT setuid — sudo -u drops to the console"
 echo "    user. A root canary would be unkillable and invert the P2 control.)"
-sudo -E launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_UID" "$CANARY" --ttl 5 > /tmp/g3a-canary-preflight.log 2>&1
+sudo -E launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" "$CANARY" --ttl 5 > /tmp/g3a-canary-preflight.log 2>&1
 sleep 7
 if grep -q "CANARY_START" /tmp/g3a-canary-preflight.log 2>/dev/null \
    && grep -q "uid=$CONSOLE_UID" /tmp/g3a-canary-preflight.log 2>/dev/null \

@@ -246,17 +246,23 @@ func spawnCanary() {
         return
     }
     var uid: UInt32 = 501
-    if let attrs = try? FileManager.default.attributesOfItem(atPath: "/dev/console"),
-       let n = attrs[.ownerAccountID] as? NSNumber {
-        uid = n.uint32Value
+    var uname: String = "501"
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: "/dev/console") {
+        if let n = attrs[.ownerAccountID] as? NSNumber {
+            uid = n.uint32Value
+        }
+        if let name = attrs[.ownerAccountName] as? String {
+            uname = name
+        }
     }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/launchctl")
     // NOTE: `launchctl asuser` adopts the user's bootstrap/audit session but
     // does NOT change credentials — the child would stay root. `sudo -u` drops
-    // to the console uid inside that session (root needs no password). Without
+    // to the console user inside that session (root needs no password). sudo -u
+    // takes a USERNAME, not a numeric uid — pass the resolved name. Without
     // this the canary would be unkillable and the P2 control would invert.
-    p.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-u", String(uid), CANARY_PATH, "--ttl", String(CANARY_TTL / SCALE)]
+    p.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-u", uname, CANARY_PATH, "--ttl", String(CANARY_TTL / SCALE)]
     let fh: FileHandle
     if let f = FileHandle(forWritingAtPath: CANARY_LOG) {
         fh = f

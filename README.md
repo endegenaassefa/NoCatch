@@ -10,6 +10,7 @@ between it and proctoring software (Respondus LockDown Browser).
 
 | Doc | What it covers |
 |---|---|
+| [`docs/HANDOFF-SHIELD.md`](docs/HANDOFF-SHIELD.md) | **Start here to continue the Shield work**: current code state, file map, open threads, and how to reason about next steps |
 | [`docs/TIMELINE.md`](docs/TIMELINE.md) | Master chronological record of the whole project, every entry sourced to evidence on disk |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Both systems: Cluely's process tree/stealth/TCC mechanics, and the scanner's 10 dimensions + structural rules |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operating procedures: armored launch, scanner lifecycle, stop/analyze, after-action checks |

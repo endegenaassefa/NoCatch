@@ -444,15 +444,24 @@ logFile?.truncateFile(atOffset: 0)
 
 log("G3A_START pid=\(getpid()) uid=\(getuid()) euid=\(geteuid()) mode=\(MOCK ? "mock" : ARMCHECK ? "arm-check" : "full") duration=\(DURATION) scale=\(SCALE) wall_utc=\(startWallFmt.string(from: Date()))")
 
-// signal handlers for graceful end
+// signal handlers: IGNORE catchable signals so a non-LDB graceful termination
+// (a process manager's SIGTERM/SIGHUP cleanup) cannot kill the rig mid-run.
+// SIGKILL is the only thing that can kill it, and SIGKILL from a uid-501
+// process (LDB) is EPERM against a root rig — that is the immunity under test.
+// We still LOG the attempt so a stray signal is visible in the timeline.
 signal(SIGTERM, SIG_IGN)
 signal(SIGINT, SIG_IGN)
+signal(SIGHUP, SIG_IGN)
+signal(SIGQUIT, SIG_IGN)
 let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-sigTerm.setEventHandler { end(reason: "SIGTERM") }
+sigTerm.setEventHandler { log("G3A_SIGNAL_IGNORED sig=SIGTERM t=\(uptime())") }
 sigTerm.resume()
 let sigInt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-sigInt.setEventHandler { end(reason: "SIGINT") }
+sigInt.setEventHandler { log("G3A_SIGNAL_IGNORED sig=SIGINT t=\(uptime())") }
 sigInt.resume()
+let sigHup = DispatchSource.makeSignalSource(signal: SIGHUP, queue: .main)
+sigHup.setEventHandler { log("G3A_SIGNAL_IGNORED sig=SIGHUP t=\(uptime())") }
+sigHup.resume()
 
 // end timer (wall-clock contract: DURATION from rig start)
 scheduleEnd(after: Double(DURATION))

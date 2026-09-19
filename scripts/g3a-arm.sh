@@ -52,7 +52,7 @@ if pgrep -x g3a-rig > /dev/null 2>&1; then
   else
     echo "ABORT: a g3a-rig is already running. A second rig would double-schedule"
     echo "captures and truncate the live run's log. If that run is done or stale:"
-    echo "  sudo pkill -x g3a-rig   # then re-run this script"
+    echo "  sudo pkill -9 -x g3a-rig   # then re-run this script (rig ignores SIGTERM)"
     exit 1
   fi
 fi
@@ -170,7 +170,7 @@ fi
 if ! grep -q "G3A_HOTKEY_OK" "$RIGLOG" 2>/dev/null; then
   echo "ABORT: rig hotkey registration failed (G3A_HOTKEY_FAIL in log) — the"
   echo "⌘⇧Space quiz-live anchor and manual captures will not work."
-  sudo -E pkill -x g3a-rig 2>/dev/null || true
+  sudo -E pkill -9 -x g3a-rig 2>/dev/null || true
   exit 1
 fi
 echo "rig: G3A_FILTER_READY + G3A_HOTKEY_OK"
@@ -201,7 +201,7 @@ else
   echo "(eslogger pids still running: $(pgrep -x eslogger | tr '\n' ' ')) — kill with:"
   echo "  sudo pkill -x eslogger"
   echo "Cleaning up the rig and caffeinate so a re-run is clean..."
-  sudo -E pkill -x g3a-rig 2>/dev/null || true
+  sudo -E pkill -9 -x g3a-rig 2>/dev/null || true
   sudo -E pkill -x caffeinate 2>/dev/null || true
   exit 1
 fi
@@ -251,4 +251,4 @@ echo "      or quiz termination, with the exact time."
 echo "   5. After the quiz: reopen Terminal and run the collection commands"
 echo "      in docs/G3A-RUNBOOK.md, then paste the output in chat."
 echo
-echo " To abort the experiment early:  sudo pkill -f g3a-rig"
+echo " To abort the experiment early:  sudo pkill -9 -f g3a-rig"

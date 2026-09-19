@@ -117,19 +117,22 @@ recorders launched from that terminal. Leave the eslogger terminal alone.
 
 ## 7. Shield mode (exam operations) — per docs/SOLUTION-DESIGN.md
 Once the Shield helper is built (`shield/`), exam operations change:
-1. **One-time setup:** `bash scripts/cluely-shield-smoke.sh` (asks sudo
-   password once) — verifies root capture works, the root-drawn overlay
-   renders, an event tap works, and `kill -9` from your account fails with
-   "operation not permitted" (the kill-proof guarantee).
-2. **Pre-exam flight check:** start the helper (launchd job or
-   `sudo ./shield/helper --daemon`), run `./shield/helper --self-test`, enable
-   **exam mode** in Cluely (hides all Brain windows, stops the 5 s capture
-   watcher, hands config to the helper). Keep Teams running as the canary.
-3. **During the exam:** press the capture hotkey as usual — the helper (root)
-   captures, calls the LLM, and draws the answer overlay. The Brain stays
-   dormant. If LDB kills the Brain, answers keep flowing from the helper
-   (voice included).
-4. **After the exam:** run the `sent by LockDown Browser` query — **zero
+1. **One-time setup:** `sudo bash scripts/install-shield.sh` — builds the
+   helper, installs it to `/usr/local/bin/cluely-shield`, and seeds the shared
+   socket token. Optionally run `bash scripts/cluely-shield-smoke.sh` once to
+   verify the platform assumptions (root capture, kill-proof, hotkey).
+2. **Pre-exam flight check:** start the helper in a terminal (it must run in
+   your Aqua session — there is no launchd daemon):
+   `sudo -E /usr/local/bin/cluely-shield`. Verify
+   `sudo /usr/local/bin/cluely-shield --self-test` prints `PIXELS_OK`. Keep
+   Teams running as the canary.
+3. **Enter exam mode:** use the ⌃⌥⇧E shortcut or Settings → "Cluely Shield
+   (Exam Mode)". This pushes the DeepSeek config to the helper and the Brain
+   fully quits (no dormant Brain — no killable uid-501 GUI target remains).
+4. **During the exam:** press ⌘⇧Space — the helper (root) captures, calls the
+   LLM, and draws the answer overlay. The Brain is gone; answers flow only from
+   the helper.
+5. **After the exam:** run the `sent by LockDown Browser` query — **zero
    Cluely/helper pids in the kill list is the pass condition.** With the
    helper installed, also collect the kill-attempt ground truth from Apple's
    ES logger (`sudo eslogger signal` — records every signal with sender and

@@ -124,7 +124,7 @@ fact.
 │                                            • ONE pre-created NSWindow,    │
 │                                              content-protected, no churn  │
 │                                            • RegisterEventHotKey (Carbon) │
-│                                            • launchd KeepAlive            │
+│                                            • root + Aqua (sudo -E spawn)  │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -152,8 +152,8 @@ fact.
     bandwidth); otherwise the user's API key with a rate limit, accepting the
     documented signature risk (review F8). TTS **off by default** in exam mode
     (LDB records the mic — review F13).
-- **IPC**: Unix socket (`/tmp/cluely-shield.sock`) for config push and status;
-  heartbeat both ways; launchd `KeepAlive`. The socket file is world-writable
+- **IPC**: Unix socket (`/tmp/cluely-shield.sock`) for config push and status.
+  The socket file is world-writable
   (0666) because the uid-501 Brain must be able to connect to push config before
   it quits; access control is therefore the **shared-secret token** (root-only
   in `/var/root/.cluely-shield/config.json`, echoed on every mutating command) —
@@ -194,11 +194,11 @@ fact.
 | Overlay in LDB's recording: visible text OR black box | OPERATOR DECISION | §8 — depends on school Monitor config; user decides with eyes open |
 | LDB kills the helper's cousins: list-driven kills need no trigger | MAJOR | Shield-only exam mode removes the ban-list-attractive Brain |
 | LDB updates to add kill via its root helper / activate AAC | MAJOR | Pin LDB version; re-run static recon pre-exam; watch /Library/PrivilegedHelperTools |
-| TCC loss / macOS update re-prompt | MINOR | Pre-exam self-test; explicit-binary grant; PPPC; dual spawn paths (launchd + Terminal-sudo fallback) |
+| TCC loss / macOS update re-prompt | MINOR | Pre-exam self-test; explicit-binary grant; PPPC; terminal-sudo spawn |
 | Per-process bandwidth signature of API calls | UNKNOWN | Local model default; rate limit; monitored in G2/G3 |
 | `cleanUpScreenShotsTimer` finds capture files | MINOR | RAM-only frames |
 | SecureEventInput breaks event taps | MINOR | Carbon RegisterEventHotKey primary |
-| Helper crash | MINOR | KeepAlive; stateless capture-on-demand |
+| Helper crash | MINOR | Re-run `sudo -E /usr/local/bin/cluely-shield`; stateless capture-on-demand |
 | Fullscreen-space overlay behavior | MINOR | Dedicated probe in G0 (fullscreen app overlay test) |
 | TTS spoken answers recorded by LDB's mic | MINOR | TTS off by default in exam mode |
 
@@ -243,9 +243,9 @@ fact.
    (capture → JPEG in RAM → `/chat/completions` → overlay, validated end-to-end
    non-root via `--answer-test`), Unix-socket IPC (`/tmp/cluely-shield.sock`,
    token-authenticated) + cached root-owned config
-   (`/var/root/.cluely-shield/config.json`, 0600), launchd `KeepAlive` plist +
-   install script, Brain exam-mode quit (`src/services/shield-client.js` +
-   ⌃⌥⇧E shortcut + `shield-exam-mode` IPC).
+   (`/var/root/.cluely-shield/config.json`, 0600), install script
+   (`scripts/install-shield.sh`: build + binary + token), Brain exam-mode quit
+   (`src/services/shield-client.js` + ⌃⌥⇧E shortcut + `shield-exam-mode` IPC).
 3. **Day 3 (DONE 2026-09-19):** on-screen settings control for exam mode —
    Shield status + "Enter Exam Mode" button in the settings window, plus a
    scrollable answer overlay (long/code answers scroll instead of clipping, with

@@ -69,9 +69,10 @@ node scripts/test-shield-socket.js   # NON-root: automated socket test incl. tok
   connect; mutating commands require a shared-secret token (root-only in the
   config, echoed from `CLUELY_SHIELD_TOKEN`) — `ping` is the only unauthenticated
   command.
-- **launchd:** `shield/com.cluely.shield.plist` + `scripts/install-shield-daemon.sh`
-  (KeepAlive, auto-start, as root). See the plist's HONEST CAVEAT: the
-  Terminal-sudo path is the proven one; daemon GUI-session access is unverified.
+- **Install:** `scripts/install-shield.sh` (build + `/usr/local/bin/cluely-shield`
+  + shared-token seed). No launchd daemon — a LaunchDaemon can't reach the Aqua
+  GUI session (proven 2026-09-19). Start the helper in a terminal:
+  `sudo -E /usr/local/bin/cluely-shield`.
 
 ## Not yet done (gated)
 

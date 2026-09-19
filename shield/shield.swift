@@ -16,7 +16,7 @@
 //
 // Day 2–3 (implemented): DeepSeek vision answer pipeline, Unix-socket IPC
 // (token-authenticated, fail-closed), cached root-owned config/credentials,
-// launchd KeepAlive plist + install script, Brain exam-mode quit.
+// install script (build + binary + token), Brain exam-mode quit.
 //
 // Hard guarantees encoded structurally (not warnings):
 //   * frames never touch disk (LDB runs cleanUpScreenShotsTimer) — RAM only
@@ -481,7 +481,7 @@ final class Shield: NSObject, @unchecked Sendable {
         self.config = loadConfig(configPath)
         log("CONFIG_LOADED examMode=\(config.examMode ? 1 : 0) model=\(config.model) apiKeySet=\(config.apiKey.isEmpty ? 0 : 1)")
         if config.token.isEmpty {
-            log("WARN_NO_TOKEN mutating socket commands rejected until a token is seeded (run scripts/install-shield-daemon.sh)")
+            log("WARN_NO_TOKEN mutating socket commands rejected until a token is seeded (run scripts/install-shield.sh)")
         }
     }
 
@@ -591,14 +591,14 @@ final class Shield: NSObject, @unchecked Sendable {
         guard let name = cmd["cmd"] as? String else { return ["ok": false, "error": "no cmd"] }
         // Token auth on every mutating command. `ping` stays open (read-only);
         // everything else requires the shared secret. FAIL-CLOSED: if no token
-        // has been seeded (the operator never ran install-shield-daemon.sh), NO
+        // has been seeded (the operator never ran install-shield.sh), NO
         // mutating command is accepted — the world-writable socket (0666) must
         // not give a uid-501 attacker (LDB) a no-token configure/quit path.
         if name != "ping" {
             let expected = DispatchQueue.main.sync { self.config.token }
             if expected.isEmpty {
                 log("SOCKET_AUTH_DENIED cmd=\(name) (no token configured)")
-                return ["ok": false, "error": "unauthorized (no token configured — run install-shield-daemon.sh)"]
+                return ["ok": false, "error": "unauthorized (no token configured — run install-shield.sh)"]
             }
             let given = cmd["token"] as? String ?? ""
             if given != expected {
@@ -631,7 +631,7 @@ final class Shield: NSObject, @unchecked Sendable {
                     if let t = cmd["maxTokens"] as? Int { self.config.maxTokens = t }
                     if let em = cmd["examMode"] as? Bool { self.config.examMode = em }
                     // NOTE: the token is NOT settable over the socket. It is
-                    // seeded only by scripts/install-shield-daemon.sh (written
+                    // seeded only by scripts/install-shield.sh (written
                     // directly to the root config). This removes the
                     // trust-on-first-use hole where an unauthenticated first
                     // `configure` could seize the shared secret.

@@ -72,13 +72,14 @@ function send(cmd) {
   });
 }
 
-async function waitForSocket(timeoutMs = 5000) {
+/** Wait for the helper to actually be LISTENING, via its own SOCKET_READY log. */
+async function waitForHelperReady(child, timeoutMs = 5000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (fs.existsSync(SOCKET)) return;
-    await new Promise((r) => setTimeout(r, 100));
+    if (child.stdoutBuf && child.stdoutBuf.includes('SOCKET_READY')) return;
+    await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error('socket never appeared at ' + SOCKET);
+  throw new Error('helper never reached SOCKET_READY');
 }
 
 /** Write the test config (overwrites any previous one). */
@@ -93,18 +94,22 @@ function writeConfig(obj) {
   }
 }
 
-/** Spawn the helper in --socket-test mode; resolve once the socket is live. */
+/** Spawn the helper in --socket-test mode; resolve once it is actually listening. */
 async function startHelper() {
   const child = spawn(HELPER, ['--socket-test'], { stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.on('data', () => {});
-  child.stderr.on('data', () => {});
+  child.stdoutBuf = '';
+  child.stdout.on('data', (d) => { child.stdoutBuf += d.toString(); });
+  child.stderr.on('data', (d) => { child.stdoutBuf += d.toString(); });
   child.on('error', (e) => {
     // Surface spawn failures (e.g. missing binary) instead of an unhandled
     // 'error' event crashing the process.
     console.error('  ERROR  helper spawn failed:', e.message);
     process.exit(1);
   });
-  await waitForSocket();
+  // Wait for SOCKET_READY (logged after listen()), not just file existence:
+  // the socket file appears at bind() and connecting before listen() yields
+  // ECONNREFUSED.
+  await waitForHelperReady(child);
   return child;
 }
 
@@ -114,8 +119,15 @@ async function stopHelper(child) {
   } catch (_) {
     /* already gone */
   }
-  // Let the socket file unlink settle (helper's runLoop unlinks on exit).
-  await new Promise((r) => setTimeout(r, 150));
+  // Wait for the process to actually exit, not a fixed sleep. A SIGKILLed
+  // child releases its executable mapping only once reaped; a fixed 150 ms can
+  // leave the binary locked and make an immediately-following build fail with
+  // "ld: can't write output file" (observed).
+  await new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    child.once('exit', () => resolve());
+    setTimeout(resolve, 3000); // safety net in case 'exit' never fires
+  });
 }
 
 async function main() {

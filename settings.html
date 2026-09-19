@@ -523,11 +523,11 @@
                     </div>
                     <div class="settings-note">
                         Requires the shield helper to be running as root. Run
-                        <code>sudo bash scripts/install-shield-daemon.sh</code> once first —
+                        <code>sudo bash scripts/install-shield.sh</code> once first —
                         it seeds the shared secret token that locks the helper's socket, so
-                        LockDown Browser can't reconfigure or quit it. After that, either the
-                        daemon auto-starts the helper, or you can run
-                        <code>sudo -E ./shield/shield</code> in a terminal before the exam.
+                        LockDown Browser can't reconfigure or quit it. Then start the helper
+                        in a terminal before the exam with
+                        <code>sudo -E /usr/local/bin/cluely-shield</code>.
                         The same action is also bound to the ⌃⌥⇧E shortcut.
                     </div>
                 </div>

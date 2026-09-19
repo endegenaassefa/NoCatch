@@ -15,10 +15,13 @@ The shield moves capture and the answer overlay into a root process that LDB
 
 ## Status
 
-**Day 1 — builds, but not yet validated end-to-end.** The helper compiles and
-has a `--self-test`, but the G0 platform smoke
-(`scripts/cluely-shield-smoke.sh`) has **not been run**, and G3 (the go/no-go
-real-exam run) is still required. See
+**Day 1 — builds; gates G0/G1/G2 passed (2026-09-19); G3a kit ready, not yet run.**
+The helper compiles and has a `--self-test`. The G0 platform smoke
+(`scripts/cluely-shield-smoke.sh`) **passed 2026-09-19** — see
+[`docs/G0-SMOKE-2026-09-19.md`](../docs/G0-SMOKE-2026-09-19.md). The G3a
+go/no-go experiment kit (rig + canary + runbook) is at
+[`docs/G3A-RUNBOOK.md`](../docs/G3A-RUNBOOK.md) — it must be run against an LDB
+practice quiz before any Day 2–3 work. See
 [`docs/SOLUTION-DESIGN.md`](../docs/SOLUTION-DESIGN.md) §6 for the full gate
 list.
 

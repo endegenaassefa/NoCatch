@@ -1251,6 +1251,15 @@ class ApplicationController {
       }
     });
 
+    ipcMain.handle("shield-status", async () => {
+      try {
+        const shieldClient = require("./src/services/shield-client");
+        return await shieldClient.status();
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+
     ipcMain.handle("shield-exam-mode", async (_event, opts = {}) => {
       return await this.enterShieldExamMode(opts);
     });

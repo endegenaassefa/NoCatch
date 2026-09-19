@@ -93,6 +93,16 @@ async function ping() {
 }
 
 /**
+ * Full status of the helper: alive + pid + whether exam mode is armed.
+ * The helper's `ping` reply already carries pid and examMode; this just
+ * surfaces them for the settings UI instead of collapsing to a boolean.
+ * @returns {Promise<object>} { ok, pid, examMode }
+ */
+async function status() {
+  return await sendCommand({ cmd: 'ping' });
+}
+
+/**
  * Push the exam-mode config to the root helper and flip examMode on.
  * Called by the Brain right before it quits. The helper persists it root-owned.
  * @param {object} opts { apiKey, model, baseUrl, prompt, maxTokens }
@@ -141,6 +151,7 @@ module.exports = {
   SOCKET_TOKEN,
   sendCommand,
   ping,
+  status,
   configureExamMode,
   answerNow,
   quit

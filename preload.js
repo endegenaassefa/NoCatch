@@ -99,6 +99,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Display management
   listDisplays: () => ipcRenderer.invoke('list-displays'),
   captureArea: (options) => ipcRenderer.invoke('capture-area', options),
+
+  // Cluely Shield (root helper) exam mode
+  shieldStatus: () => ipcRenderer.invoke('shield-status'),
+  shieldExamMode: (opts) => ipcRenderer.invoke('shield-exam-mode', opts),
   
   // Event listeners
   onTranscriptionReceived: (callback) => ipcRenderer.on('transcription-received', callback),

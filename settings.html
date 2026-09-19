@@ -503,6 +503,38 @@
             
             <div class="settings-section">
                 <div class="settings-section-title">
+                    <i class="fas fa-shield-alt"></i>
+                    Cluely Shield (Exam Mode)
+                </div>
+                <div class="settings-section-content">
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-item-label">Shield Status</div>
+                            <div class="settings-item-description" id="shieldStatus">Checking…</div>
+                        </div>
+                        <button class="btn" id="shieldCheckButton">Check</button>
+                    </div>
+                    <div class="settings-item">
+                        <div>
+                            <div class="settings-item-label">Enter Exam Mode</div>
+                            <div class="settings-item-description">Push your DeepSeek config to the root shield helper and quit Cluely. The helper then captures and answers on its own (⌘⇧Space), unkillable by LockDown Browser.</div>
+                        </div>
+                        <button class="btn btn-quit" id="shieldExamModeButton">Enter Exam Mode</button>
+                    </div>
+                    <div class="settings-note">
+                        Requires the shield helper to be running as root. Run
+                        <code>sudo bash scripts/install-shield-daemon.sh</code> once first —
+                        it seeds the shared secret token that locks the helper's socket, so
+                        LockDown Browser can't reconfigure or quit it. After that, either the
+                        daemon auto-starts the helper, or you can run
+                        <code>sudo -E ./shield/shield</code> in a terminal before the exam.
+                        The same action is also bound to the ⌃⌥⇧E shortcut.
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-section-title">
                     <i class="fas fa-window-maximize"></i>
                     Window Settings
                 </div>

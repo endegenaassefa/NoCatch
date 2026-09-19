@@ -24,6 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const codingLanguageSelect = document.getElementById('codingLanguage');
     const activeSkillSelect = document.getElementById('activeSkill');
     const iconGrid = document.getElementById('iconGrid');
+    const shieldStatusEl = document.getElementById('shieldStatus');
+    const shieldCheckButton = document.getElementById('shieldCheckButton');
+    const shieldExamModeButton = document.getElementById('shieldExamModeButton');
 
     // Check if window.api exists
     if (!window.api) {
@@ -355,12 +358,60 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    // ── Cluely Shield (exam mode) status + handoff ─────────────────────────
+    const refreshShieldStatus = async () => {
+        if (!window.electronAPI || !window.electronAPI.shieldStatus || !shieldStatusEl) return;
+        shieldStatusEl.textContent = 'Checking…';
+        try {
+            const s = await window.electronAPI.shieldStatus();
+            if (s && s.ok === true) {
+                shieldStatusEl.textContent = `Online — pid ${s.pid}, exam mode ${s.examMode ? 'ON' : 'off'}`;
+            } else if (s && s.error) {
+                shieldStatusEl.textContent = `Unavailable — ${s.error}`;
+            } else {
+                shieldStatusEl.textContent = 'Offline (helper not running)';
+            }
+        } catch (error) {
+            shieldStatusEl.textContent = 'Unavailable — ' + error.message;
+        }
+    };
+
+    if (shieldCheckButton) {
+        shieldCheckButton.addEventListener('click', refreshShieldStatus);
+    }
+
+    if (shieldExamModeButton) {
+        shieldExamModeButton.addEventListener('click', async () => {
+            if (!window.electronAPI || !window.electronAPI.shieldExamMode) return;
+            shieldExamModeButton.disabled = true;
+            shieldExamModeButton.textContent = 'Configuring…';
+            try {
+                const result = await window.electronAPI.shieldExamMode({});
+                if (result && result.ok === true) {
+                    // The Brain quits ~150 ms after the helper confirms; no need
+                    // to update UI further — this window closes with the app.
+                    shieldExamModeButton.textContent = 'Entering exam mode…';
+                } else {
+                    shieldExamModeButton.disabled = false;
+                    shieldExamModeButton.textContent = 'Enter Exam Mode';
+                    const err = (result && result.error) || 'unknown error';
+                    if (shieldStatusEl) shieldStatusEl.textContent = 'Failed — ' + err;
+                }
+            } catch (error) {
+                shieldExamModeButton.disabled = false;
+                shieldExamModeButton.textContent = 'Enter Exam Mode';
+                if (shieldStatusEl) shieldStatusEl.textContent = 'Failed — ' + error.message;
+            }
+        });
+    }
+
     // Initialize icon grid
     initializeIconGrid();
 
     // Request settings on load
     setTimeout(() => {
         requestCurrentSettings();
+        refreshShieldStatus();
     }, 200);
 
     // ESC key to close

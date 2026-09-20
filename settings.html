@@ -336,15 +336,15 @@
                 <div class="settings-section-content">
                     <div class="icon-grid" id="iconGrid">
                         <div class="icon-option" data-icon="terminal">
-                            <img src="./assests/icons/terminal.png" alt="Terminal">
+                            <img src="./assets/icons/terminal.png" alt="Terminal">
                             <div>Terminal</div>
                         </div>
                         <div class="icon-option" data-icon="activity">
-                            <img src="./assests/icons/activity.png" alt="Activity">
+                            <img src="./assets/icons/activity.png" alt="Activity">
                             <div>Activity</div>
                         </div>
                         <div class="icon-option" data-icon="settings">
-                            <img src="./assests/icons/settings.png" alt="Settings">
+                            <img src="./assets/icons/settings.png" alt="Settings">
                             <div>Settings</div>
                         </div>
                     </div>
@@ -516,8 +516,15 @@
                     </div>
                     <div class="settings-item">
                         <div>
+                            <div class="settings-item-label">Show helper's own backup window</div>
+                            <div class="settings-item-description">Off (recommended): the shield has no custom UI — answers appear in the Cluely chat window, which stays visible with chat history, question types, typing and mic. On: the root helper also draws its own small unkillable window, which keeps showing answers even if Cluely gets killed mid-exam.</div>
+                        </div>
+                        <input type="checkbox" id="shieldShowWindowCheckbox" class="settings-checkbox">
+                    </div>
+                    <div class="settings-item">
+                        <div>
                             <div class="settings-item-label">Enter Exam Mode</div>
-                            <div class="settings-item-description">Push your DeepSeek config to the root shield helper and quit Cluely. The helper then captures and answers on its own (⌘⇧Space), unkillable by LockDown Browser.</div>
+                            <div class="settings-item-description">Push your DeepSeek config to the root shield helper and switch to exam mode — the chat stays on top as your surface while the overlay and settings hide; press ⌃⌥⇧E (or the chat's 🛡️ button) to restore. The helper then captures and answers on its own (⌘⇧Space), unkillable by LockDown Browser.</div>
                         </div>
                         <button class="btn btn-quit" id="shieldExamModeButton">Enter Exam Mode</button>
                     </div>
@@ -528,7 +535,8 @@
                         LockDown Browser can't reconfigure or quit it. Then start the helper
                         in a terminal before the exam with
                         <code>sudo -E /usr/local/bin/cluely-shield</code>.
-                        The same action is also bound to the ⌃⌥⇧E shortcut.
+                        The same action is also bound to the ⌃⌥⇧E shortcut —
+                        it toggles exam mode armed ↔ restored.
                     </div>
                 </div>
             </div>

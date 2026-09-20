@@ -70,7 +70,7 @@ ls -t ~/.screen-reader-util/logs/console-*.log | head -1
   Verify per incident:
   `log show --predicate 'eventMessage CONTAINS "sent by" AND eventMessage CONTAINS "LockDown"'`
   (launchd records each kill with sender + victim; the Teams agent is a free canary).
-- Static recon (research/ldb-static-recon.md) confirms the machinery:
+- Static recon (docs/research/ldb-static-recon.md) confirms the machinery:
   `killProcessesTimer` + `forceTerminate` over `NSRunningApplication` +
   Developer-ID signature checks (ban list is server-supplied), plus
   CoreGraphics observation (`CGDisplayIsCaptured`, `CGWindowListCopyWindowInfo`
@@ -99,7 +99,7 @@ sudo eslogger signal | tee -a ~/.screen-reader-util/logs/eslogger-$(date +%Y%m%d
 ```
 Extraction:
 ```
-python3 - <<'EOF'   # or see research/ for the parse script
+python3 - <<'EOF'   # or see research/probes/ for the parse script
 import json
 F = "<eslogger file>"
 for line in open(F):

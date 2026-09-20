@@ -39,6 +39,7 @@ The compiled binary `shield/shield` is gitignored — never commit it.
 
 ```bash
 sudo -E ./shield/shield              # interactive: overlay + hotkey capture + socket IPC
+                                     # (headless when config has showWindow:false)
 sudo -E ./shield/shield --self-test  # one-shot capture -> luma verdict, exit 0/4
 ./shield/shield --answer-test IMG    # NON-root: fixture image -> DeepSeek -> print answer
 ./shield/shield --socket-test        # NON-root: stand up the socket (drive it externally)
@@ -48,7 +49,10 @@ node scripts/test-shield-socket.js   # NON-root: automated socket test incl. tok
 ## Design contract (Day 1)
 
 - `SCContentFilter` fetched **once** at startup (no per-capture enumeration).
-- One overlay window created once; hotkey redraws its content in place.
+- One overlay window created once (unless `showWindow:false` → headless relay);
+  hotkey redraws its content in place. When shown, the window is **440×280,
+  draggable** (click-and-drag anywhere, or drag edges to resize) so it never
+  blocks the exam UI.
 - `RegisterEventHotKey` (⌘⇧Space, via Carbon) is the **primary** hotkey path —
   no TCC. `CGEventTap` is only the fallback (SecureEventInput can kill taps).
 - `--self-test` captures once and prints a luma verdict (`PIXELS_OK` / `BLACK`).
@@ -61,14 +65,37 @@ node scripts/test-shield-socket.js   # NON-root: automated socket test incl. tok
   `src/services/deepseek.client.js` (the validated request shape).
 - **Cached config/credentials:** JSON at `/var/root/.cluely-shield/config.json`
   (root-only 0600). Loaded at startup; rewritten by the socket `configure`
-  command. The helper answers autonomously after the Brain quits.
+  command. The helper answers autonomously while the Brain's windows are hidden
+  (the Brain stays resident and ⌃⌥⇧E brings it back).
 - **Unix-socket IPC:** `/tmp/cluely-shield.sock`, newline-delimited JSON.
-  Commands: `ping`, `configure`, `exam-mode`, `answer`, `quit`. The Brain
-  (`src/services/shield-client.js`) pushes config and flips `examMode` on, then
-  fully quits. The socket is world-writable (0666) so the uid-501 Brain can
-  connect; mutating commands require a shared-secret token (root-only in the
-  config, echoed from `CLUELY_SHIELD_TOKEN`) — `ping` is the only unauthenticated
-  command.
+  Commands: `ping`, `configure`, `exam-mode`, `answer`, `get-answer`, `quit`.
+  The Brain (`src/services/shield-client.js`) pushes config and flips `examMode`
+  on, then hides its windows (it no longer quits). The socket is world-writable
+  (0666) so the uid-501 Brain can connect; mutating commands require a
+  shared-secret token (root-only in the config, echoed from
+  `CLUELY_SHIELD_TOKEN`) — `ping` is the only unauthenticated command.
+
+## Integrated display (no custom shield UI)
+
+- `configure` accepts `showWindow` (default `true`). With `showWindow:false` the
+  helper creates **no window of its own** and stays headless: every overlay
+  update (status, errors, answers) is recorded with a monotonic `seq`, and the
+  Brain polls the token-authenticated `get-answer` command once per second
+  while exam mode is armed, rendering the text in Cluely's normal answer panel
+  (`llmResponse`). The shield is then invisible — it is just capture + LLM +
+  relay.
+- `showWindow:true` keeps the helper's own small root-drawn window as a backup.
+  That window is the only answer surface that survives if LDB SIGKILLs the
+  Brain mid-exam (the Brain is a uid-501 enumerable target; the helper is root
+  and gets EPERM — G0).
+- `configure` reconciles the window with `showWindow` at runtime (no restart
+  needed): arming with `showWindow:false` hides the helper's window
+  immediately; arming with `true` creates it immediately.
+- **Self-heal watchdog:** while headless AND `examMode` is on, if no
+  authenticated `get-answer` poll arrives for 15 s (the Brain was killed,
+  crashed, or restored), the helper re-creates its own window and draws the
+  last answer. The answer surface therefore degrades to the unkillable root
+  window instead of disappearing.
 - **Install:** `scripts/install-shield.sh` (build + `/usr/local/bin/cluely-shield`
   + shared-token seed). No launchd daemon — a LaunchDaemon can't reach the Aqua
   GUI session (proven 2026-09-19). Start the helper in a terminal:
@@ -91,4 +118,4 @@ node scripts/test-shield-socket.js   # NON-root: automated socket test incl. tok
 | Incident forensics (LDB SIGKILL) | [`docs/INCIDENT-*.md`](../docs/) |
 | Platform smoke probe | [`research/probes/shield-smoke.swift`](../research/probes/shield-smoke.swift) |
 | Smoke runner | [`scripts/cluely-shield-smoke.sh`](../scripts/cluely-shield-smoke.sh) |
-| Recon / platform research | [`research/`](../research/) |
+| Recon / platform research | [`docs/research/`](../docs/research/) |

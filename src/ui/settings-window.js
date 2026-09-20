@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const shieldStatusEl = document.getElementById('shieldStatus');
     const shieldCheckButton = document.getElementById('shieldCheckButton');
     const shieldExamModeButton = document.getElementById('shieldExamModeButton');
+    const shieldShowWindowCheckbox = document.getElementById('shieldShowWindowCheckbox');
 
     // Check if window.api exists
     if (!window.api) {
@@ -282,9 +283,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!iconGrid) return;
 
         const icons = [
-            { key: 'terminal', name: 'Terminal', src: './assests/icons/terminal.png' },
-            { key: 'activity', name: 'Activity', src: './assests/icons/activity.png' },
-            { key: 'settings', name: 'Settings', src: './assests/icons/settings.png' }
+            { key: 'terminal', name: 'Terminal', src: './assets/icons/terminal.png' },
+            { key: 'activity', name: 'Activity', src: './assets/icons/activity.png' },
+            { key: 'settings', name: 'Settings', src: './assets/icons/settings.png' }
         ];
 
         iconGrid.innerHTML = '';
@@ -304,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Failed to load icon:', icon.src);
                 // Try alternative paths
                 const altPaths = [
-                    `./assests/${icon.key}.png`,
+                    `./assets/${icon.key}.png`,
                     `./assets/icons/${icon.key}.png`,
                     `./assets/${icon.key}.png`
                 ];
@@ -386,11 +387,18 @@ document.addEventListener('DOMContentLoaded', () => {
             shieldExamModeButton.disabled = true;
             shieldExamModeButton.textContent = 'Configuring…';
             try {
-                const result = await window.electronAPI.shieldExamMode({});
+                // Integrated display by default: showWindow:false keeps the
+                // helper headless and answers render in the CHAT window (the
+                // Cluely UI stays visible — chat, question types, mic, typing).
+                // The checkbox opts into the root-drawn backup window.
+                const result = await window.electronAPI.shieldExamMode({
+                    showWindow: shieldShowWindowCheckbox ? shieldShowWindowCheckbox.checked : false
+                });
                 if (result && result.ok === true) {
-                    // The Brain quits ~150 ms after the helper confirms; no need
-                    // to update UI further — this window closes with the app.
-                    shieldExamModeButton.textContent = 'Entering exam mode…';
+                    // The chat stays visible as the surface; only this settings
+                    // window and the overlay hide. ⌃⌥⇧E or the chat's 🛡️ button
+                    // is the restore path.
+                    shieldExamModeButton.textContent = 'Exam mode armed — chat stays on top (⌃⌥⇧E to restore)';
                 } else {
                     shieldExamModeButton.disabled = false;
                     shieldExamModeButton.textContent = 'Enter Exam Mode';

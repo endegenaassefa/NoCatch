@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Cluely Shield (root helper) exam mode
   shieldStatus: () => ipcRenderer.invoke('shield-status'),
   shieldExamMode: (opts) => ipcRenderer.invoke('shield-exam-mode', opts),
+  getExamModeState: () => ipcRenderer.invoke('get-exam-mode-state'),
   
   // Event listeners
   onTranscriptionReceived: (callback) => ipcRenderer.on('transcription-received', callback),
@@ -133,6 +134,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPaletteKey: (callback) => ipcRenderer.on('palette-key', callback),
   onCaptureHotkeyRefused: (callback) => ipcRenderer.on('capture-hotkey-refused', callback),
   onToggleShortcutsPopover: (callback) => ipcRenderer.on('toggle-shortcuts-popover', callback),
+  onShieldAnswer: (callback) => ipcRenderer.on('shield-answer', callback),
+  onShieldExamModeChanged: (callback) => ipcRenderer.on('shield-exam-mode-changed', callback),
   
   // Generic receive method
   receive: (channel, callback) => ipcRenderer.on(channel, callback),

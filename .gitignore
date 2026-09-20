@@ -23,3 +23,4 @@ research/probes/sck-hold
 research/probes/cgwindow-grab
 research/probes/shield-smoke
 shield/shield
+shield/*.old*

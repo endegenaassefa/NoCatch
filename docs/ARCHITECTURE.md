@@ -141,7 +141,7 @@ during exams, not a passive kiosk:
 - **Log signature**: an LDB SIGKILL of Cluely looks like "npm log `exit 1`,
   no signal, no .ips, no will-quit log" — `node_modules/electron/cli.js`
   prints the signal to console only and exits 1. Only the armored wrapper
-  (`cluely-safe-start.sh`) captures the distinguishing line.
+  (`scripts/cluely-safe-start.sh`) captures the distinguishing line.
 - **No software countermeasure**: SIGKILL is unmaskable; known mitigations are
   operational only (avoid capture while LDB runs; keep Cluely outside LDB's
   kill reach). Proven by `docs/INCIDENT-2026-09-18-160938-LDB-SIGKILL.md`.

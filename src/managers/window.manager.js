@@ -1004,6 +1004,27 @@ class WindowManager {
     logger.info('Screen capture availability watcher initialized');
   }
 
+  // Exam mode must silence the Brain's own SCK enumeration: each
+  // desktopCapturer.getSources() call is capture-class activity, and the
+  // incident doc explicitly demands the 5 s watcher be disabled during exams
+  // ("constant SCK enumeration = repeated trigger opportunity" —
+  // INCIDENT-2026-09-19-135148). The shield does all exam capture; the Brain
+  // must go quiet. Called by enterShieldExamMode on arm/restore.
+  pauseScreenCaptureAvailabilityWatcher() {
+    if (this.screenCaptureAvailabilityWatcher) {
+      clearInterval(this.screenCaptureAvailabilityWatcher);
+      this.screenCaptureAvailabilityWatcher = null;
+      logger.info('Screen capture availability watcher paused (exam mode)');
+    }
+  }
+
+  resumeScreenCaptureAvailabilityWatcher() {
+    if (!this.screenCaptureAvailabilityWatcher) {
+      this.setupScreenCaptureAvailabilityWatcher();
+      logger.info('Screen capture availability watcher resumed');
+    }
+  }
+
   async checkScreenCaptureAvailability() {
     if (this.isCheckingScreenCaptureStatus) {
       logger.debug('Skipping overlapping screen capture availability check');
@@ -1162,15 +1183,25 @@ class WindowManager {
   }
 
   hideAllWindows() {
+    // Legacy shape: hide everything except the answer panel, which is only
+    // shown transiently when content arrives. Exam mode now calls
+    // hideAllWindowsExcept(["chat"]) instead — the chat is the surface.
+    this.hideAllWindowsExcept(['llmResponse']);
+  }
+
+  // Hide every window whose type is NOT in `keepTypes`. Exam mode calls this
+  // with keepTypes=["chat"] so the Cluely chat UI stays visible as the single
+  // answer surface while the overlay/settings/answer panel are hidden.
+  hideAllWindowsExcept(keepTypes = []) {
     this.windows.forEach((window, type) => {
       if (window.isDestroyed()) return;
-      if (type !== 'llmResponse') {
+      if (!keepTypes.includes(type)) {
         window.hide();
       }
     });
-    
+
     this.isVisible = false;
-    logger.info('All windows hidden');
+    logger.info('All windows hidden except', { keepTypes });
   }
 
   toggleVisibility() {

@@ -75,6 +75,55 @@
         background: rgba(255, 255, 255, 0.22);
         color: #fff;
       }
+      .icon-button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      /* Armed exam mode: accent the shield button so the state is obvious */
+      .icon-button.active {
+        background: rgba(255, 193, 7, 0.28);
+        border-color: rgba(255, 193, 7, 0.65);
+        color: #ffd54f;
+      }
+      /* Question-type selector in the header menu */
+      .skill-select {
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: rgba(255, 255, 255, 0.9);
+        border-radius: 6px;
+        padding: 5px 6px;
+        font-size: 12px;
+        cursor: pointer;
+        outline: none;
+        max-width: 130px;
+      }
+      .skill-select option {
+        background: #1c1c1c;
+        color: #fff;
+      }
+      .skill-select:hover {
+        background: rgba(255, 255, 255, 0.22);
+      }
+      /* Exam-mode status banner (hidden unless armed) */
+      .exam-banner {
+        display: none;
+        -webkit-app-region: no-drag;
+        background: rgba(255, 193, 7, 0.12);
+        border-bottom: 1px solid rgba(255, 193, 7, 0.35);
+        color: #ffe082;
+        font-size: 11.5px;
+        line-height: 1.4;
+        padding: 6px 14px;
+        flex-shrink: 0;
+      }
+      /* Exam-mode discipline: answer text is not selectable while armed —
+         accidental Cmd+C from the chat is a clipboard proctor tell, the same
+         reason the shield overlay makes its text non-selectable. The input
+         box stays selectable so typing works. */
+      .exam-active .message-text {
+        user-select: none;
+        -webkit-user-select: none;
+      }
       .recording-indicator {
         width: 8px;
         height: 8px;
@@ -660,10 +709,23 @@
           <div class="recording-indicator" id="recordingIndicator"></div>
         </div>
         <div class="header-actions">
+          <select class="skill-select" id="chatSkillSelect" title="Question type">
+            <option value="dsa">DSA</option>
+          </select>
+          <button class="icon-button" id="chatCaptureBtn" title="Take a picture — answer lands in this chat (⌘⇧Space)">
+            <span aria-hidden="true">📷</span>
+          </button>
+          <button class="icon-button" id="chatExamBtn" title="Arm exam mode — shield captures, answers land in this chat">
+            <span aria-hidden="true">🛡️</span>
+          </button>
           <button class="icon-button" id="clearHistoryBtn" title="Clear chat history">
             <i class="fas fa-trash"></i>
           </button>
         </div>
+      </div>
+
+      <div class="exam-banner" id="examModeBanner">
+        🛡️ Exam mode armed — the shield captures and answers land in this chat. Mic, question types and typing keep working. Click 🛡️ or press ⌃⌥⇧E to restore.
       </div>
 
       <!-- Interim Text Overlay -->
@@ -690,6 +752,7 @@
     </div>
     <script src="lib/markdown.js"></script>
     <script src="lib/mathrender.js"></script>
+    <script src="lib/sanitize.js"></script>
     <!-- PrismJS core and autoloader for language components -->
     <script src="./node_modules/prismjs/prism.min.js"></script>
     <script src="./node_modules/prismjs/plugins/autoloader/prism-autoloader.min.js"></script>
@@ -712,6 +775,15 @@
       const listeningDuration = document.getElementById('listeningDuration');
       const interimOverlay = document.getElementById('interimOverlay');
       const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+
+      // Unified header menu (UNIFIED-CHAT-SURFACE.md): question-type selector,
+      // capture button, and exam-mode toggle live in the chat header so every
+      // flow — normal picture, typed, spoken, or exam shield — stays inside
+      // this one UI.
+      const chatSkillSelect = document.getElementById('chatSkillSelect');
+      const chatCaptureBtn = document.getElementById('chatCaptureBtn');
+      const chatExamBtn = document.getElementById('chatExamBtn');
+      const examModeBannerEl = document.getElementById('examModeBanner');
 
       let isRecording = false;
       let isInteractive = true;
@@ -821,6 +893,172 @@
         });
       }
 
+      // ── Unified header menu: question type, capture, exam mode ──────────
+      const CHAT_SKILLS = [
+        { id: 'dsa', label: 'DSA' },
+        { id: 'mcq', label: 'MCQ' },
+        { id: 'ood', label: 'OOD' },
+        { id: 'system-design', label: 'System Design' },
+        { id: 'behavioral', label: 'Behavioral' },
+        { id: 'programming', label: 'Programming' }
+      ];
+
+      function populateSkillSelect(active) {
+        if (!chatSkillSelect) return;
+        chatSkillSelect.innerHTML = '';
+        CHAT_SKILLS.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = s.label;
+          if (s.id === active) opt.selected = true;
+          chatSkillSelect.appendChild(opt);
+        });
+      }
+
+      async function initSkillSelect() {
+        let active = 'dsa';
+        try {
+          if (whysperAPI && whysperAPI.getSettings) {
+            const settings = await whysperAPI.getSettings();
+            if (settings && settings.activeSkill) active = settings.activeSkill;
+          }
+        } catch (e) { /* default */ }
+        populateSkillSelect(active);
+      }
+
+      if (chatSkillSelect) {
+        chatSkillSelect.addEventListener('change', () => {
+          const skill = chatSkillSelect.value;
+          if (!skill) return;
+          if (whysperAPI && whysperAPI.updateActiveSkill) {
+            whysperAPI.updateActiveSkill(skill)
+              .then(() => {
+                const label = chatSkillSelect.selectedOptions[0]
+                  ? chatSkillSelect.selectedOptions[0].textContent : skill;
+                addMessage(`Question type: ${label}`, 'system', true);
+              })
+              .catch(err => addMessage(`Skill switch failed: ${err.message}`, 'error'));
+          }
+        });
+        initSkillSelect();
+      }
+
+      // Keep the dropdown in sync when the skill changes elsewhere (overlay arrows)
+      if (whysperAPI && whysperAPI.onSkillChanged) {
+        whysperAPI.onSkillChanged((event, data) => {
+          if (data && data.skill && chatSkillSelect) {
+            const known = CHAT_SKILLS.some(s => s.id === data.skill);
+            if (!known) populateSkillSelect(data.skill);
+            else chatSkillSelect.value = data.skill;
+          }
+        });
+      }
+
+      // ── Exam mode toggle + banner ────────────────────────────────────────
+      let examModeActive = false;
+      let rootMode = false;
+
+      function setRootModeUi() {
+        rootMode = true;
+        if (chatExamBtn) {
+          chatExamBtn.classList.add('active');
+          chatExamBtn.title = 'Root mode: Cluely itself is the root, kill-immune exam app — no shield needed.';
+        }
+        if (examModeBannerEl) {
+          examModeBannerEl.style.display = 'block';
+          examModeBannerEl.textContent = '🛡️ Root exam mode — this Cluely runs as root: LockDown Browser cannot kill it. Chat, question types, mic, settings and ⌘⇧Space capture are all live. Do not run the shield helper alongside it.';
+        }
+      }
+
+      function setExamModeUi(active) {
+        examModeActive = !!active;
+        if (rootMode) return; // root banner/state wins; nothing to toggle
+        if (chatExamBtn) {
+          chatExamBtn.classList.toggle('active', examModeActive);
+          chatExamBtn.title = examModeActive
+            ? 'Exam mode armed — answers land in this chat. Click to restore (⌃⌥⇧E).'
+            : 'Arm exam mode — shield captures, answers land in this chat';
+        }
+        if (examModeBannerEl) {
+          examModeBannerEl.style.display = examModeActive ? 'block' : 'none';
+        }
+        // Exam discipline: make answer text non-selectable while armed.
+        if (chatContainer) {
+          chatContainer.classList.toggle('exam-active', examModeActive);
+        }
+      }
+
+      async function toggleExamMode() {
+        if (!whysperAPI || !whysperAPI.shieldExamMode) return;
+        if (rootMode) {
+          addMessage('🛡️ Root mode: Cluely is already the kill-immune exam app — the shield is not needed.', 'system', true);
+          return;
+        }
+        if (chatExamBtn) chatExamBtn.disabled = true;
+        try {
+          const result = await whysperAPI.shieldExamMode({});
+          if (result && result.ok === true) {
+            setExamModeUi(result.examMode !== false);
+            // Hotkey health surfaced at arm time (2026-09-19 real-test
+            // failure): the helper re-asserts its ⌘⇧Space registration every
+            // 10 s, so a false here usually self-heals within seconds.
+            if (result.helperHotkeyOk === false) {
+              addMessage('⚠ Shield hotkey not registered yet — it retries every 10 s. If it stays silent, restart the helper, then try ⌘⇧Space again.', 'system', true);
+            }
+          } else {
+            addMessage('Exam mode failed: ' + ((result && result.error) || 'unknown error'), 'error');
+          }
+        } catch (e) {
+          addMessage('Exam mode failed: ' + e.message, 'error');
+        } finally {
+          if (chatExamBtn) chatExamBtn.disabled = false;
+        }
+      }
+
+      if (chatExamBtn) {
+        chatExamBtn.addEventListener('click', toggleExamMode);
+        if (whysperAPI && whysperAPI.getExamModeState) {
+          whysperAPI.getExamModeState()
+            .then(s => {
+              if (s && s.root) {
+                setRootModeUi();
+              } else {
+                setExamModeUi(!!(s && s.active));
+              }
+            })
+            .catch(() => {});
+        }
+      }
+
+      if (whysperAPI && whysperAPI.onShieldExamModeChanged) {
+        whysperAPI.onShieldExamModeChanged((event, data) => {
+          setExamModeUi(!!(data && data.active));
+        });
+      }
+
+      // ── Capture button: take a picture → answer renders in this chat ────
+      if (chatCaptureBtn) {
+        chatCaptureBtn.addEventListener('click', async () => {
+          if (!whysperAPI || !whysperAPI.takeScreenshot) return;
+          addMessage('📷 Taking a picture…', 'system', true);
+          try {
+            await whysperAPI.takeScreenshot();
+          } catch (e) {
+            addMessage('Capture failed: ' + e.message, 'error');
+          }
+        });
+      }
+
+      // ── Shield answers land in the chat ──────────────────────────────────
+      if (whysperAPI && whysperAPI.onShieldAnswer) {
+        whysperAPI.onShieldAnswer((event, data) => {
+          if (data && data.text) {
+            try { hideThinkingIndicator(); } catch (_) {}
+            renderAssistantResponse(data.text);
+          }
+        });
+      }
+
       // Initialize availability and history
       loadHistory();
       initSpeechAvailability();
@@ -867,16 +1105,22 @@
         if (!text) return '';
         
         try {
+          let html;
           if (typeof markdown !== 'undefined' && markdown.toHTML) {
-            return markdown.toHTML(text);
+            html = markdown.toHTML(text);
           } else {
             console.warn('Markdown library not loaded, falling back to basic formatting');
-            return text
+            html = text
               .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
               .replace(/\*(.+?)\*/g, '<em>$1</em>')
               .replace(/`(.+?)`/g, '<code>$1</code>')
               .replace(/\n/g, '<br>');
           }
+          // Scrub script/event-handler/javascript: constructs before the
+          // output hits innerHTML — in root exam mode this renderer runs
+          // unsandboxed as root and LLM output is untrusted input.
+          if (window.sanitizeHtml) html = window.sanitizeHtml(html);
+          return html;
         } catch (error) {
           console.error('Markdown parsing failed:', error);
           return text.replace(/\n/g, '<br>');

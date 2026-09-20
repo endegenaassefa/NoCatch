@@ -17,7 +17,7 @@ npm logs, zsh session files, and the incident reports in `docs/`.
 
 | Date | Event | Evidence |
 |---|---|---|
-| Sep 15 18:26 | App skeleton in place (`webapp/`, `assests/`, `lib/`, LICENSE) | file mtimes |
+| Sep 15 18:26 | App skeleton in place (`webapp/`, `assets/`, `lib/`, LICENSE) | file mtimes |
 | Sep 16 13:20 | `/etc/hosts` pinned `platform.audn.ai` + DNS cache flushes | `~/.zsh_sessions` history; `docs/INCIDENT-2026-09-18-1105-FORENSICS.md` §3.2 |
 | Sep 16 18:17–20:38 | ENGINEERING_BRIEF + ENGINEERING_PLAN written | file mtimes |
 | Sep 16 21:17–22:44 | env.example, onboarding flow, docs/TESTING_CAPTURE.md | file mtimes |

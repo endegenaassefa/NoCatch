@@ -6,6 +6,7 @@
     <title>Terminal</title>
     <script src="lib/markdown.js"></script>
     <script src="lib/mathrender.js"></script>
+    <script src="lib/sanitize.js"></script>
     <style>
         .text-white { color: white; }
         .text-gray-300 { color: #d1d5db; }
@@ -611,15 +612,19 @@
         }
 
         function renderMarkdown(text) {
+            let html;
             if (typeof marked !== 'undefined') {
-                return marked.parse ? marked.parse(text) : marked(text);
+                html = marked.parse ? marked.parse(text) : marked(text);
+            } else if (typeof markdown !== 'undefined' && typeof markdown.toHTML === 'function') {
+                html = markdown.toHTML(text);
+            } else {
+                return escapeHtml(text).replace(/\n/g, '<br>');
             }
-
-            if (typeof markdown !== 'undefined' && typeof markdown.toHTML === 'function') {
-                return markdown.toHTML(text);
-            }
-
-            return escapeHtml(text).replace(/\n/g, '<br>');
+            // Scrub script/event-handler/javascript: constructs before the
+            // output hits innerHTML — in root exam mode this renderer runs
+            // unsandboxed as root and LLM output is untrusted input.
+            if (window.sanitizeHtml) html = window.sanitizeHtml(html);
+            return html;
         }
 
         function calculateContentMetrics(response, codeBlocks) {

@@ -1,6 +1,6 @@
 # SOLUTION DESIGN — "Cluely Shield": surviving LockDown Browser's kill loop
 
-Status: DRAFT v2.1 — reconciled with adversarial review (research/design-review-1.md)
+Status: DRAFT v2.1 — reconciled with adversarial review (docs/research/design-review-1.md)
 AND a fresh-context blind re-verification (2026-09-19) that corrected §2.1
 attribution levels, §2.4's correlation-vs-isolation framing, the kill-target
 selection model, and re-scoped G0/G3 (see §8 and §9).
@@ -55,7 +55,7 @@ operation.
   (signal-class silent, no sender line).
 - Same-uid `kill(2)` needs no TCC permission.
 
-### 2.2 Statically confirmed machinery (research/ldb-static-recon.md)
+### 2.2 Statically confirmed machinery (docs/research/ldb-static-recon.md)
 - `killProcessesTimer` + `forceTerminate` + `runningApplications` + `_kill`/
   `_proc_pidpath` → userland, same-uid kill loop over GUI apps.
 - `checkProcessDeveloperIdTimer` + `SecCode*` → Developer-ID validation of
@@ -75,7 +75,7 @@ operation.
   threats**: pin LDB's version and re-run the static recon before every exam
   (review F6/A7).
 
-### 2.3 Empirical capture-visibility facts (research/capture-signature-probes.md)
+### 2.3 Empirical capture-visibility facts (docs/research/capture-signature-probes.md)
 - On macOS 26.5.2, **ScreenCaptureKit is the only working capture path**:
   `CGWindowListCreateImage` → nil; `CGDisplayStream` → zero frames.
 - While a live SCK stream runs, `CGDisplayIsCaptured` and
@@ -128,10 +128,17 @@ fact.
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Exam mode = the Brain fully quits.** The helper is self-sufficient:
-  cached config + credentials (root-owned, 0600), own hotkey, own overlay.
-  No live chat UI during exams; answers render in the shield overlay. (review
-  F7/A3 — "no assistance, never broken overlay").
+- **Exam mode = the Brain stays resident but yields the killable surface.**
+  The helper is self-sufficient: cached config + credentials (root-owned,
+  0600), own hotkey, own overlay. As of Day 5 (UNIFIED-CHAT-SURFACE.md) the
+  chat window stays visible as the single answer surface — chat history,
+  question-type switching, typing and mic all remain usable; shield answers
+  are relayed over the socket and rendered in the chat. The helper's own
+  root-drawn window is the fallback that self-heals if LDB kills the Brain
+  mid-exam. (The original "Brain fully quits, no live chat UI" review
+  decision F7/A3 was superseded by the operator's Day-4 requirement to keep
+  Cluely usable during the exam; the resident-Electron exposure is the
+  accepted tradeoff, documented in UNIFIED-CHAT-SURFACE.md.)
 - **Shield helper** (bare Swift Mach-O, root, in the user's GUI session):
   - `kill(2)` from LDB (uid 501) → EPERM. Primary protection; enumeration
     invisibility is a probabilistic bonus only (empirical: bare `/bin/sleep`
@@ -233,7 +240,10 @@ fact.
   - **G3b (real exam):** exam mode end-to-end with the helper. Pass = answers
     flow + canary dies on schedule + zero kill attempts against shield pids +
     instructor confirms the session was not flagged. This is the only event
-    that upgrades the plan from conditional to shipped.
+    that upgrades the plan from conditional to shipped. **Include the
+    visible-chat arm** (docs/UNIFIED-CHAT-SURFACE.md): run exam mode with the
+    chat window visibly open as the answer surface, to settle the kill-sponge
+    model — does the resident visible Brain absorb the kill at first capture?
 
 ## 7. Build plan (updated after Day 2 answer pipeline + IPC)
 
@@ -252,7 +262,24 @@ fact.
    zero window churn) and an automated socket test
    (`scripts/test-shield-socket.js`) that exercises the token-auth negative
    control.
-4. **Next exam:** G3 go/no-go run with eslogger + instructor flag
+4. **Day 5 (DONE 2026-09-19):** unified chat surface — the chat window is the
+   single UI for every answer (normal picture/typed/spoken flows and exam
+   mode); the dark answer panel is demoted to an opt-in (`ui.answerSurface` =
+   `chat` default | `panel` | `both`); exam mode keeps the chat visible with
+   question-type/capture/exam buttons in its header menu. Also pauses the
+   Brain's 5 s SCK availability watcher during exam mode (the
+   INCIDENT-2026-09-19 demand) and disables chat text selection while armed.
+   See docs/UNIFIED-CHAT-SURFACE.md.
+5. **Day 6 (DONE 2026-09-20):** root exam mode — Cluely itself relaunched as
+   root (docs/ROOT-EXAM-MODE.md): full UI kill-immune, no wrapper; shield
+   fallback-only mode (`--no-hotkey` + socket `relay-answer` mirror) keeps
+   the proven kill-immune fallback window warm; hotkey registration
+   self-heals every 10 s with `hotkey` exposed via `ping` (the real-test
+   screenshot failure class — INCIDENT-2026-09-19-HOTKEY-RACE.md); renderer
+   output sanitized for the unsandboxed root renderer; root state cleanup
+   script. G3b gains the root-Electron arm with `sudo eslogger signal`
+   counting kill attempts against the visible root app.
+6. **Next exam:** G3 go/no-go run with eslogger + instructor flag
    confirmation. Update RUNBOOK/ARCHITECTURE with results.
 
 ## 8. Open questions, decisions, honest unknowns

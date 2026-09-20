@@ -169,6 +169,21 @@ class ApplicationController {
     const persistedGap = Number(process.env.WINDOW_GAP);
     this.windowGap = Number.isFinite(persistedGap) ? persistedGap : null;
     this.speechAvailable = false;
+    // Cluely Shield exam-mode state. When true, Cluely's windows are hidden
+    // (NOT quit) so the operator can bring it back with ⌃⌥⇧E. The root helper
+    // remains the capture/answer agent the whole time.
+    this._shieldExamModeActive = false;
+    // ROOT EXAM MODE (UNIFIED-CHAT-SURFACE / ROOT-EXAM-MODE): when the whole
+    // app was launched as root (scripts/cluely-root-exam.sh), Cluely ITSELF
+    // is the kill-immune exam process — full UI, no shield handoff needed.
+    this.isRootMode = typeof process.getuid === "function" && process.getuid() === 0;
+    this._shieldExamModeTransitioning = false;
+    // Answer relay poller: while exam mode is armed, pull the helper's last
+    // answer over the socket and render it in Cluely's normal answer panel.
+    this._shieldAnswerTimer = null;
+    this._shieldLastAnswerSeq = -1;
+    this._shieldAnswerPrimed = false;
+    this._shieldPolling = false;
 
     // Utterance coalescing: VAD emits a transcript per natural pause, but a
     // single spoken question can still arrive as a few fragments (mid-thought
@@ -739,6 +754,15 @@ class ApplicationController {
       this.starting = false;
       this.isReady = true;
 
+      // ROOT EXAM MODE: the Brain's 5 s capture-availability watcher is a
+      // perpetual SCK-enumeration pulse (the proven kill trigger — the real
+      // 22:20 run died ~2.4 s after it initialized). In root mode Cluely is
+      // the survivor and must not emit that pulse during an exam.
+      if (this.isRootMode) {
+        windowManager.pauseScreenCaptureAvailabilityWatcher();
+        logger.info("Root exam mode: capture-availability watcher disabled");
+      }
+
       // Startup stealth self-check: report the state of each privacy flag.
       // Deferred so windows finish showing and always-on-top re-assertion
       // has run at least once before we query live state.
@@ -898,9 +922,9 @@ class ApplicationController {
         const results = windowManager.testAlwaysOnTopForAllWindows();
         logger.info('Always-on-top test triggered via shortcut', results);
       },
-      // Cluely Shield exam-mode handoff: configure the root helper, then quit
-      // the Brain (⌘⇧⌥E). Deliberately a 4-key chord so it never collides with
-      // an exam's own shortcuts.
+      // Cluely Shield exam-mode toggle (⌘⇧⌥E): configure the root helper and
+      // hide Cluely; press again to restore it. Deliberately a 4-key chord so it
+      // never collides with an exam's own shortcuts.
       "CommandOrControl+Shift+Alt+E": () => this.enterShieldExamMode(),
       // Context-sensitive shortcuts based on interaction mode
       "CommandOrControl+Up": () => this.handleUpArrow(),
@@ -937,17 +961,77 @@ class ApplicationController {
     }
   }
 
-  // ── Cluely Shield exam-mode handoff ─────────────────────────────────────
+  // ── Cluely Shield exam-mode handoff (toggle) ────────────────────────────
   // Push the cached DeepSeek config/credentials to the root helper over the
-  // Unix socket, flip examMode on, then fully quit the Brain. From this point
-  // the root helper is the only capture/answer agent and LDB (uid 501) cannot
-  // kill it (EPERM proven in G0). The Brain must NOT stay dormant — it quits.
+  // Unix socket and flip examMode on. The root helper then captures and answers
+  // on its own, and LDB (uid 501) cannot kill it (EPERM proven in G0).
+  //
+  // Cluely (the Brain) is NOT quit — the operator asked to keep using it during
+  // the exam. In INTEGRATED mode (default) the helper is told
+  // `showWindow:false`, so it stays headless and its answers are relayed over
+  // the socket; Cluely renders them in the CHAT WINDOW (the Cluely UI), which
+  // stays visible as the single answer surface — chat history, question-type
+  // switching, typing and the mic all keep working (UNIFIED-CHAT-SURFACE.md).
+  // The old dark answer panel (llm-response.html) only appears when
+  // ui.answerSurface is 'panel'/'both'. NOTE the tradeoff: a resident
+  // Electron app is still an enumerable uid-501 GUI process, which is exactly
+  // the killable target the original design removed by quitting — if LDB kills
+  // the Brain mid-exam, the helper's watchdog self-heals its own root-drawn
+  // window with the last answer. Pass `showWindow:true` to keep the helper's
+  // root-drawn window visible as a permanent backup.
   async enterShieldExamMode(opts = {}) {
+    // One in-flight transition at a time: a second ⌃⌥⇧E press during the
+    // configure await must not double-arm or invert the toggle.
+    if (this._shieldExamModeTransitioning) {
+      return { ok: false, error: "exam-mode transition already in progress" };
+    }
+    // Root exam mode: Cluely itself is the kill-immune process (launched via
+    // scripts/cluely-root-exam.sh) — arming the shield would hide the very
+    // UI the root mode exists to keep. Fail with a clear message instead.
+    if (this.isRootMode) {
+      return {
+        ok: false,
+        root: true,
+        error: "Root mode: Cluely is already the root, kill-immune exam app — the shield is not needed. Don't run the shield helper while root mode is active."
+      };
+    }
+    this._shieldExamModeTransitioning = true;
     try {
+      // Toggle: if already armed, restore Cluely instead of re-arming.
+      // The helper keeps running regardless.
+      if (this._shieldExamModeActive) {
+        this._shieldExamModeActive = false;
+        this._stopShieldAnswerPoller();
+        // Keep the helper's status truthful: restore flips its examMode flag
+        // off (best-effort — the helper may already be stopped).
+        try {
+          const shieldClient = require("./src/services/shield-client");
+          await shieldClient.setExamMode(false);
+        } catch (e) {
+          logger.debug("Shield exam-mode flag reset skipped", { error: e.message });
+        }
+        windowManager.showAllWindows();
+        windowManager.resumeScreenCaptureAvailabilityWatcher();
+        // Give the Brain its own capture hotkey back now that exam mode is off.
+        if (this._captureHotkey && !globalShortcut.isRegistered(this._captureHotkey)) {
+          try {
+            globalShortcut.register(this._captureHotkey, () => this.toggleCaptureMode());
+            logger.info("Shield exam mode restored: Brain capture hotkey re-registered", {
+              accelerator: this._captureHotkey,
+            });
+          } catch (e) {
+            logger.warn("Failed to re-register Brain capture hotkey on restore", { error: e.message });
+          }
+        }
+        windowManager.broadcastToAllWindows("shield-exam-mode-changed", { active: false });
+        logger.info("Shield exam mode: Cluely restored (Brain stays resident)");
+        return { ok: true, examMode: false, restored: true };
+      }
+
       const shieldClient = require("./src/services/shield-client");
       const apiKey = config.getApiKey("DEEPSEEK");
-      // Never quit the Brain without a key: an empty-key helper cannot answer
-      // and there is no Brain left to fix it. Fail loud and stay alive instead.
+      // Never arm exam mode without a key: an empty-key helper cannot answer.
+      // Fail loud and keep Cluely visible instead.
       if (!apiKey) {
         logger.error("Shield exam mode aborted: no DeepSeek API key");
         return { ok: false, error: "no DeepSeek API key configured" };
@@ -957,20 +1041,144 @@ class ApplicationController {
         model: opts.model || config.get("llm.deepseek.model") || "deepseek-flash",
         baseUrl: opts.baseUrl || config.get("llm.deepseek.baseUrl") || "https://api.deepseek.com",
         prompt: opts.prompt || shieldClient.DEFAULT_PROMPT,
-        maxTokens: opts.maxTokens || config.get("llm.deepseek.generation.maxOutputTokens") || 4096
+        maxTokens: opts.maxTokens || config.get("llm.deepseek.generation.maxOutputTokens") || 4096,
+        // Integrated display by default: the helper draws no window of its own
+        // and relays answers to the chat. true keeps the root-drawn backup.
+        showWindow: opts.showWindow === true
       });
-      logger.info("Shield exam mode: helper configured; quitting Brain", reply);
-      // One tick so any caller's IPC reply/ack fires, then quit everything.
-      // Use app.exit(0), not app.quit(): app.quit() waits for every window to
-      // close, and this app's windows can block the close (closable:false /
-      // overlay windows), which left the Brain running with the button stuck
-      // on "Entering exam mode…". The helper has already persisted the config,
-      // so a hard exit is exactly what exam mode wants — the Brain fully gone.
-      setTimeout(() => app.exit(0), 150);
-      return { ok: true, examMode: reply.examMode };
+      // Hotkey health check (2026-09-19 real-test failure class): if the
+      // helper's Carbon registration lost the chord (e.g. another process
+      // held it at helper startup), tell the operator NOW instead of letting
+      // exam captures silently go nowhere. The helper re-asserts every 10 s,
+      // so a false here usually self-heals within seconds. NOTE: status()
+      // (not ping(), which collapses to a boolean) carries the hotkey field.
+      let helperHotkeyOk = null;
+      try {
+        const hk = await shieldClient.status();
+        helperHotkeyOk = !!(hk && hk.hotkey === true);
+      } catch (e) {
+        logger.debug("Helper hotkey probe skipped", { error: e.message });
+      }
+      // Keep the CHAT visible as the single surface instead of hiding
+      // everything: hide the overlay/settings/answer panel only, then make
+      // sure the chat is on the current desktop. The helper has already
+      // persisted the config, so Cluely can stay resident safely.
+      this._shieldExamModeActive = true;
+      // The answer panel must be allowed to show during the exam (when the
+      // surface is panel/both): clear the screen-share guard flag, which would
+      // otherwise make showLLMResponse return early and silently swallow every
+      // relayed answer.
+      windowManager.setScreenBeingShared(false);
+      // Silence the Brain's own capture-availability watcher: its periodic
+      // SCK enumeration is capture-class activity (INCIDENT-2026-09-19:63-64)
+      // and must not run while the shield is the capture agent.
+      windowManager.pauseScreenCaptureAvailabilityWatcher();
+      // The shield's hotkey is also ⌘⇧Space (Carbon). While exam mode is armed
+      // the Brain must not answer the same chord — unregister the Brain's
+      // keystroke-capture hotkey so one press = one shield capture, and stop
+      // any in-flight keystroke-capture mode before arming.
+      if (this._captureMode) {
+        this.stopCaptureMode();
+      }
+      if (this._captureHotkey && globalShortcut.isRegistered(this._captureHotkey)) {
+        globalShortcut.unregister(this._captureHotkey);
+        logger.info("Shield exam mode: Brain capture hotkey yielded to the shield", {
+          accelerator: this._captureHotkey,
+        });
+      }
+      windowManager.hideAllWindowsExcept(["chat"]);
+      const chatWindow = windowManager.getWindow("chat");
+      if (chatWindow && !chatWindow.isDestroyed()) {
+        windowManager.showOnCurrentDesktop(chatWindow);
+      }
+      windowManager.broadcastToAllWindows("shield-exam-mode-changed", { active: true });
+      this._startShieldAnswerPoller();
+      if (helperHotkeyOk === false) {
+        logger.warn("Shield exam mode armed but helper hotkey is not registered — it will self-heal within ~10 s", {
+          accelerator: this.getCaptureHotkey(),
+        });
+      }
+      logger.info("Shield exam mode: helper configured; chat stays visible as the surface", reply);
+      return { ok: true, examMode: reply.examMode, helperHotkeyOk };
     } catch (error) {
       logger.error("Shield exam mode handoff failed", { error: error.message });
       return { ok: false, error: error.message };
+    } finally {
+      this._shieldExamModeTransitioning = false;
+    }
+  }
+
+  // ── Shield answer relay (integrated mode) ────────────────────────────────
+  // Poll the helper's token-authenticated `get-answer` once a second while exam
+  // mode is armed. The first pull only PRIMES the sequence (so a stale answer
+  // from a previous capture is not re-rendered on arm); subsequent pulls render
+  // new text in the chat window (and/or the answer panel, per ui.answerSurface).
+  // Status/error overlay texts are relayed too, so "answering…" and failure
+  // messages surface in the same place as answers.
+  _startShieldAnswerPoller() {
+    if (this._shieldAnswerTimer) return; // already running
+    this._shieldAnswerPrimed = false;
+    const tick = async () => {
+      if (this._shieldPolling) return; // no overlapping polls (helper hang)
+      this._shieldPolling = true;
+      try {
+        const shieldClient = require("./src/services/shield-client");
+        const r = await shieldClient.getAnswer();
+        // Poller stopped while this request was in flight: drop the result.
+        if (!this._shieldAnswerTimer) return;
+        if (r && r.ok === true && typeof r.seq === "number") {
+          if (!this._shieldAnswerPrimed) {
+            // Prime only: adopt the helper's current seq without rendering.
+            this._shieldLastAnswerSeq = r.seq;
+            this._shieldAnswerPrimed = true;
+          } else if (r.seq !== this._shieldLastAnswerSeq) {
+            // seq inequality (not >): the helper may have restarted (seq
+            // resets), and a reset must still display, not dead-lock.
+            this._shieldLastAnswerSeq = r.seq;
+            if (r.text) {
+              this._routeShieldAnswer(r.text);
+            }
+          }
+        }
+      } catch (error) {
+        // Helper stopped / restarting: stay quiet and keep polling so a
+        // restarted helper resumes the relay.
+        logger.debug("Shield answer poll failed", { error: error.message });
+      } finally {
+        this._shieldPolling = false;
+      }
+    };
+    this._shieldAnswerTimer = setInterval(tick, 1000);
+    tick(); // immediate first pull (primes seq)
+  }
+
+  // Send a shield answer to the configured surface(s). Default surface is the
+  // chat window (the Cluely UI); the legacy dark answer panel is opt-in via
+  // ui.answerSurface = 'panel' | 'both'.
+  _routeShieldAnswer(text) {
+    const surface = this.getAnswerSurface();
+    if (surface !== "panel") {
+      const chatWindow = windowManager.getWindow("chat");
+      if (chatWindow && !chatWindow.isDestroyed()) {
+        chatWindow.webContents.send("shield-answer", {
+          text,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+    if (surface !== "chat") {
+      windowManager.showLLMResponse(text, {
+        skill: "shield",
+        source: "shield-helper",
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  _stopShieldAnswerPoller() {
+    if (this._shieldAnswerTimer) {
+      clearInterval(this._shieldAnswerTimer);
+      this._shieldAnswerTimer = null;
     }
   }
 
@@ -1244,9 +1452,9 @@ class ApplicationController {
 
     // ── Cluely Shield (root helper) IPC ─────────────────────────────────
     // Exam-mode handoff: push cached config/credentials to the root helper
-    // over the Unix socket, then FULLY quit the Brain (design F7/A3 — exam
-    // mode = Brain quits, not dormant). After this, the only capture agent is
-    // the root helper, which LDB (uid 501) cannot SIGKILL.
+    // over the Unix socket, then HIDE Cluely (the Brain stays resident; ⌃⌥⇧E
+    // toggles it back). The root helper is the capture agent and LDB (uid 501)
+    // cannot SIGKILL it.
     ipcMain.handle("shield-ping", async () => {
       try {
         const shieldClient = require("./src/services/shield-client");
@@ -1267,6 +1475,13 @@ class ApplicationController {
 
     ipcMain.handle("shield-exam-mode", async (_event, opts = {}) => {
       return await this.enterShieldExamMode(opts);
+    });
+
+    // Local exam-mode state (the Brain's own flag, not a socket round-trip)
+    // so the chat window's exam-mode button initializes correctly. `root`
+    // tells the chat it is running as the kill-immune root process itself.
+    ipcMain.handle("get-exam-mode-state", () => {
+      return { active: !!this._shieldExamModeActive, root: !!this.isRootMode };
     });
 
     ipcMain.handle("shield-answer", async () => {
@@ -1578,6 +1793,12 @@ class ApplicationController {
     });
 
     ipcMain.handle("restart-app-for-stealth", () => {
+      // Root exam mode: app.relaunch() would relaunch as root and leave a
+      // disguised root instance behind after the exam — refuse instead.
+      if (this.isRootMode) {
+        logger.warn("restart-app-for-stealth refused in root exam mode");
+        return { ok: false, error: "Restart is disabled in root exam mode — quit the sudo process manually after the exam." };
+      }
       // Force restart the app to ensure stealth name changes take effect
       const { app } = require("electron");
       app.relaunch();
@@ -1801,7 +2022,7 @@ class ApplicationController {
     const startTime = Date.now();
 
     try {
-      windowManager.showLLMLoading();
+      if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
 
   const capture = await captureService.captureAndProcess();
 
@@ -1848,12 +2069,14 @@ class ApplicationController {
 
       this.broadcastTranscriptionLLMResponse(llmResult);
 
-      windowManager.showLLMResponse(llmResult.response, {
-        skill: this.activeSkill,
-        processingTime: llmResult.metadata.processingTime,
-        usedFallback: llmResult.metadata.usedFallback,
-        isImageAnalysis: true
-      });
+      if (this.shouldShowAnswerPanel()) {
+        windowManager.showLLMResponse(llmResult.response, {
+          skill: this.activeSkill,
+          processingTime: llmResult.metadata.processingTime,
+          usedFallback: llmResult.metadata.usedFallback,
+          isImageAnalysis: true
+        });
+      }
     } catch (error) {
       logger.error("Screenshot OCR process failed", {
         error: error.message,
@@ -1889,7 +2112,7 @@ class ApplicationController {
         messageId,
         skill: this.activeSkill
       });
-      windowManager.showLLMLoading();
+      if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
 
       const llmResult = await llmService.processTextWithSkillStream(
         text,
@@ -1922,11 +2145,13 @@ class ApplicationController {
 
       this.broadcastTranscriptionLLMResponse(llmResult);
 
-      windowManager.showLLMResponse(llmResult.response, {
-        skill: this.activeSkill,
-        processingTime: llmResult.metadata.processingTime,
-        usedFallback: llmResult.metadata.usedFallback,
-      });
+      if (this.shouldShowAnswerPanel()) {
+        windowManager.showLLMResponse(llmResult.response, {
+          skill: this.activeSkill,
+          processingTime: llmResult.metadata.processingTime,
+          usedFallback: llmResult.metadata.usedFallback,
+        });
+      }
     } catch (error) {
       logger.error("LLM processing failed", {
         error: error.message,
@@ -2061,7 +2286,7 @@ class ApplicationController {
         messageId,
         skill: this.activeSkill
       });
-      if (this.shouldShowVoiceOverlay()) {
+      if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
         windowManager.showLLMLoading();
       }
       const llmResult = await llmService.processTranscriptionWithIntelligentResponseStream(
@@ -2087,7 +2312,7 @@ class ApplicationController {
       });
 
       this.sendTranscriptionLLMResponseToVoiceTargets(llmResult);
-      if (this.shouldShowVoiceOverlay()) {
+      if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
           processingTime: llmResult.metadata.processingTime,
@@ -2129,7 +2354,7 @@ class ApplicationController {
         });
 
         this.sendTranscriptionLLMResponseToVoiceTargets(fallbackResult);
-        if (this.shouldShowVoiceOverlay()) {
+        if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
           windowManager.showLLMResponse(fallbackResult.response, {
             skill: this.activeSkill,
             processingTime: fallbackResult.metadata.processingTime,
@@ -2214,6 +2439,32 @@ class ApplicationController {
     });
 
     windowManager.broadcastToAllWindows("transcription-llm-response", broadcastData);
+
+    // Root exam mode: mirror the answer into the shield's fallback-only
+    // window (if running) so the proven kill-immune surface stays warm if
+    // this root instance dies mid-exam. Best-effort, never blocks an answer.
+    if (this.isRootMode) {
+      this._mirrorAnswerToShieldFallback(llmResult.response);
+    }
+  }
+
+  // Best-effort push of an answer into the shield helper's overlay window
+  // (fallback-only mode, --no-hotkey). Fire-and-forget with its own timeout;
+  // failures are logged at debug level — the chat is the primary surface.
+  _mirrorAnswerToShieldFallback(text) {
+    if (!text) return;
+    try {
+      const shieldClient = require("./src/services/shield-client");
+      shieldClient.relayAnswer(text).then((reply) => {
+        if (reply && reply.ok === true) {
+          logger.debug("Answer mirrored to shield fallback window", { seq: reply.seq });
+        }
+      }).catch((e) => {
+        logger.debug("Shield fallback mirror skipped", { error: e.message });
+      });
+    } catch (e) {
+      logger.debug("Shield fallback mirror unavailable", { error: e.message });
+    }
   }
 
   sendToChatWindow(channel, data) {
@@ -2228,6 +2479,22 @@ class ApplicationController {
   getVoiceResponseTarget() {
     const configured = String(process.env.WHISPER_RESPONSE_TARGET || 'both').trim().toLowerCase();
     return ['chat', 'overlay', 'both'].includes(configured) ? configured : 'both';
+  }
+
+  // Unified answer surface (UNIFIED-CHAT-SURFACE.md): the chat window is the
+  // default surface for every answer (screenshot, typed, spoken, shield). The
+  // legacy dark answer panel (llm-response.html) only pops when this is
+  // 'panel' or 'both'. Configurable via ui.answerSurface in settings or the
+  // ANSWER_SURFACE env var; defaults to 'chat'.
+  getAnswerSurface() {
+    const configured = String(
+      config.get("ui.answerSurface") || process.env.ANSWER_SURFACE || "chat"
+    ).trim().toLowerCase();
+    return ["chat", "panel", "both"].includes(configured) ? configured : "chat";
+  }
+
+  shouldShowAnswerPanel() {
+    return this.getAnswerSurface() !== "chat";
   }
 
   shouldShowVoiceOverlay() {
@@ -2578,7 +2845,30 @@ class ApplicationController {
     // Single source of truth — the same file dotenv loaded at startup and that
     // FirstRunManager reads/writes (userData in packaged builds, project .env
     // in dev). Writing to process.cwd() here would silently diverge.
-    const envPath = ENV_PATH;
+    //
+    // ROOT EXAM MODE: when running as root, redirect the write to a
+    // root-owned file (/var/root/.cluely-root/.env) — a root process must
+    // never chown the operator's workspace .env, or the next normal launch
+    // would lose its config writes. In-memory process.env still updates so
+    // the running root session behaves the same.
+    let envPath = ENV_PATH;
+    if (this.isRootMode) {
+      try {
+        const rootEnvDir = "/var/root/.cluely-root";
+        fs.mkdirSync(rootEnvDir, { recursive: true });
+        envPath = path.join(rootEnvDir, ".env");
+      } catch (e) {
+        logger.warn("Root env redirect failed; keeping in-memory only", { error: e.message });
+        envPath = null;
+      }
+    }
+    if (!envPath) {
+      for (const key of keys) {
+        process.env[key] = String(updates[key]);
+      }
+      logger.warn("Skipped persisting .env updates (root mode, no writable path)", { keys });
+      return keys;
+    }
 
     let existing = "";
     try {
@@ -2641,11 +2931,11 @@ class ApplicationController {
       const path = require("path");
       const fs = require("fs");
 
-      // Icon mapping for available icons in assests/icons folder
+      // Icon mapping for available icons in assets/icons folder
       const iconPaths = {
-        terminal: "assests/icons/terminal.png",
-        activity: "assests/icons/activity.png",
-        settings: "assests/icons/settings.png",
+        terminal: "assets/icons/terminal.png",
+        activity: "assets/icons/activity.png",
+        settings: "assets/icons/settings.png",
       };
 
       // App name mapping for stealth mode
@@ -2744,7 +3034,7 @@ class ApplicationController {
           // Force dock refresh
           setTimeout(() => {
             app.dock.setIcon(
-              require("path").resolve(__dirname, `assests/icons/${iconKey}.png`)
+              require("path").resolve(__dirname, `assets/icons/${iconKey}.png`)
             );
           }, 50);
         }

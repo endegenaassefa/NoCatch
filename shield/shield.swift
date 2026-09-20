@@ -16,7 +16,12 @@
 //
 // Day 2–3 (implemented): DeepSeek vision answer pipeline, Unix-socket IPC
 // (token-authenticated, fail-closed), cached root-owned config/credentials,
-// install script (build + binary + token), Brain exam-mode quit.
+// install script (build + binary + token), Brain exam-mode hide (not quit).
+//
+// Day 4 (integrated display): `get-answer` relays answers to the Brain, which
+// renders them in Cluely's chat window (the Cluely UI); `showWindow:false`
+// keeps the helper headless. The helper's own root-drawn window remains the
+// opt-in fallback surface that survives if LDB kills the Brain mid-exam.
 //
 // Hard guarantees encoded structurally (not warnings):
 //   * frames never touch disk (LDB runs cleanUpScreenShotsTimer) — RAM only
@@ -33,6 +38,18 @@ import CoreImage
 import ImageIO
 
 func log(_ s: String) { print(s); fflush(stdout) }
+
+// Constant-time string comparison for the socket token gate. String's `!=`
+// short-circuits on the first differing byte, which leaks prefix length of the
+// shared secret to a local timing observer on the world-writable socket.
+// XOR-accumulate over all bytes instead (length mismatch is not secret).
+func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+    let x = Array(a.utf8), y = Array(b.utf8)
+    guard x.count == y.count else { return false }
+    var acc: UInt8 = 0
+    for i in 0..<x.count { acc |= x[i] ^ y[i] }
+    return acc == 0
+}
 
 enum ShieldError: Error {
     case timeout
@@ -152,11 +169,23 @@ struct ShieldConfig: Codable {
     var temperature: Double = 0.7
     var prompt: String = "You are an exam assistant. Read the question shown on the screen and answer it correctly and concisely. If it is multiple choice, give the letter and a one-line reason. If it is a coding question, give the code in a fenced block with the language tag."
     var examMode: Bool = false
+    // Integrated display mode: when false, the helper does NOT create its own
+    // window — answers are relayed to the Brain over the socket (get-answer),
+    // which renders them in Cluely's chat window. When true (default),
+    // the helper also draws its own small root-owned window, the only surface
+    // that survives if the Brain is SIGKILLed mid-exam (G2: capture activity
+    // can trigger LDB's kill-loop against uid-501 bystanders).
+    var showWindow: Bool = true
     // Shared secret for the socket. The helper stores it root-only (0600); the
     // Brain reads it from CLUELY_SHIELD_TOKEN and must echo it on every
     // mutating command. A uid-501 attacker (LDB) does not know it, so it cannot
     // reconfigure, disable, or answer-spam the helper. Empty = token auth
     // disabled (operator has not configured it).
+    // Hotkey registration: in fallback-only mode (--no-hotkey, used alongside
+    // root exam mode where the root Cluely owns ⌘⇧Space), the helper never
+    // touches the chord at all — answers arrive via the socket relay-answer
+    // command and the helper's window is the warm fallback if root Cluely dies.
+    var hotkeyEnabled: Bool = true
     var token: String = ""
 
     // Tolerant decode: any absent key falls back to its default, so configs
@@ -170,6 +199,8 @@ struct ShieldConfig: Codable {
         temperature = try c.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.7
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? "You are an exam assistant. Read the question shown on the screen and answer it correctly and concisely. If it is multiple choice, give the letter and a one-line reason. If it is a coding question, give the code in a fenced block with the language tag."
         examMode = try c.decodeIfPresent(Bool.self, forKey: .examMode) ?? false
+        showWindow = try c.decodeIfPresent(Bool.self, forKey: .showWindow) ?? true
+        hotkeyEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeyEnabled) ?? true
         token = try c.decodeIfPresent(String.self, forKey: .token) ?? ""
     }
 
@@ -192,6 +223,16 @@ func shieldConfigPath() -> String {
         return CommandLine.arguments[i + 1]
     }
     return configPathDefault
+}
+
+// Socket path override: production uses /tmp/cluely-shield.sock, tests pass
+// --socket PATH so a root-owned stale socket (sticky /tmp) never blocks the
+// non-root verification suite.
+func shieldSocketPath() -> String {
+    if let i = CommandLine.arguments.firstIndex(of: "--socket"), i + 1 < CommandLine.arguments.count {
+        return CommandLine.arguments[i + 1]
+    }
+    return socketPathDefault
 }
 
 func loadConfig(_ path: String) -> ShieldConfig {
@@ -288,9 +329,10 @@ func deepSeekAnswer(imageJPEG: Data, config: ShieldConfig) async throws -> Strin
 // the uid-501 Brain (or the operator). Runs on a background queue so it never
 // blocks the Carbon hotkey main loop.
 // Commands (one JSON object per line):
-//   {"cmd":"configure","apiKey":"...","model":"...","prompt":"...","baseUrl":"...","examMode":true}
+//   {"cmd":"configure","apiKey":"...","model":"...","prompt":"...","baseUrl":"...","examMode":true,"showWindow":false}
 //   {"cmd":"exam-mode","on":true}
 //   {"cmd":"answer"}                  — force a capture+answer now
+//   {"cmd":"get-answer"}              — pull the last answer {seq,text} (auth)
 //   {"cmd":"quit"}                    — orderly shutdown
 // Replies: {"ok":true,...} or {"ok":false,"error":"..."}
 final class SocketServer: @unchecked Sendable {
@@ -399,6 +441,23 @@ final class SocketServer: @unchecked Sendable {
     }
 }
 
+// ── draggable overlay content ─────────────────────────────────────────────
+// A borderless NSWindow has no title bar, so it is NOT draggable by default.
+// This content view restores that affordance: a mouse-down on any part of the
+// surface that is not consumed by a child control (the vertical scroller)
+// starts a window drag via performDrag(_:), matching how the Electron overlays
+// move. The answer text is non-selectable and non-editable, so a click on the
+// text body bubbles up here instead of being swallowed by the text view.
+final class OverlayContentView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        if let window = self.window {
+            window.performDrag(with: event)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+}
+
 // ── the helper ────────────────────────────────────────────────────────────
 // Threading discipline (justifies @unchecked Sendable):
 //   * `filter`, `isCapturing`, `window`, `textView` are touched ONLY on the main
@@ -409,7 +468,31 @@ final class Shield: NSObject, @unchecked Sendable {
     var filter: SCContentFilter?          // fetched ONCE, before LDB launches (main-only)
     var window: NSWindow?
     var textView: NSTextView?
+    // Answer relay (main-only): the last overlay text + a monotonic sequence,
+    // served to the Brain over the socket via the token-authenticated
+    // `get-answer` command. Recorded on EVERY updateOverlay call so integrated
+    // mode (no window) works headless — the Brain polls and renders in its
+    // chat window.
+    var lastAnswerText = ""
+    var lastAnswerSeq = 0
+    // Main-only: wall-clock time of the last authenticated get-answer poll.
+    // The integrated-mode watchdog uses it to detect a Brain that stopped
+    // polling (killed / crashed / restored) and re-create the helper's own
+    // window so the answer surface self-heals onto the unkillable process.
+    var lastAnswerPollTime = Date()
     private var isCapturing = false       // main-only in-flight guard (MAJOR-2)
+    // Hotkey health (main-only). The 2026-09-19 real-test failure: the helper
+    // started while another process (the Brain) held ⌘⇧Space, its one-shot
+    // Carbon registration failed silently to stdout, and every exam capture
+    // press went to the wrong process. hotkeyOk feeds the socket `ping` reply
+    // and a periodic re-assert timer so the registration self-heals instead of
+    // staying dead for the whole exam.
+    var hotkeyOk = false
+    // InstallEventHandler must run exactly once: the re-assert timer calls
+    // registerHotKey() repeatedly while hotkeyOk is false, and each
+    // InstallEventHandler call stacks another handler (one press would fire
+    // onHotKey N times).
+    private var hotkeyHandlerInstalled = false
     var config = ShieldConfig()           // config lives on main only; snapshot per capture
     private var socket: SocketServer?
     private let configPath: String
@@ -425,15 +508,22 @@ final class Shield: NSObject, @unchecked Sendable {
     // interactive mode — --self-test stays headless (capture → verdict → exit).
     //
     // The answer surface is a scrollable, non-editable NSTextView inside a
-    // FIXED-SIZE window. Answers (code blocks, multi-line reasoning) scroll
-    // instead of clipping, and the window frame is never re-sized per answer —
-    // zero window churn, which is exactly what the design demands (LDB reacts
-    // to window churn, not to in-place text redraws).
+    // compact, draggable, user-resizable window. Answers (code blocks,
+    // multi-line reasoning) scroll instead of clipping, and the window frame is
+    // never re-sized PER ANSWER — zero automatic window churn, which is exactly
+    // what the design demands (LDB reacts to window churn, not to in-place text
+    // redraws). User-initiated drag/resize is separate from that invariant.
     func showOverlay() {
         guard window == nil else { return }
+        // Compact default footprint (was 640×360 — too large and it hid the
+        // exam's questions/buttons). The window is now resizable AND draggable,
+        // so the operator can shrink or move it out of the way mid-exam. F11
+        // still holds: the frame is never auto-resized per answer (updateOverlay
+        // only rewrites the text), so resize/drag are user-initiated and are not
+        // the window churn the design forbids.
         let win = NSWindow(
-            contentRect: NSRect(x: 80, y: 120, width: 640, height: 360),
-            styleMask: [.borderless],
+            contentRect: NSRect(x: 80, y: 120, width: 440, height: 280),
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -442,8 +532,14 @@ final class Shield: NSObject, @unchecked Sendable {
         win.isOpaque = false
         win.backgroundColor = NSColor(calibratedWhite: 0.0, alpha: 0.86)
         win.sharingType = .none            // content-protected (recording tradeoff — design §8)
+        win.isMovableByWindowBackground = true   // whole-surface drag fallback
+        win.minSize = NSSize(width: 300, height: 180)
+        win.maxSize = NSSize(width: 1280, height: 900)
 
-        guard let content = win.contentView else { return }
+        let content = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 440, height: 280))
+        content.autoresizingMask = [.width, .height]
+        win.contentView = content
+
         let scroll = NSScrollView(frame: content.bounds)
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
@@ -463,7 +559,7 @@ final class Shield: NSObject, @unchecked Sendable {
         tv.autoresizingMask = [.width]
         tv.minSize = NSSize(width: 0, height: scroll.contentSize.height)  // fill the viewport even with short content
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        tv.string = "CLUELY SHIELD — ready (⌘⇧Space to capture)"
+        tv.string = "CLUELY SHIELD — ready\n⌘⇧Space to capture · drag to move · drag edges to resize"
         scroll.documentView = tv
         content.addSubview(scroll)
 
@@ -487,9 +583,49 @@ final class Shield: NSObject, @unchecked Sendable {
 
     // ── startup: load config, open socket, fetch filter ONCE, register hotkey
     func start() {
-        registerHotKey()
-        startSocket()
         loadPersistedConfig()
+        // Fallback-only mode (--no-hotkey): alongside root exam mode, the root
+        // Cluely owns ⌘⇧Space; the helper never touches the chord and only
+        // mirrors answers relayed over the socket into its own window, which
+        // stays warm as the fallback surface if root Cluely dies.
+        if CommandLine.arguments.contains("--no-hotkey") {
+            config.hotkeyEnabled = false
+            log("HOTKEY_DISABLED fallback-only mode (socket relay answers only)")
+        }
+        if config.hotkeyEnabled {
+            registerHotKey()
+            // Hotkey re-assert: if the chord was held by another process at
+            // startup, retry every 10 s until it frees (2026-09-19 real-test
+            // failure class — a silent one-shot registration death).
+            let hotkeyTimer = Timer(timeInterval: 10, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                if !self.hotkeyOk {
+                    self.registerHotKey()
+                }
+            }
+            RunLoop.main.add(hotkeyTimer, forMode: .common)
+        }
+        startSocket()
+        // Integrated-mode watchdog (main-only state, main-runloop timer): when
+        // the helper is headless (showWindow:false), the Brain renders answers.
+        // If the Brain stops polling get-answer — killed mid-exam, crashed, or
+        // exam mode restored — the helper re-creates its own root-drawn window
+        // after a grace period and draws the last answer, so the answer surface
+        // self-heals onto the process LDB cannot SIGKILL. Gated on examMode so
+        // a restore (which flips examMode off) never pops a phantom window.
+        if !config.showWindow {
+            let t = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                guard !self.config.showWindow, self.config.examMode,
+                      self.window == nil, !self.lastAnswerText.isEmpty else { return }
+                if Date().timeIntervalSince(self.lastAnswerPollTime) > 15 {
+                    log("WATCHDOG_BRAIN_SILENT creating fallback window")
+                    self.showOverlay()
+                    self.updateOverlay(self.lastAnswerText)
+                }
+            }
+            RunLoop.main.add(t, forMode: .common)
+        }
         Task {
             do {
                 let content = try await SCShareableContent.current
@@ -573,6 +709,9 @@ final class Shield: NSObject, @unchecked Sendable {
     }
 
     func updateOverlay(_ text: String) {
+        // Relay-first: record the text for get-answer even when headless.
+        lastAnswerSeq += 1
+        lastAnswerText = text
         guard let tv = textView else { return }
         tv.string = text                      // in-place redraw — no level/hide/show churn
         tv.scrollToBeginningOfDocument(nil)   // always show the top of the answer
@@ -580,7 +719,7 @@ final class Shield: NSObject, @unchecked Sendable {
 
     // ── socket command dispatch (uid-501 Brain → root helper) ──────────────
     func startSocket() {
-        let s = SocketServer(path: socketPathDefault) { [weak self] cmd in
+        let s = SocketServer(path: shieldSocketPath()) { [weak self] cmd in
             self?.handleCommand(cmd) ?? ["ok": false, "error": "gone"]
         }
         self.socket = s
@@ -601,7 +740,7 @@ final class Shield: NSObject, @unchecked Sendable {
                 return ["ok": false, "error": "unauthorized (no token configured — run install-shield.sh)"]
             }
             let given = cmd["token"] as? String ?? ""
-            if given != expected {
+            if !constantTimeEqual(given, expected) {
                 log("SOCKET_AUTH_DENIED cmd=\(name)")
                 return ["ok": false, "error": "unauthorized"]
             }
@@ -609,7 +748,8 @@ final class Shield: NSObject, @unchecked Sendable {
         switch name {
         case "ping":
             let em = DispatchQueue.main.sync { self.config.examMode }
-            return ["ok": true, "pid": getpid(), "examMode": em]
+            let hk = DispatchQueue.main.sync { self.hotkeyOk }
+            return ["ok": true, "pid": getpid(), "examMode": em, "hotkey": hk]
         case "configure":
             var ok = true
             var err = ""
@@ -630,6 +770,28 @@ final class Shield: NSObject, @unchecked Sendable {
                     if let p = cmd["prompt"] as? String { self.config.prompt = p }
                     if let t = cmd["maxTokens"] as? Int { self.config.maxTokens = t }
                     if let em = cmd["examMode"] as? Bool { self.config.examMode = em }
+                    if let sw = cmd["showWindow"] as? Bool {
+                        // Reconcile the actual window with the setting AT RUNTIME
+                        // (not just at next start): integrated mode must remove
+                        // the window immediately; opting back into the backup
+                        // window must create it immediately. Operator-initiated,
+                        // not per-answer churn, so F11 is untouched.
+                        self.config.showWindow = sw
+                        if sw {
+                            if self.window == nil {
+                                self.showOverlay()
+                                if !self.lastAnswerText.isEmpty {
+                                    self.updateOverlay(self.lastAnswerText)
+                                }
+                            }
+                        } else {
+                            if let w = self.window {
+                                w.orderOut(nil)
+                                self.window = nil
+                                self.textView = nil
+                            }
+                        }
+                    }
                     // NOTE: the token is NOT settable over the socket. It is
                     // seeded only by scripts/install-shield.sh (written
                     // directly to the root config). This removes the
@@ -658,6 +820,23 @@ final class Shield: NSObject, @unchecked Sendable {
             }
             DispatchQueue.main.async { self.onHotKey() }
             return ["ok": true, "queued": true]
+        case "relay-answer":
+            // Fallback-only mode: the root Cluely mirrors its answers here so
+            // this window stays warm as the kill-immune fallback surface.
+            guard let text = cmd["text"] as? String, !text.isEmpty else {
+                return ["ok": false, "error": "relay-answer needs non-empty text"]
+            }
+            DispatchQueue.main.async { self.updateOverlay(text) }
+            return ["ok": true, "seq": self.lastAnswerSeq]
+        case "get-answer":
+            // Token-authenticated answer relay (NOT part of unauthenticated
+            // `ping`): an unauthenticated uid-501 reader (LDB) must not be
+            // able to pull answers off the world-writable socket.
+            let (seq, text) = DispatchQueue.main.sync {
+                self.lastAnswerPollTime = Date()   // feeds the watchdog
+                return (self.lastAnswerSeq, self.lastAnswerText)
+            }
+            return ["ok": true, "seq": seq, "text": text]
         case "quit":
             log("SOCKET_QUIT")
             DispatchQueue.main.async {
@@ -671,29 +850,51 @@ final class Shield: NSObject, @unchecked Sendable {
     }
 
     // ── Carbon RegisterEventHotKey (⌘⇧Space) — no TCC, PRIMARY path ───────
+    // Re-invocable: the periodic re-assert timer (start()) calls this again
+    // whenever hotkeyOk is false, so a startup failure caused by the chord
+    // being held elsewhere (e.g. a Brain instance) self-heals the moment the
+    // chord frees up — the exact failure mode of the 2026-09-19 real test.
     private func registerHotKey() {
-        let hotKeyID = EventHotKeyID(signature: OSType(0x434C_5545), id: 1) // 'CLUE'
         var hotKeyRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
             UInt32(kVK_Space),
             UInt32(cmdKey | shiftKey),
-            hotKeyID,
+            EventHotKeyID(signature: OSType(0x434C_5545), id: 1), // 'CLUE'
             GetApplicationEventTarget(),
             0,
             &hotKeyRef
         )
-        log(status == 0 && hotKeyRef != nil ? "HOTKEY_OK" : "HOTKEY_FAIL status=\(status)")
+        let ok = status == 0 && hotKeyRef != nil
+        if ok && !hotkeyOk {
+            log("HOTKEY_OK")
+        } else if !ok {
+            // eventHotKeyExistsErr (-9878) means another process holds the
+            // chord; anything else is a session/registration problem. Either
+            // way it must be VISIBLE, not just on stdout: draw it in the
+            // overlay so the operator sees it before the exam, and keep the
+            // flag false so the re-assert timer retries.
+            log("HOTKEY_FAIL status=\(status) (retry in progress)")
+            updateOverlay("⚠ ⌘⇧Space NOT registered (status \(status)) — another app may hold it. Cluely Shield retries every 10 s.")
+        }
+        hotkeyOk = ok
 
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        var handlerRef: EventHandlerRef?
-        InstallEventHandler(
-            GetApplicationEventTarget(),
-            hotKeyCallback,
-            1,
-            &eventType,
-            nil,
-            &handlerRef
-        )
+        // Install the event handler exactly once per process: the re-assert
+        // timer re-enters registerHotKey() while hotkeyOk is false, and each
+        // InstallEventHandler call stacks another handler (one press would
+        // fire onHotKey N times).
+        if !hotkeyHandlerInstalled {
+            hotkeyHandlerInstalled = true
+            var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            var handlerRef: EventHandlerRef?
+            InstallEventHandler(
+                GetApplicationEventTarget(),
+                hotKeyCallback,
+                1,
+                &eventType,
+                nil,
+                &handlerRef
+            )
+        }
         // handlerRef and hotKeyRef are intentionally retained by Carbon for process lifetime.
         // Delivery is verified by the interactive run: pressing ⌘⇧Space must log
         // HOTKEY_PRESSED and redraw the overlay (on-device, not self-test).
@@ -723,11 +924,15 @@ if isSocketTest {
     // rejected) against the same code path the Brain uses in production.
     let testShield = Shield(configPath: "/tmp/cluely-shield-test/socket-config.json")
     testShield.loadPersistedConfig()
-    let s = SocketServer(path: socketPathDefault) { cmd in
+    // Seed the relay: updateOverlay runs headless (no window created) — the
+    // exact integrated-mode path — so the positive get-answer test asserts a
+    // REAL relayed text instead of the vacuous empty seq-0 default.
+    testShield.updateOverlay("SOCKET_TEST_ANSWER")
+    let s = SocketServer(path: shieldSocketPath()) { cmd in
         testShield.handleCommand(cmd)
     }
     s.start()
-    log("SOCKET_TEST_READY — drive ping/configure over \(socketPathDefault)")
+    log("SOCKET_TEST_READY — drive ping/configure over \(shieldSocketPath())")
     DispatchQueue.main.asyncAfter(deadline: .now() + 30) { exit(0) }
     RunLoop.main.run()
 } else if isAnswerTest {
@@ -811,7 +1016,15 @@ if isSocketTest {
         }
     }
 } else {
-    shield.showOverlay()
+    // Integrated mode: load the cached config FIRST — if the Brain configured
+    // showWindow=false, the helper stays headless (no window) and answers are
+    // relayed over the socket; the Brain renders them in Cluely's own panel.
+    shield.loadPersistedConfig()
+    if shield.config.showWindow {
+        shield.showOverlay()
+    } else {
+        log("SHIELD_HEADLESS integrated mode — answers relay to the Brain (get-answer)")
+    }
     shield.start()
 }
 

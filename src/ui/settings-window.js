@@ -122,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateSpeechFieldStates();
         updateLlmFieldStates();
+        document.dispatchEvent(new Event('settings-loaded'));
     };
 
     // Load settings when window opens
@@ -170,6 +171,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const updateSpeechFieldStates = () => {
         const provider = speechProviderSelect ? speechProviderSelect.value : 'azure';
+        const preparingModel = document.getElementById('whisperModelSetup')?.dataset.busy === 'true';
+        if (speechProviderSelect) speechProviderSelect.disabled = preparingModel;
 
         // Show/hide provider-specific field groups instead of just disabling
         // them. This keeps the settings UI clean — only the relevant fields
@@ -194,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         [whisperCommandInput, whisperModelInput, whisperLanguageInput, whisperDeviceSelect,
             whisperCaptureModeSelect, whisperResponseTargetSelect, whisperSegmentMsInput].forEach(input => {
-            if (input) input.disabled = provider !== 'whisper';
+            if (input) input.disabled = provider !== 'whisper' || (preparingModel && [whisperCommandInput, whisperModelInput, whisperDeviceSelect].includes(input));
         });
     };
 

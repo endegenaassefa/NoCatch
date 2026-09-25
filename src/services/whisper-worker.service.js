@@ -10,18 +10,23 @@ class WhisperWorkerService {
     this.pythonPath = null;
     this.scriptPath = null;
     this.pending = new Map();
+    // Reader ownership outlives rejected requests when exit is unconfirmed.
+    this.inputReaders = new Map();
     this.sequence = 0;
     this.idleTimer = null;
     this.idleUnloadMs = 60000;
     this.readyInfo = null;
     this.closing = false;
+    this.retirement = null;
   }
 
-  configure({ pythonPath, scriptPath, idleUnloadMs = 60000 }) {
-    const changed = this.pythonPath !== pythonPath || this.scriptPath !== scriptPath;
+  configure({ pythonPath, scriptPath, idleUnloadMs = 60000, env = null }) {
+    const changed = this.pythonPath !== pythonPath || this.scriptPath !== scriptPath ||
+      JSON.stringify(this.env) !== JSON.stringify(env);
     this.pythonPath = pythonPath;
     this.scriptPath = scriptPath;
     this.idleUnloadMs = idleUnloadMs;
+    this.env = env;
     if (changed) {
       this.close();
     }
@@ -48,7 +53,7 @@ class WhisperWorkerService {
       language: options.language || 'auto',
       model_dir: options.modelDir || null,
       device: options.device || 'auto'
-    });
+    }, 180000, options.retainInput);
     this._scheduleIdleUnload();
     return result;
   }
@@ -72,8 +77,25 @@ class WhisperWorkerService {
     }
   }
 
+  isTerminationPending() {
+    return this.retirement !== null;
+  }
+
+  _terminationError() {
+    const error = new Error('Whisper worker termination is unconfirmed; retry after the process exits');
+    error.code = 'WHISPER_WORKER_TERMINATION_UNCONFIRMED';
+    return error;
+  }
+
   _ensureProcess() {
-    if (this.process && !this.process.killed) {
+    if (this.retirement) {
+      throw this._terminationError();
+    }
+    if (this.process) {
+      if (this.process.killed) {
+        this._retireProcess(this.process, this._terminationError());
+        throw this._terminationError();
+      }
       return;
     }
 
@@ -81,12 +103,15 @@ class WhisperWorkerService {
     this.closing = false;
     const child = spawn(this.pythonPath, ['-u', this.scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      ...(this.env ? { env: this.env } : {})
     });
     this.process = child;
 
     const lines = readline.createInterface({ input: child.stdout });
-    lines.on('line', (line) => this._handleLine(line));
+    lines.on('line', (line) => {
+      if (this.process === child && !this.retirement) this._handleLine(line);
+    });
 
     child.stderr.on('data', (chunk) => {
       const message = chunk.toString().trim();
@@ -95,21 +120,30 @@ class WhisperWorkerService {
       }
     });
 
-    child.on('error', (error) => {
+    const handleError = (error) => {
+      if (this.process !== child) return;
       logger.error('Whisper worker process error', { error: error.message });
-      this._rejectAll(error);
-    });
+      this._retireProcess(child, error);
+    };
+    child.on('error', handleError);
+    child.stdin.on?.('error', handleError);
 
-    child.on('close', (code) => {
-      const error = new Error(`Whisper worker exited with code ${code}`);
-      if (!this.closing && code !== 0) {
+    child.once('close', (code) => {
+      lines.close?.();
+      if (this.process !== child) return;
+      const retirement = this.retirement;
+      const error = retirement?.error || new Error(`Whisper worker exited with code ${code}`);
+      if (!this.closing && !retirement && code !== 0) {
         logger.error(error.message);
       }
+      if (retirement) clearTimeout(retirement.timer);
+      this.retirement = null;
       this.process = null;
       this.readyInfo = null;
-      if (!this.closing) {
-        this._rejectAll(error);
-      }
+      this._clearIdleTimer();
+      this._rejectAll(error);
+      for (const release of this.inputReaders.values()) release();
+      this.inputReaders.clear();
       this.closing = false;
     });
   }
@@ -135,6 +169,8 @@ class WhisperWorkerService {
     }
     this.pending.delete(message.id);
     clearTimeout(pending.timer);
+    this.inputReaders.get(message.id)?.();
+    this.inputReaders.delete(message.id);
 
     if (message.ok) {
       pending.resolve(message);
@@ -145,32 +181,58 @@ class WhisperWorkerService {
     }
   }
 
-  _request(payload, timeoutMs = 180000) {
+  _request(payload, timeoutMs = 180000, retainInput) {
     this._ensureProcess();
+    const child = this.process;
     const id = ++this.sequence;
     const request = { ...payload, id };
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Whisper worker timed out after ${timeoutMs}ms`));
+        if (this.pending.has(id)) {
+          this._retireProcess(child, new Error(`Whisper worker timed out after ${timeoutMs}ms`));
+        }
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
+      if (retainInput) this.inputReaders.set(id, retainInput());
 
-      this.process.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
-        if (error) {
-          clearTimeout(timer);
-          this.pending.delete(id);
-          reject(error);
-        }
-      });
+      try {
+        child.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
+          if (error && this.process === child) this._retireProcess(child, error);
+        });
+      } catch (error) {
+        this._retireProcess(child, error);
+      }
     });
+  }
+
+  _retireProcess(child, error) {
+    if (!child || this.process !== child || this.retirement) return;
+    this._clearIdleTimer();
+    this.readyInfo = null;
+    for (const pending of this.pending.values()) clearTimeout(pending.timer);
+    const retirement = { child, error, timer: null };
+    this.retirement = retirement;
+    // Keep ownership until close: ChildProcess.killed only confirms a signal
+    // was sent. Neither late output nor a kill error may release this barrier.
+    retirement.timer = setTimeout(() => {
+      if (this.retirement !== retirement) return;
+      retirement.timer = null;
+      this._rejectAll(this._terminationError());
+    }, 5000);
+    try { child.kill(); } catch (_) { /* Wait for close or the grace deadline. */ }
   }
 
   _scheduleIdleUnload() {
     this._clearIdleTimer();
+    if (!this.process || this.retirement) return;
     this.idleTimer = setTimeout(() => {
-      if (!this.process || this.pending.size > 0) {
+      this.idleTimer = null;
+      if (!this.process || this.retirement) return;
+      if (this.pending.size > 0) {
+        // Keep the requested release alive while warmup or transcription
+        // finishes. A new capture still cancels it through warmup().
+        this._scheduleIdleUnload();
         return;
       }
       this._request({ action: 'unload' }, 30000)
@@ -196,17 +258,16 @@ class WhisperWorkerService {
 
   close() {
     this._clearIdleTimer();
-    if (this.process && !this.process.killed) {
-      try {
-        this.closing = true;
-        this.process.kill();
-      } catch (_) {
-        // Ignore shutdown races.
-      }
+    const error = new Error('Whisper worker closed');
+    error.code = 'WHISPER_WORKER_CLOSED';
+    if (this.process) {
+      this.closing = true;
+      this._retireProcess(this.process, error);
     }
-    this.process = null;
+    // Reject cancellation immediately, retaining the child and its readers
+    // until close. Reconfiguration uses this same ownership barrier.
     this.readyInfo = null;
-    this._rejectAll(new Error('Whisper worker closed'));
+    this._rejectAll(error);
   }
 }
 

@@ -3,13 +3,39 @@ const { contextBridge, ipcRenderer } = require('electron')
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  getManagedStatus: () => ipcRenderer.invoke('managed-status'),
+  signIn: () => ipcRenderer.invoke('managed-sign-in'),
+  signOut: () => ipcRenderer.invoke('managed-sign-out'),
+  getSetupCapabilities: () => ipcRenderer.invoke('setup-capabilities'),
+  requestSetupPermission: kind => ipcRenderer.invoke('setup-permission', kind),
+  openPermissionSettings: kind => ipcRenderer.invoke('setup-permission-settings', kind),
+  testSetupAnswer: input => ipcRenderer.invoke('setup-test-answer', input),
+  getSetupState: () => ipcRenderer.invoke('get-setup-state'),
+  saveSetupProgress: progress => ipcRenderer.invoke('save-setup-progress', progress),
+  captureSetupPreview: options => ipcRenderer.invoke('capture-setup-preview', options),
+  submitSetupQuestion: input => ipcRenderer.invoke('submit-setup-question', input),
+  cancelSetup: () => ipcRenderer.invoke('cancel-setup'),
+  showOnboarding: () => ipcRenderer.invoke('show-onboarding'),
+  minimizeOnboarding: () => ipcRenderer.invoke('minimize-onboarding'),
+  onManagedStatus: callback => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('managed-status', listener);
+    return () => ipcRenderer.removeListener('managed-status', listener);
+  },
   // Screenshot and OCR
-  takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+  takeScreenshot: (requestId) => ipcRenderer.invoke('take-screenshot', requestId),
   
   // Speech recognition
+  toggleSpeechRecognition: () => ipcRenderer.invoke('toggle-speech-recognition'),
   startSpeechRecognition: () => ipcRenderer.invoke('start-speech-recognition'),
   stopSpeechRecognition: () => ipcRenderer.invoke('stop-speech-recognition'),
-  sendAudioChunk: (buffer) => ipcRenderer.send('audio-chunk', { buffer }),
+  cancelSpeechRecognition: () => ipcRenderer.invoke('cancel-speech-recognition'),
+  sendMicrophoneEvent: event => ipcRenderer.send('microphone-event', event),
+  onMicrophoneCommand: callback => {
+    const listener = (_event, command) => callback(command);
+    ipcRenderer.on('microphone-command', listener);
+    return () => ipcRenderer.removeListener('microphone-command', listener);
+  },
   getSpeechAvailability: () => ipcRenderer.invoke('get-speech-availability'),
   
   // Window management
@@ -28,7 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLLMSessionHistory: () => ipcRenderer.invoke('get-llm-session-history'),
   clearSessionMemory: () => ipcRenderer.invoke('clear-session-memory'),
   formatSessionHistory: () => ipcRenderer.invoke('format-session-history'),
-  sendChatMessage: (text) => ipcRenderer.invoke('send-chat-message', text),
+  sendChatMessage: (text, requestId) => ipcRenderer.invoke('send-chat-message', text, requestId),
   getSkillPrompt: (skillName) => ipcRenderer.invoke('get-skill-prompt', skillName),
   
   // Gemini LLM configuration
@@ -40,6 +66,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showSettings: () => ipcRenderer.invoke('show-settings'),
   hideSettings: () => ipcRenderer.invoke('hide-settings'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  getShortcutStatus: () => ipcRenderer.invoke('get-shortcut-status'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 
   // First-run onboarding
@@ -47,6 +74,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   completeFirstRun: () => ipcRenderer.invoke('complete-first-run'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   closeOnboarding: () => ipcRenderer.invoke('close-onboarding'),
+  getWhisperModelStatus: model => ipcRenderer.invoke('whisper-model-status', model),
+  prepareWhisperModel: model => ipcRenderer.invoke('prepare-whisper-model', model),
+  cancelWhisperModel: operationId => ipcRenderer.invoke('cancel-whisper-model', operationId),
+  onWhisperModelStatus: callback => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('whisper-model-status', listener);
+    return () => ipcRenderer.removeListener('whisper-model-status', listener);
+  },
   detectWhisper: () => ipcRenderer.invoke('detect-whisper'),
   installWhisper: () => ipcRenderer.invoke('install-whisper'),
   downloadWhisperModel: (modelName) => ipcRenderer.invoke('download-whisper-model', modelName),
@@ -114,6 +149,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSessionEvent: (callback) => ipcRenderer.on('session-event', callback),
   onSessionCleared: (callback) => ipcRenderer.on('session-cleared', callback),
   onOcrCompleted: (callback) => ipcRenderer.on('ocr-completed', callback),
+  onChatRequestStarted: (callback) => ipcRenderer.on('chat-request-started', callback),
   onOcrError: (callback) => ipcRenderer.on('ocr-error', callback),
   onLlmResponse: (callback) => ipcRenderer.on('llm-response', callback),
   onLlmError: (callback) => ipcRenderer.on('llm-error', callback),

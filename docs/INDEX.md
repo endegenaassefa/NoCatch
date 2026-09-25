@@ -25,6 +25,9 @@ the pointers — nothing here is a dead end.
 
 | Doc | What it covers |
 |---|---|
+| [`BUILDING.md`](BUILDING.md) | Cross-platform build commands, signing inputs, artifact verification, draft-release behavior and remaining qualification gates |
+| [`CROSS-PLATFORM-DESIGN.md`](CROSS-PLATFORM-DESIGN.md) | Proposed full-feature Windows/macOS design: managed sign-in, parity inventory, platform boundaries, setup recovery, migration and release gates |
+| [`CROSS-PLATFORM-REVIEW.md`](CROSS-PLATFORM-REVIEW.md) | Isolated Codex design review and source-verified findings; initial scope superseded by the full-parity requirement |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Both systems: Cluely's process tree/stealth/TCC mechanics, and the scanner's dimensions + structural rules |
 | [`SOLUTION-DESIGN.md`](SOLUTION-DESIGN.md) | "Cluely Shield" engineering design: threat model, Brain/root-helper split, verification plan |
 | [`HANDOFF-SHIELD.md`](HANDOFF-SHIELD.md) | Handoff for shield work: code state, file map, open threads |

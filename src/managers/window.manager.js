@@ -84,7 +84,7 @@ class WindowManager {
         frame: false,
         titleBarStyle: 'hidden',
         transparent: true,
-        skipTaskbar: true,
+        skipTaskbar: process.platform === 'darwin',
         resizable: false,
         minimizable: false,
         maximizable: false,
@@ -122,7 +122,8 @@ class WindowManager {
       
       this.setupWindowEventHandlers();
       this.setupScreenTracking();
-      this.setupScreenCaptureAvailabilityWatcher();
+      // Screen enumeration may prompt for access. Only explicit capture actions
+      // should use it; startup and text-only setup must remain permission-free.
 
       // Make windows interactive by default so they are not click-through
       this.setInteractive(true);
@@ -151,10 +152,10 @@ class WindowManager {
       try {
         mainWindow.setAlwaysOnTop(true, 'floating', 2);
       } catch (error) {
-        mainWindow.setAlwaysOnTop(true);
+        this.setWindowAlwaysOnTop(mainWindow);
       }
     } else {
-      mainWindow.setAlwaysOnTop(true);
+      this.setWindowAlwaysOnTop(mainWindow);
     }
     
     // Wait for app to fully initialize and detect current desktop
@@ -168,10 +169,10 @@ class WindowManager {
         try {
           mainWindow.setAlwaysOnTop(true, 'floating', 2);
         } catch (error) {
-          mainWindow.setAlwaysOnTop(true);
+          this.setWindowAlwaysOnTop(mainWindow);
         }
       } else {
-        mainWindow.setAlwaysOnTop(true);
+        this.setWindowAlwaysOnTop(mainWindow);
       }
     }
     
@@ -195,10 +196,10 @@ class WindowManager {
       try {
         window.setAlwaysOnTop(true, 'floating', 2);
       } catch (error) {
-        window.setAlwaysOnTop(true);
+        this.setWindowAlwaysOnTop(window);
       }
     } else {
-      window.setAlwaysOnTop(true);
+      this.setWindowAlwaysOnTop(window);
     }
 
     // Only auto-show when explicitly allowed (e.g. not during first-run
@@ -215,10 +216,10 @@ class WindowManager {
               try {
                 window.setAlwaysOnTop(true, 'floating', 2);
               } catch (error) {
-                window.setAlwaysOnTop(true);
+                this.setWindowAlwaysOnTop(window);
               }
             } else {
-              window.setAlwaysOnTop(true);
+              this.setWindowAlwaysOnTop(window);
             }
           }
         }, 200);
@@ -325,18 +326,19 @@ class WindowManager {
       };
   } else if (type === 'onboarding') {
       // First-run onboarding wizard — same frameless/panel style as
-      // settings, but closable (X button) and slightly larger.
+      // settings, with visible renderer controls and native minimize support.
       browserWindowOptions = {
         ...baseOptions,
         frame: false,
         titleBarStyle: 'hidden',
-        transparent: true,
+        transparent: false,
         resizable: false,
-        minimizable: false,
+        minimizable: true,
         maximizable: false,
         closable: true,
         hasShadow: true,
-        backgroundColor: '#00000000',
+        backgroundColor: '#151923',
+        skipTaskbar: process.platform === 'darwin',
         level: process.platform === 'darwin' ? 'floating' : undefined,
         ...(process.platform === 'darwin' && {
           type: 'panel',
@@ -535,10 +537,12 @@ class WindowManager {
           }
         });
 
-        // When resized (by user or programmatically), keep bound windows aligned at top
+        // Windows content resizing must preserve the user's placement. A move
+        // can emit resize events at fractional DPI, so never restart top layout.
         window.on('resize', () => {
           if (this.bindWindows) {
-            this.positionBoundWindows();
+            if (process.platform === 'win32') this.moveBoundWindows(0, 0);
+            else this.positionBoundWindows();
           }
         });
       } catch { /* ignore */ }
@@ -586,7 +590,7 @@ class WindowManager {
         
         if (!levelSet) {
           // Final fallback
-          window.setAlwaysOnTop(true);
+          this.setWindowAlwaysOnTop(window);
         }
         
         // Additional macOS-specific enforcement
@@ -609,31 +613,31 @@ class WindowManager {
       } catch (error) {
         logger.warn('Error setting always-on-top for macOS', { error: error.message });
         // Absolute fallback
-        window.setAlwaysOnTop(true);
+        this.setWindowAlwaysOnTop(window);
       }
     } else if (process.platform === 'win32') {
       // Windows: Multiple enforcement attempts
-      window.setAlwaysOnTop(true);
+      this.setWindowAlwaysOnTop(window);
       
       setTimeout(() => {
         if (!window.isDestroyed()) {
-          window.setAlwaysOnTop(true);
+          this.setWindowAlwaysOnTop(window);
         }
       }, 100);
       
       setTimeout(() => {
         if (!window.isDestroyed()) {
-          window.setAlwaysOnTop(true);
+          this.setWindowAlwaysOnTop(window);
         }
       }, 500);
       
     } else {
       // Linux and other platforms
-      window.setAlwaysOnTop(true);
+      this.setWindowAlwaysOnTop(window);
       
       setTimeout(() => {
         if (!window.isDestroyed()) {
-          window.setAlwaysOnTop(true);
+          this.setWindowAlwaysOnTop(window);
         }
       }, 100);
     }
@@ -648,8 +652,9 @@ class WindowManager {
       skipTransformProcessType: true,
     });
     
-    // Hide from taskbar to maintain stealth
-    window.setSkipTaskbar(true);
+    // Keep setup reachable in the taskbar after native minimization.
+    const skipTaskbar = type !== 'onboarding' || process.platform === 'darwin';
+    window.setSkipTaskbar(skipTaskbar);
     
     // Make window undetectable by screen capture (if supported)
     try {
@@ -671,7 +676,7 @@ class WindowManager {
             // the screen-saver level churn that occludes other apps.
             window.setAlwaysOnTop(true, 'floating', 1);
           } else {
-            window.setAlwaysOnTop(true);
+            this.setWindowAlwaysOnTop(window);
           }
         } catch (error) {
           logger.debug('Error in enforceAlwaysOnTop', { error: error.message });
@@ -704,7 +709,7 @@ class WindowManager {
       platform: process.platform,
       alwaysOnTop: true,
       visibleOnAllWorkspaces: true,
-      skipTaskbar: true
+      skipTaskbar
     });
   }
 
@@ -817,7 +822,15 @@ class WindowManager {
 
   // New method to move bound windows (column layout) - Maintains top positioning preference
   moveBoundWindows(deltaX, deltaY) {
-    if (!this.bindWindows) return;
+    if (!this.bindWindows || this.geometryFrozen) return;
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+    if (process.platform === 'win32') {
+      if (this._windowsMovementDisposed) return;
+      // A resize callback during a native move must not enqueue another clamp.
+      if (this._movingBoundWindows && deltaX === 0 && deltaY === 0) return;
+      return this.queueWindowsMove(deltaX, deltaY);
+    }
+    if (this._movingBoundWindows) return;
     
     const mainWindow = this.windows.get('main');
     const llmWindow = this.windows.get('llmResponse');
@@ -864,6 +877,73 @@ class WindowManager {
     });
   }
 
+  async getWindowsPositioner() {
+    if (!this._windowsPositioner) {
+      const WindowsWindowPositioner = require('../platform/windows/window-position');
+      this._windowsPositioner = new WindowsWindowPositioner();
+    }
+    await this._windowsPositioner.ready();
+    return this._windowsPositioner;
+  }
+
+  queueWindowsMove(deltaX, deltaY) {
+    if ((this._queuedWindowsMoves || 0) >= 32) {
+      logger.warn('Windows movement queue is full');
+      return Promise.resolve();
+    }
+    this._queuedWindowsMoves = (this._queuedWindowsMoves || 0) + 1;
+    const operation = (this._windowsMoveQueue || Promise.resolve()).then(async () => {
+      if (!this.bindWindows || this.geometryFrozen || this._windowsMovementDisposed) return;
+      const positioner = await this.getWindowsPositioner();
+      // Startup may overlap capture, hiding, or shutdown. Read current state
+      // after readiness and after earlier queued moves have actually completed.
+      if (!this.bindWindows || this.geometryFrozen || this._windowsMovementDisposed) return;
+      return this.moveVisibleBoundWindows(deltaX, deltaY, positioner);
+    }).catch(error => {
+      logger.warn('Windows window movement failed', { message: error.message });
+    }).finally(() => { this._queuedWindowsMoves--; });
+    this._windowsMoveQueue = operation;
+    return operation;
+  }
+
+  async moveVisibleBoundWindows(deltaX, deltaY, positioner) {
+    const windows = ['main', 'llmResponse']
+      .map(type => this.windows.get(type))
+      .filter(window => window && !window.isDestroyed() && window.isVisible());
+    if (!windows.length) return;
+    const area = (this.currentDisplay || screen.getPrimaryDisplay()).workArea;
+    const bounds = windows.map(window => window.getBounds());
+    const left = Math.min(...bounds.map(b => b.x));
+    const top = Math.min(...bounds.map(b => b.y));
+    const right = Math.max(...bounds.map(b => b.x + b.width));
+    const bottom = Math.max(...bounds.map(b => b.y + b.height));
+    // Clamp a shared translation, preserving each visible window's offset.
+    // A hidden legacy answer panel must not constrain the visible toolbar.
+    const dx = Math.max(area.x - left, Math.min(area.x + area.width - right, deltaX));
+    const dy = Math.max(area.y + 20 - top, Math.min(area.y + area.height - bottom, deltaY));
+    if (dx === 0 && dy === 0) return;
+    this._movingBoundWindows = true;
+    try {
+      const targets = windows.map((window, index) => {
+        const b = bounds[index];
+        const nativeHandle = window.getNativeWindowHandle();
+        const handle = nativeHandle.length === 8
+          ? nativeHandle.readBigUInt64LE(0).toString()
+          : nativeHandle.readUInt32LE(0).toString();
+        const point = screen.dipToScreenPoint({ x: Math.round(b.x + dx), y: Math.round(b.y + dy) });
+        return { handle, x: point.x, y: point.y };
+      });
+      await positioner.move(targets);
+      const main = this.windows.get('main');
+      if (main && !main.isDestroyed()) {
+        const [x, y] = main.getPosition();
+        this.boundWindowsPosition = { x, y };
+      }
+    } finally {
+      this._movingBoundWindows = false;
+    }
+  }
+
   showOnCurrentDesktop(win) {
     if (!win || win.isDestroyed()) return;
 
@@ -887,7 +967,7 @@ class WindowManager {
           win.setAlwaysOnTop(true, 'floating', 2);
         } catch {
           try { win.setAlwaysOnTop(true, 'pop-up-menu', 2); }
-          catch { win.setAlwaysOnTop(true); }
+          catch { this.setWindowAlwaysOnTop(win); }
         }
       };
 
@@ -918,7 +998,7 @@ class WindowManager {
         visibleOnFullScreen: true,
         skipTransformProcessType: true,
       });
-      win.setAlwaysOnTop(true);
+      this.setWindowAlwaysOnTop(win);
       win.showInactive(); // Non-activating show: never steal focus
       setTimeout(() => {
         if (win.isDestroyed()) return;
@@ -927,7 +1007,7 @@ class WindowManager {
             skipTransformProcessType: true,
           });
         }
-        win.setAlwaysOnTop(true);
+        this.setWindowAlwaysOnTop(win);
       }, 500);
     }
 
@@ -973,8 +1053,10 @@ class WindowManager {
 
       // Handle window minimize attempts
       window.on('minimize', (event) => {
-        event.preventDefault();
-        logger.debug('Prevented window minimize', { type });
+        if (type !== 'onboarding') {
+          event.preventDefault();
+          logger.debug('Prevented window minimize', { type });
+        }
       });
 
       window.on('restore', () => {
@@ -1210,7 +1292,7 @@ class WindowManager {
     }
 
     if (this.isVisible) {
-      this.hideAllWindows();
+      this.hideAllWindowsExcept([]);
     } else {
       this.showAllWindows();
     }
@@ -1250,6 +1332,13 @@ class WindowManager {
     return this.isInteractive;
   }
 
+  setWindowAlwaysOnTop(window) {
+    // Electron's default floating level reorders behind the Windows taskbar.
+    // The explicit popup level preserves native topmost state on Windows.
+    if (process.platform === 'win32') window.setAlwaysOnTop(true, 'pop-up-menu');
+    else window.setAlwaysOnTop(true);
+  }
+
   // New method to enforce always-on-top for all windows
   enforceAlwaysOnTopForAllWindows() {
     this.windows.forEach((window, type) => {
@@ -1261,12 +1350,12 @@ class WindowManager {
             window.setAlwaysOnTop(true, 'floating', 1);
           } else {
             // Windows and Linux
-            window.setAlwaysOnTop(true);
+            this.setWindowAlwaysOnTop(window);
             
             // Additional enforcement after a short delay
             setTimeout(() => {
               if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true);
+                this.setWindowAlwaysOnTop(window);
               }
             }, 100);
           }
@@ -1277,7 +1366,7 @@ class WindowManager {
           });
           // Fallback to basic always-on-top
           try {
-            window.setAlwaysOnTop(true);
+            this.setWindowAlwaysOnTop(window);
           } catch (fallbackError) {
             logger.error('Fallback always-on-top failed', { 
               type, 
@@ -1324,10 +1413,10 @@ class WindowManager {
             }, 50);
           } else {
             // For other platforms
-            window.setAlwaysOnTop(true);
+            this.setWindowAlwaysOnTop(window);
             setTimeout(() => {
               if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true);
+                this.setWindowAlwaysOnTop(window);
               }
             }, 50);
           }
@@ -1478,6 +1567,7 @@ class WindowManager {
       });
     }
 
+    if (onboardingWindow.isMinimized()) onboardingWindow.restore();
     this.showOnCurrentDesktop(onboardingWindow);
     this.centerWindow(onboardingWindow);
     // Onboarding is a non-activating panel and the app runs under the
@@ -1634,6 +1724,10 @@ class WindowManager {
   }
 
   destroyAllWindows() {
+    if (process.platform === 'win32') {
+      this._windowsMovementDisposed = true;
+      this._windowsPositioner?.dispose();
+    }
     this.windows.forEach((window, type) => {
       logger.debug('Destroying window', { type });
       if (!window.isDestroyed()) {
@@ -1783,7 +1877,7 @@ class WindowManager {
         if (process.platform === 'darwin') {
           window.setAlwaysOnTop(true, 'floating', 1);
         } else {
-          window.setAlwaysOnTop(true);
+          this.setWindowAlwaysOnTop(window);
         }
         
         // Ensure window appears on current desktop if it's visible

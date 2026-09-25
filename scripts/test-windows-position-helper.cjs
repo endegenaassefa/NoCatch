@@ -1,0 +1,3 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),path=require('node:path'),cp=require('node:child_process');const root=path.resolve(__dirname,'..'),python=process.platform==='win32'?path.join(root,'.depthengine/speech-runtime/windows-x64/python.exe'):'python3';
+for(const name of ['success','second-failure','end-failure','owner-dead','foreign','hidden'])test('Python native batch '+name+' obeys no-size ownership/failure contract',()=>{const r=cp.spawnSync(python,['-I','-S','-B',path.join(__dirname,'check-window-position-helper.py'),path.join(root,'src/platform/windows/window_position.py'),name],{encoding:'utf8',timeout:10000});assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).passed,true)});

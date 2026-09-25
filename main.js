@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const { fileURLToPath } = require("url");
-const { app, BrowserWindow, globalShortcut, session, ipcMain } = require("electron");
+const { app, BrowserWindow, globalShortcut, session, ipcMain, powerMonitor } = require("electron");
 // Depth Engine de-0002 E9: pure mid-capture key routing (gate chain + refusal validator).
 const captureRouting = require("./src/capture-routing");
 
@@ -36,7 +36,7 @@ function resolveEnvPath() {
     const projectEnv = path.join(process.cwd(), ".env");
     // Prefer a project .env only when it already exists and userData has none
     // (i.e. a developer running from the repo). Otherwise use userData.
-    if (!fs.existsSync(userDataEnv) && fs.existsSync(projectEnv)) {
+    if (!app.isPackaged && !fs.existsSync(userDataEnv) && fs.existsSync(projectEnv)) {
       return projectEnv;
     }
     return userDataEnv;
@@ -100,8 +100,8 @@ const config = require("./src/core/config");
 const FirstRunManager = require("./src/core/first-run");
 
 // ── Global crash guard ──
-// The speech path spawns external processes (Whisper CLI, and on macOS/Linux
-// the sox/rec/arecord recorders via node-record-lpcm16). A missing recorder
+// The speech path spawns external processes (Whisper CLI, and on Linux
+// the sox/arecord recorders via node-record-lpcm16). A missing recorder
 // binary makes that library emit an 'error' on its child process with no
 // listener, which would otherwise become an uncaughtException and quit the
 // entire app the moment the user clicks the mic. We log and stay alive — the
@@ -142,11 +142,18 @@ app.on("child-process-gone", (_event, details) => {
 // Screen capture (image-based)
 const captureService = require("./src/services/capture.service");
 const speechService = require("./src/services/speech.service");
+const { RendererAudioSession } = require('./src/core/renderer-audio-session');
+const { assertMicrophoneOwner } = require('./src/core/microphone-owner');
 const llmService = require("./src/services/llm.service");
 
 // Managers
 const windowManager = require("./src/managers/window.manager");
 const sessionManager = require("./src/managers/session.manager");
+const { createManagedManager } = require('./src/managed');
+const { attachManagedSession } = require('./src/services/managed-routing');
+const { assertTrustedRenderer } = require('./src/core/trusted-renderer');
+const { SetupService } = require('./src/core/setup-service');
+const { createDirectSetupAnswer } = require('./src/core/setup-direct-answer');
 
 class ApplicationController {
   constructor() {
@@ -210,6 +217,30 @@ class ApplicationController {
     // the constructor without polluting main-process startup.
     this._whisperInstaller = null;
     this.isFirstRun = false;
+    this.operationEpoch = 0;
+    // Setup and ordinary capture must observe the same operation health.
+    this.platformAdapter = captureService.platformAdapter;
+    this.managedSession = createManagedManager({ app, safeStorage: require('electron').safeStorage,
+      externalBrowser: url => require('electron').shell.openExternal(url),
+      onStatus: status => {
+        const subject = status.authenticated ? status.account?.subject : null;
+        const accountChanged = this._managedAccountSubject != null && this._managedAccountSubject !== subject;
+        // Record the new identity before cleanup can emit another status.
+        this._managedAccountSubject = subject;
+        // Explicit sign-in already cleared the session and owns its auth transition.
+        if (accountChanged && this._managedSignInEpoch !== this.operationEpoch) {
+          this.invalidateManagedWork().catch(error => logger.warn('Managed account cleanup failed', { error: error.message }));
+        } else if (this._voiceAccountAuthenticated !== undefined && this._voiceAccountAuthenticated !== status.authenticated) this.cancelVoiceWork();
+        this._voiceAccountAuthenticated = status.authenticated;
+        windowManager.broadcastToAllWindows('managed-status', status);
+      } });
+    this.setupService = new SetupService({ userDataPath: app.getPath('userData'),
+      platformAdapter: this.platformAdapter, captureService, managedSession: this.managedSession,
+      getAIMode: () => this.getAIMode(), answer: createDirectSetupAnswer({ llmService }),
+      legacyCompleted: this.firstRunManager.getStatus().sentinelExists });
+    attachManagedSession(llmService, this.managedSession, () => this.getAIMode());
+    this._closingOnboarding = false;
+    this._quitting = false;
 
     // Window configurations for reference
     this.windowConfigs = {
@@ -260,12 +291,16 @@ class ApplicationController {
     const candidates = [
       // Packaged app: electron-builder copies resources/bin → Contents/Resources/bin
       path.join(process.resourcesPath || "", "bin", "keystroke-capture"),
+      path.join(__dirname, "resources", "bin", process.arch, "keystroke-capture"),
       // Dev: built into the repo by scripts/build-capture-helper.sh
       path.join(__dirname, "resources", "bin", "keystroke-capture"),
     ];
     for (const candidate of candidates) {
       if (fs.existsSync(candidate)) return candidate;
     }
+
+    // A distributed app must never need a compiler or write into its bundle.
+    if (app.isPackaged) return null;
 
     // Dev convenience: compile on first use if swiftc is available.
     try {
@@ -629,8 +664,38 @@ class ApplicationController {
     app.whenReady().then(() => this.onAppReady());
     app.on("window-all-closed", () => this.onWindowAllClosed());
     app.on("activate", () => this.onActivate());
+    app.on("before-quit", event => {
+      this._quitting = true;
+      if (this._modelShutdownComplete) return;
+      event.preventDefault();
+      if (this._modelShutdownPromise) return;
+      const pending = [speechService.shutdown()];
+      this.cancelVoiceWork();
+      const helper = this._captureHelper;
+      if (helper) {
+        pending.push(new Promise(resolve => helper.once("close", resolve)));
+        try { helper.kill("SIGTERM"); } catch (error) {
+          logger.warn("Capture helper shutdown is pending", { error: error.message });
+        }
+      }
+      if (this._whisperModelService) pending.push(this._whisperModelService.dispose());
+      this._modelShutdownPromise = Promise.allSettled(pending).then(results => {
+        for (const result of results) {
+          if (result.status === "rejected") logger.warn("Voice shutdown failed", { error: result.reason?.message });
+        }
+        this._modelShutdownComplete = true;
+        // Windows rejects normal close requests for our non-closable overlays.
+        // Release that restriction only after the owned voice children close,
+        // then let Electron run the normal window and application quit events.
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.setClosable(true);
+        }
+        app.quit();
+      });
+    });
     app.on("will-quit", () => this.onWillQuit());
 
+    this.setupMicrophoneCapture();
     this.setupIPCHandlers();
     this.setupServiceEventHandlers();
   }
@@ -724,8 +789,10 @@ class ApplicationController {
     }
 
     try {
+      this.setupWhisperModelPreparation();
       this.setupPermissions();
       this.setupNetworkConfiguration();
+      await this.managedSession.restore();
 
       // Small delay to ensure desktop/space detection is accurate
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -735,16 +802,17 @@ class ApplicationController {
       let status;
       try {
         this.firstRunManager.ensureEnv();
-        status = this.firstRunManager.getStatus();
+        status = this.getSetupStatus();
         this.isFirstRun = status.needsOnboarding;
-        logger.info("First-run status", status);
+        logger.info("First-run status", { needsOnboarding: status.needsOnboarding, aiMode: status.aiMode });
       } catch (e) {
         logger.warn("First-run check failed", { error: e.message });
-        status = { needsOnboarding: false };
-        this.isFirstRun = false;
+        status = { needsOnboarding: true };
+        this.isFirstRun = true;
       }
       const isFirstRun = status.needsOnboarding;
 
+      powerMonitor.on("suspend", () => this.cancelVoiceWork());
       await windowManager.initializeWindows({ showMainWindow: !isFirstRun });
       this.setupGlobalShortcuts();
 
@@ -793,9 +861,9 @@ class ApplicationController {
       if (this.isFirstRun) {
         // Defer slightly so all windows finish loading before we pop
         // the wizard on top of them.
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            windowManager.showOnboarding();
+            await this.showOnboarding();
             windowManager.broadcastToAllWindows("first-run", status);
             logger.info("First-run onboarding: wizard opened");
           } catch (e) {
@@ -806,9 +874,6 @@ class ApplicationController {
             try { this.showSettings(); } catch (_) { /* ignore */ }
           }
         }, 800);
-      } else {
-        // Already configured — mark completed so we never nag again.
-        this.firstRunManager.markCompleted();
       }
 
       logger.info("Application initialized successfully", {
@@ -850,6 +915,60 @@ class ApplicationController {
     logger.debug('Network configuration applied');
   }
 
+  isMicrophoneOwnerContents(contents) {
+    try {
+      if (!contents || contents.isDestroyed() || contents !== windowManager.getWindow('main')?.webContents) return false;
+      assertMicrophoneOwner({ sender: contents, senderFrame: contents.mainFrame }, contents, app.getAppPath());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  setupMicrophoneCapture() {
+    this.microphoneSession = new RendererAudioSession({
+      send: (owner, payload) => {
+        if (!this.isMicrophoneOwnerContents(owner)) throw new Error('Microphone owner unavailable');
+        owner.send('microphone-command', payload);
+      },
+      onAudio: bytes => speechService.handleAudioChunkFromRenderer(bytes),
+      onError: error => {
+        this.cancelVoiceWork();
+        speechService.emit('error', error.message);
+      },
+    });
+    const guardedOwners = new WeakSet();
+    speechService.setRendererCapture({
+      start: () => {
+        const owner = windowManager.getWindow('main')?.webContents;
+        if (!this.isMicrophoneOwnerContents(owner)) throw new Error('Microphone owner unavailable');
+        this.microphoneOwner = owner;
+        if (!guardedOwners.has(owner)) {
+          guardedOwners.add(owner);
+          const lost = () => { if (this.microphoneOwner === owner) this.cancelVoiceWork(); };
+          owner.on('destroyed', lost);
+          owner.on('render-process-gone', lost);
+          owner.on('will-navigate', lost);
+          owner.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) lost(); });
+        }
+        return this.microphoneSession.start(owner);
+      },
+      stop: () => this.microphoneSession.stop(),
+      cancel: () => this.microphoneSession.cancel(),
+    });
+  }
+
+  invalidateVoiceOutput() {
+    this._voiceEpoch = (this._voiceEpoch || 0) + 1;
+    clearTimeout(this._utteranceTimer);
+    this._utteranceTimer = null;
+    this._utteranceBuffer = '';
+    this._utteranceDispatchInFlight = false;
+  }
+
+  cancelVoiceWork() {
+    this.invalidateVoiceOutput();
+    speechService.cancelRecording();
+  }
+
   setupPermissions() {
     const appSession = session.defaultSession;
     const isTrustedAppContents = (webContents) => {
@@ -878,7 +997,9 @@ class ApplicationController {
           return false;
         }
         if (permission === "media") {
-          return !details.mediaType || details.mediaType === "audio";
+          return this.isMicrophoneOwnerContents(webContents) &&
+            this.microphoneSession?.current?.owner === webContents &&
+            details.isMainFrame === true && (!details.mediaType || details.mediaType === "audio");
         }
         return permission === "display-capture";
       }
@@ -890,7 +1011,9 @@ class ApplicationController {
         if (isTrustedAppContents(webContents)) {
           if (permission === "media") {
             const mediaTypes = Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
-            granted = mediaTypes.length === 0 || mediaTypes.includes("audio");
+            granted = this.isMicrophoneOwnerContents(webContents) &&
+              this.microphoneSession?.current?.owner === webContents &&
+              details.isMainFrame === true && mediaTypes.length > 0 && mediaTypes.every(type => type === "audio");
           } else {
             granted = permission === "display-capture";
           }
@@ -917,6 +1040,7 @@ class ApplicationController {
       "CommandOrControl+,": () => windowManager.showSettings(),
       "Alt+A": () => windowManager.toggleInteraction(),
       "Alt+R": () => this.toggleSpeechRecognition(),
+      "CommandOrControl+Shift+R": () => this.toggleSpeechRecognition(),
       "CommandOrControl+Shift+T": () => windowManager.forceAlwaysOnTopForAllWindows(),
       "CommandOrControl+Shift+Alt+T": () => {
         const results = windowManager.testAlwaysOnTopForAllWindows();
@@ -933,15 +1057,62 @@ class ApplicationController {
       "CommandOrControl+Right": () => this.handleRightArrow(),
     };
 
+    const labels = {
+      "CommandOrControl+Shift+S": ["screenshot", "Capture screenshot and analyze"],
+      "CommandOrControl+Shift+Q": ["screenshot-alternate", "Capture screenshot (alternate)"],
+      "CommandOrControl+Shift+V": ["visibility", "Toggle visibility"],
+      "CommandOrControl+Shift+I": ["interaction", "Toggle interaction"],
+      "CommandOrControl+Shift+C": ["chat", "Open chat"],
+      "CommandOrControl+Shift+\\": ["clear", "Clear session history"],
+      "CommandOrControl+,": ["settings", "Open settings"],
+      "Alt+A": ["interaction-alternate", "Toggle interaction (alternate)"],
+      "Alt+R": ["speech", "Start / stop microphone"],
+      "CommandOrControl+Shift+R": ["speech-alternate", "Start / stop microphone (alternate)"],
+      "CommandOrControl+Shift+T": ["topmost", "Keep windows on top"],
+      "CommandOrControl+Shift+Alt+T": ["topmost-check", "Check window placement"],
+      "CommandOrControl+Shift+Alt+E": ["shield", "Toggle shield mode"],
+      "CommandOrControl+Up": ["up", "Previous skill / move up"],
+      "CommandOrControl+Down": ["down", "Next skill / move down"],
+      "CommandOrControl+Left": ["left", "Move left"],
+      "CommandOrControl+Right": ["right", "Move right"]
+    };
+    this._shortcutStatus = [];
     Object.entries(shortcuts).forEach(([accelerator, handler]) => {
-      const success = globalShortcut.register(accelerator, handler);
-      logger.debug("Global shortcut registered", { accelerator, success });
+      const [id, action] = labels[accelerator];
+      const supported = id !== 'shield' || process.platform === 'darwin';
+      const state = { id, action, accelerator, supported, registered: false, reason: '' };
+      if (!supported) {
+        state.reason = 'This native mode is currently available on macOS only; Windows implementation is pending.';
+      } else {
+        try { state.registered = globalShortcut.register(accelerator, handler); }
+        catch (_) { state.registered = false; }
+        if (!state.registered) {
+          state.reason = 'Shortcut unavailable. Another app or NoCatch instance may be using it. Close the conflicting app, then restart NoCatch.';
+          logger.warn('Global shortcut unavailable', { accelerator, action });
+        }
+      }
+      this._shortcutStatus.push(state);
     });
 
     // Keystroke-capture hotkey (configurable via CAPTURE_MODE_HOTKEY).
     // Registered separately so a settings change can unregister/re-register
     // it live without touching the static shortcut map.
     this.registerCaptureHotkey();
+  }
+
+  getShortcutStatus() {
+    const shortcuts = (this._shortcutStatus || []).map(row => ({ ...row }));
+    const supported = process.platform === 'darwin';
+    let registered = false;
+    try { registered = supported && Boolean(this._captureHotkey) && globalShortcut.isRegistered(this._captureHotkey); }
+    catch (_) {}
+    shortcuts.push({
+      id: 'keystroke-capture', action: 'Start / stop keystroke capture',
+      accelerator: this.getCaptureHotkey(), supported, registered,
+      reason: !supported ? 'Keystroke capture is currently macOS-only; Windows implementation is pending.' :
+        registered ? '' : 'Capture shortcut unavailable. Choose another shortcut in Settings and retry.'
+    });
+    return { platform: process.platform, shortcuts };
   }
 
   registerCaptureHotkey() {
@@ -1187,11 +1358,17 @@ class ApplicationController {
       windowManager.handleRecordingStarted();
     });
 
+    speechService.on("recording-cancelled", () => this.invalidateVoiceOutput());
     speechService.on("recording-stopped", () => {
       windowManager.handleRecordingStopped();
     });
 
     speechService.on("transcription", (text) => {
+      if (typeof text === "string" && text.trim()) {
+        this.platformAdapter.reportOperation("microphone", {
+          success: true, reason: "Last microphone transcription succeeded."
+        });
+      }
       this.handleTranscriptionFragment(text);
     });
 
@@ -1213,6 +1390,10 @@ class ApplicationController {
     });
 
     speechService.on("error", (error) => {
+      this.platformAdapter.reportOperation("microphone", {
+        success: false,
+        reason: "Speech operation failed. Check microphone access and the selected speech provider, then retry."
+      });
       // In error, still compute availability
       this.speechAvailable = speechService.isAvailable ? speechService.isAvailable() : false;
       BrowserWindow.getAllWindows().forEach((window) => {
@@ -1222,9 +1403,62 @@ class ApplicationController {
   }
 
   setupIPCHandlers() {
-  ipcMain.handle("take-screenshot", () => this.triggerScreenshotOCR());
-  ipcMain.handle("list-displays", () => captureService.listDisplays());
-  ipcMain.handle("capture-area", (event, options) => captureService.captureAndProcess(options));
+    const managedHandle = (channel, action, { includeEvent = false } = {}) => ipcMain.handle(channel, async (event, ...args) => {
+      assertTrustedRenderer(event, app.getAppPath());
+      try { return await (includeEvent ? action(event, ...args) : action(...args)); }
+      catch (error) { return { success: false, error: { code: error.code || 'REQUEST_FAILED', message: String(error.message || 'The action failed. Please try again.').slice(0, 512) } }; }
+    });
+    managedHandle('managed-status', () => this.managedSession.status());
+    managedHandle('managed-sign-in', async event => {
+      const epoch = this.operationEpoch + 1;
+      this._managedSignInEpoch = epoch;
+      const setupOwned = path.basename(fileURLToPath(event.senderFrame.url)) === 'onboarding.html';
+      if (setupOwned) this._setupSignInEpoch = epoch;
+      try {
+        await this.invalidateManagedWork();
+        if (epoch !== this.operationEpoch) throw Object.assign(new Error('Sign-in was cancelled.'), { code: 'CANCELLED' });
+        const result = await this.managedSession.signIn();
+        if (epoch !== this.operationEpoch) throw Object.assign(new Error('Sign-in was cancelled.'), { code: 'CANCELLED' });
+        return result;
+      } finally {
+        if (this._managedSignInEpoch === epoch) this._managedSignInEpoch = null;
+        if (this._setupSignInEpoch === epoch) this._setupSignInEpoch = null;
+      }
+    }, { includeEvent: true });
+    managedHandle('managed-sign-out', async () => {
+      await this.invalidateManagedWork();
+      return this.managedSession.signOut();
+    });
+    managedHandle('get-shortcut-status', () => this.getShortcutStatus());
+    managedHandle('get-setup-state', () => this.setupService.getStatus());
+    managedHandle('save-setup-progress', progress => this.setupService.saveProgress(progress));
+    managedHandle('capture-setup-preview', options => this.setupService.capturePreview(options));
+    managedHandle('submit-setup-question', input => this.setupService.submit(input));
+    managedHandle('cancel-setup', () => this.cancelSetup());
+    managedHandle('show-onboarding', () => this.showOnboarding());
+    managedHandle('minimize-onboarding', async event => {
+      const win = windowManager.getWindow('onboarding');
+      if (!win || win.isDestroyed() || win.webContents !== event.sender) {
+        throw new Error('Setup window is unavailable.');
+      }
+      if (process.platform !== 'darwin') win.minimize();
+      await new Promise(resolve => setTimeout(resolve, 80));
+      // Accessory panels and X11 sessions without a window manager cannot
+      // always minimize. Hide setup and leave the main overlay available.
+      if (process.platform === 'darwin' || !win.isMinimized()) {
+        win.hide();
+        await windowManager.showMainWindow();
+      }
+      return { success: true };
+    }, { includeEvent: true });
+    managedHandle('setup-capabilities', () => this.setupService.getStatus().capabilities);
+    managedHandle('setup-permission', kind => this.platformAdapter.requestCapability(kind));
+    managedHandle('setup-permission-settings', kind => this.platformAdapter.openSettings(kind));
+    // Compatibility alias still requires the same question and explicit consent.
+    managedHandle('setup-test-answer', input => this.setupService.submit(input));
+    managedHandle("take-screenshot", requestId => this.triggerScreenshotOCR(requestId));
+    managedHandle('list-displays', () => captureService.listDisplays());
+    managedHandle('capture-area', options => captureService.captureAndProcess(options));
 
     // NOTE: the old copy-to-clipboard handler was REMOVED deliberately —
     // writing answer code to the system clipboard is a proctor tell
@@ -1235,29 +1469,40 @@ class ApplicationController {
       return speechService.isAvailable ? speechService.isAvailable() : false;
     });
 
-    ipcMain.handle("start-speech-recognition", () => {
-      speechService.startRecording();
+    const assertVoiceControl = event => assertTrustedRenderer(event, app.getAppPath());
+    ipcMain.handle('toggle-speech-recognition', event => {
+      assertVoiceControl(event);
+      this.toggleSpeechRecognition();
       return speechService.getStatus();
     });
-
-    ipcMain.handle("stop-speech-recognition", () => {
-      speechService.stopRecording();
+    ipcMain.handle('start-speech-recognition', async event => {
+      assertVoiceControl(event);
+      await speechService.startRecording();
       return speechService.getStatus();
     });
-
-    // Raw PCM audio captured by the renderer's Web Audio API (Windows Whisper path)
-    ipcMain.on("audio-chunk", (_event, data) => {
-      if (data && data.buffer) {
-        speechService.handleAudioChunkFromRenderer(Buffer.from(data.buffer));
-      }
+    ipcMain.handle('stop-speech-recognition', async event => {
+      assertVoiceControl(event);
+      await speechService.stopRecording();
+      return speechService.getStatus();
     });
-
-    // Also handle direct send events for fallback
-    ipcMain.on("start-speech-recognition", () => {
+    ipcMain.handle('cancel-speech-recognition', event => {
+      assertVoiceControl(event);
+      this.cancelVoiceWork();
+      return speechService.getStatus();
+    });
+    ipcMain.on('microphone-event', (event, payload) => {
+      const owner = windowManager.getWindow('main')?.webContents;
+      try { assertMicrophoneOwner(event, owner, app.getAppPath()); }
+      catch (_) { return; }
+      this.microphoneSession.receive(owner, payload);
+    });
+    // Legacy controls still require a trusted application main frame.
+    ipcMain.on('start-speech-recognition', event => {
+      try { assertVoiceControl(event); } catch (_) { return; }
       speechService.startRecording();
     });
-
-    ipcMain.on("stop-speech-recognition", () => {
+    ipcMain.on('stop-speech-recognition', event => {
+      try { assertVoiceControl(event); } catch (_) { return; }
       speechService.stopRecording();
     });
 
@@ -1413,7 +1658,8 @@ class ApplicationController {
       }
     });
 
-    ipcMain.on("toggle-recording", () => {
+    ipcMain.on("toggle-recording", event => {
+      try { assertVoiceControl(event); } catch (_) { return; }
       this.toggleSpeechRecognition();
     });
 
@@ -1539,11 +1785,7 @@ class ApplicationController {
       }
     });
 
-    ipcMain.handle("clear-session-memory", () => {
-      sessionManager.clear();
-      windowManager.broadcastToAllWindows("session-cleared");
-      return { success: true };
-    });
+    ipcMain.handle("clear-session-memory", () => this.clearSessionMemory());
 
     ipcMain.handle("force-always-on-top", () => {
       windowManager.forceAlwaysOnTopForAllWindows();
@@ -1555,7 +1797,7 @@ class ApplicationController {
       return { success: true, results };
     });
 
-    ipcMain.handle("send-chat-message", async (event, text) => {
+    ipcMain.handle("send-chat-message", async (event, text, requestId) => {
       // Add chat message to session memory
       sessionManager.addUserInput(text, 'chat');
       logger.debug('Chat message added to session memory', { textLength: text.length });
@@ -1567,7 +1809,7 @@ class ApplicationController {
       (async () => {
         try {
           const sessionHistory = sessionManager.getOptimizedHistory();
-          await this.processWithLLM(text, sessionHistory);
+          await this.processWithLLM(text, sessionHistory, requestId);
         } catch (error) {
           logger.error("Failed to process chat message with LLM", {
             error: error.message,
@@ -1665,24 +1907,29 @@ class ApplicationController {
       return { success: true };
     });
 
-    ipcMain.handle("get-settings", () => {
-      return this.getSettings();
+    ipcMain.handle("get-settings", (event) => {
+      assertTrustedRenderer(event, app.getAppPath());
+      const settings = this.getSettings();
+      if (path.basename(fileURLToPath(event.senderFrame.url)) !== 'settings.html') {
+        for (const key of ['geminiKey', 'deepseekKey', 'azureKey']) delete settings[key];
+      }
+      return settings;
     });
 
     // First-run onboarding status — renderer can query to know whether
     // to show the welcome banner / prompt for API-key entry.
-    ipcMain.handle("get-first-run-status", () => {
+    managedHandle("get-first-run-status", () => {
       try {
-        return this.firstRunManager.getStatus();
+        return this.getSetupStatus();
       } catch (e) {
         logger.warn("Failed to get first-run status", { error: e.message });
-        return { needsOnboarding: false, error: e.message };
+        return { needsOnboarding: true, error: e.message };
       }
     });
 
-    ipcMain.handle("complete-first-run", async () => {
+    managedHandle("complete-first-run", async () => {
       try {
-        this.firstRunManager.markCompleted();
+        this.setupService.complete();
         this.isFirstRun = false;
         // Reinitialize speech service with the latest persisted settings
         // so the mic button reflects the provider/command set during onboarding.
@@ -1708,7 +1955,8 @@ class ApplicationController {
 
     // Open a URL in the system browser (used by the GitHub star button
     // in onboarding).
-    ipcMain.handle("open-external", async (_event, url) => {
+    ipcMain.handle("open-external", async (event, url) => {
+      assertTrustedRenderer(event, app.getAppPath());
       try {
         if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
           return { ok: false, error: "Invalid URL" };
@@ -1723,13 +1971,32 @@ class ApplicationController {
     });
 
     // Close the onboarding wizard window.
-    ipcMain.handle("close-onboarding", () => {
-      try {
-        windowManager.closeOnboarding();
-        return { success: true };
-      } catch (e) {
-        return { success: false, error: e.message };
+    managedHandle("close-onboarding", () => this.closeOnboarding());
+
+    const unsupportedVoiceModel = model => ({
+      supported: false, model, state: "unsupported",
+      message: "Model preparation is available with the included Windows speech engine. Your custom runtime remains selected."
+    });
+    ipcMain.handle("whisper-model-status", async (event, model = "small") => {
+      assertTrustedRenderer(event, app.getAppPath());
+      const service = this.getWhisperModelService();
+      if (service && speechService._getWhisperDevice?.() === "cuda") {
+        return { supported: true, model, state: "error", error: "The included speech engine uses CPU. Choose Auto or CPU in Settings; CUDA requires a custom runtime." };
       }
+      return service ? service.getStatus(model) : unsupportedVoiceModel(model);
+    });
+    ipcMain.handle("prepare-whisper-model", async (event, model = "small") => {
+      assertTrustedRenderer(event, app.getAppPath());
+      if (speechService.isRecording || speechService.isProcessingAudio) {
+        throw new Error("Stop recording and wait for transcription before preparing a model.");
+      }
+      const service = this.getWhisperModelService();
+      if (service && speechService._getWhisperDevice?.() === "cuda") throw new Error("The included speech engine uses CPU. Choose Auto or CPU in Settings; CUDA requires a custom runtime.");
+      return service ? service.prepare(model) : unsupportedVoiceModel(model);
+    });
+    ipcMain.handle("cancel-whisper-model", async (event, operationId) => {
+      assertTrustedRenderer(event, app.getAppPath());
+      return this._whisperModelService?.cancel(operationId) || null;
     });
 
     // Detect an installed Whisper CLI across common locations.
@@ -1779,6 +2046,7 @@ class ApplicationController {
     });
 
     ipcMain.handle("save-settings", (event, settings) => {
+      assertTrustedRenderer(event, app.getAppPath());
       return this.saveSettings(settings);
     });
 
@@ -1806,6 +2074,8 @@ class ApplicationController {
     });
 
     ipcMain.handle("close-window", (event) => {
+      assertTrustedRenderer(event, app.getAppPath());
+      if (windowManager.getWindow("onboarding")?.webContents === event.sender) return this.closeOnboarding();
       const webContents = event.sender;
       windowManager.windows.forEach((win, type) => {
         if (!win.isDestroyed() && win.webContents === webContents) {
@@ -1829,27 +2099,8 @@ class ApplicationController {
 
     ipcMain.handle("quit-app", () => {
       logger.info("Quit app requested via IPC");
-      try {
-        // Force quit the application
-        const { app } = require("electron");
-
-        // Close all windows first
-        windowManager.destroyAllWindows();
-
-        // Unregister shortcuts
-        globalShortcut.unregisterAll();
-
-        // Force quit
-        app.quit();
-
-        // If the above doesn't work, force exit
-        setTimeout(() => {
-          process.exit(0);
-        }, 2000);
-      } catch (error) {
-        logger.error("Error during quit:", error);
-        process.exit(1);
-      }
+      app.quit();
+      return { success: true };
     });
 
     // Handle close settings
@@ -1862,6 +2113,7 @@ class ApplicationController {
 
     // Handle save settings (synchronous)
     ipcMain.on("save-settings", (event, settings) => {
+      try { assertTrustedRenderer(event, app.getAppPath()); } catch (_) { return; }
       this.saveSettings(settings);
     });
 
@@ -1873,17 +2125,8 @@ class ApplicationController {
 
     // Handle quit app (alternative method)
     ipcMain.on("quit-app", () => {
-      logger.info("Quit app requested via IPC (on method)");
-      try {
-        const { app } = require("electron");
-        windowManager.destroyAllWindows();
-        globalShortcut.unregisterAll();
-        app.quit();
-        setTimeout(() => process.exit(0), 1000);
-      } catch (error) {
-        logger.error("Error during quit (on method):", error);
-        process.exit(1);
-      }
+      logger.info("Quit app requested via IPC");
+      app.quit();
     });
   }
 
@@ -1898,7 +2141,7 @@ class ApplicationController {
       return;
     }
     const currentStatus = speechService.getStatus();
-    if (currentStatus.isRecording) {
+    if (currentStatus.isRecording || currentStatus.isStarting) {
       try {
         speechService.stopRecording();
         logger.info("Speech recognition stopped via global shortcut");
@@ -1916,13 +2159,15 @@ class ApplicationController {
     }
   }
 
-  clearSessionMemory() {
+  async clearSessionMemory() {
     try {
-      sessionManager.clear();
-      windowManager.broadcastToAllWindows("session-cleared");
-      logger.info("Session memory cleared via global shortcut");
+      // Both IPC and the global shortcut invalidate ownership before any await.
+      await this.invalidateManagedWork();
+      logger.info("Session memory cleared");
+      return { success: true };
     } catch (error) {
       logger.error("Error clearing session memory:", error);
+      return { success: false, error: error.message };
     }
   }
 
@@ -2013,22 +2258,29 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("skill-updated", { skill: newSkill });
   }
 
-  async triggerScreenshotOCR() {
+  async triggerScreenshotOCR(requestId) {
     if (!this.isReady) {
       logger.warn("Screenshot requested before application ready");
-      return;
+      return { success: false, error: "Screenshot capture is not ready. Please try again." };
     }
 
+    this._responseSeq = (this._responseSeq || 0) + 1;
+    const messageId = `img-${Date.now()}-${this._responseSeq}`;
+    requestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 200 ? requestId : messageId;
+    windowManager.broadcastToAllWindows("chat-request-started", { requestId, kind: 'capture' });
     const startTime = Date.now();
+    const epoch = this.operationEpoch;
+    const current = () => this.operationEpoch === epoch;
 
     try {
       if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
 
-  const capture = await captureService.captureAndProcess();
+      const capture = await captureService.captureAndProcess();
+      if (!current()) return;
 
       if (!capture.imageBuffer || !capture.imageBuffer.length) {
         windowManager.hideLLMResponse();
-        this.broadcastOCRError("Failed to capture screenshot image");
+        this.broadcastOCRError("Failed to capture screenshot image", requestId, messageId);
         return;
       }
 
@@ -2038,10 +2290,9 @@ class ApplicationController {
       const skillsRequiringProgrammingLanguage = ['dsa', 'ood'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
-      this._responseSeq = (this._responseSeq || 0) + 1;
-      const messageId = `img-${Date.now()}-${this._responseSeq}`;
       windowManager.broadcastToAllWindows("transcription-llm-response-start", {
         messageId,
+        requestId,
         skill: this.activeSkill
       });
 
@@ -2052,13 +2303,16 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
+          if (!current()) return;
           windowManager.broadcastToAllWindows("transcription-llm-response-chunk", {
             messageId,
+            requestId,
             delta
           });
         }
       );
-      llmResult.metadata = { ...llmResult.metadata, messageId };
+      if (!current()) return;
+      llmResult.metadata = { ...llmResult.metadata, messageId, requestId };
 
       sessionManager.addModelResponse(llmResult.response, {
         skill: this.activeSkill,
@@ -2078,13 +2332,14 @@ class ApplicationController {
         });
       }
     } catch (error) {
+      if (!current()) return;
       logger.error("Screenshot OCR process failed", {
         error: error.message,
         duration: Date.now() - startTime,
       });
 
       windowManager.hideLLMResponse();
-      this.broadcastOCRError(error.message);
+      this.broadcastOCRError(error.message, requestId, messageId);
       
       sessionManager.addConversationEvent({
         role: 'system',
@@ -2097,7 +2352,12 @@ class ApplicationController {
     }
   }
 
-  async processWithLLM(text, sessionHistory) {
+  async processWithLLM(text, sessionHistory, requestId) {
+    this._responseSeq = (this._responseSeq || 0) + 1;
+    const messageId = `chat-${Date.now()}-${this._responseSeq}`;
+    requestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 200 ? requestId : messageId;
+    const epoch = this.operationEpoch;
+    const current = () => this.operationEpoch === epoch;
     try {
       // Add user input to session memory
       sessionManager.addUserInput(text, 'llm_input');
@@ -2106,10 +2366,9 @@ class ApplicationController {
       const skillsRequiringProgrammingLanguage = ['dsa', 'ood'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
-      this._responseSeq = (this._responseSeq || 0) + 1;
-      const messageId = `chat-${Date.now()}-${this._responseSeq}`;
       windowManager.broadcastToAllWindows("transcription-llm-response-start", {
         messageId,
+        requestId,
         skill: this.activeSkill
       });
       if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
@@ -2120,13 +2379,16 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
+          if (!current()) return;
           windowManager.broadcastToAllWindows("transcription-llm-response-chunk", {
             messageId,
+            requestId,
             delta
           });
         }
       );
-      llmResult.metadata = { ...llmResult.metadata, messageId };
+      if (!current()) return;
+      llmResult.metadata = { ...llmResult.metadata, messageId, requestId };
 
       logger.info("LLM processing completed, showing response", {
         responseLength: llmResult.response.length,
@@ -2153,6 +2415,7 @@ class ApplicationController {
         });
       }
     } catch (error) {
+      if (!current()) return;
       logger.error("LLM processing failed", {
         error: error.message,
         skill: this.activeSkill,
@@ -2169,7 +2432,7 @@ class ApplicationController {
         }
       });
 
-      this.broadcastLLMError(error.message);
+      this.broadcastLLMError(error.message, requestId, messageId);
     }
   }
 
@@ -2226,6 +2489,7 @@ class ApplicationController {
     }
     this._utteranceBuffer = "";
     this._utteranceDispatchInFlight = true;
+    const voiceEpoch = this._voiceEpoch || 0;
 
     try {
       const sessionHistory = sessionManager.getOptimizedHistory();
@@ -2236,6 +2500,7 @@ class ApplicationController {
         text: combined.substring(0, 100)
       });
     } finally {
+      if ((this._voiceEpoch || 0) !== voiceEpoch) return;
       this._utteranceDispatchInFlight = false;
       // Anything that arrived while we were busy gets answered now.
       if (this._utteranceBuffer.trim()) {
@@ -2249,6 +2514,8 @@ class ApplicationController {
     // bubble the streaming start event created; otherwise a total failure
     // leaves an empty streamed bubble stranded next to the fallback message.
     let messageId = null;
+    const voiceEpoch = this._voiceEpoch || 0;
+    const current = () => (this._voiceEpoch || 0) === voiceEpoch;
     try {
       // Validate input text
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -2295,12 +2562,14 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
+          if (!current()) return;
           this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
             messageId,
             delta
           });
         }
       );
+      if (!current()) return;
       llmResult.metadata = { ...llmResult.metadata, messageId };
 
       // Add LLM response to session memory
@@ -2329,6 +2598,7 @@ class ApplicationController {
       });
 
     } catch (error) {
+      if (!current()) return;
       logger.error("Transcription LLM processing failed", {
         error: error.message,
         errorStack: error.stack,
@@ -2392,8 +2662,10 @@ class ApplicationController {
     });
   }
 
-  broadcastOCRError(errorMessage) {
+  broadcastOCRError(errorMessage, requestId, messageId) {
     windowManager.broadcastToAllWindows("ocr-error", {
+      requestId,
+      messageId,
       error: errorMessage,
       timestamp: new Date().toISOString(),
     });
@@ -2416,8 +2688,10 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("llm-response", broadcastData);
   }
 
-  broadcastLLMError(errorMessage) {
+  broadcastLLMError(errorMessage, requestId, messageId) {
     windowManager.broadcastToAllWindows("llm-error", {
+      requestId,
+      messageId,
       error: errorMessage,
       timestamp: new Date().toISOString(),
     });
@@ -2428,6 +2702,7 @@ class ApplicationController {
       response: llmResult.response,
       metadata: llmResult.metadata,
       messageId: llmResult.metadata && llmResult.metadata.messageId,
+      requestId: llmResult.metadata && llmResult.metadata.requestId,
       skill: this.activeSkill,
       isTranscriptionResponse: true
     };
@@ -2519,6 +2794,8 @@ class ApplicationController {
       response: llmResult.response,
       metadata: llmResult.metadata,
       messageId: llmResult.metadata && llmResult.metadata.messageId,
+      // The provider request counter is not the renderer's pending request ID.
+      requestId: llmResult.metadata && llmResult.metadata.messageId,
       skill: this.activeSkill,
       isTranscriptionResponse: true
     };
@@ -2556,6 +2833,9 @@ class ApplicationController {
   }
 
   onWillQuit() {
+    this._quitting = true;
+    this.setupService.invalidate();
+    this.managedSession.cancelAll();
     globalShortcut.unregisterAll();
     if (this._captureHelper) {
       try { this._captureHelper.kill("SIGTERM"); } catch (_) { /* already dead */ }
@@ -2572,6 +2852,57 @@ class ApplicationController {
     });
   }
 
+  setupWhisperModelPreparation() {
+    speechService.setModelPreparation({
+      isReady: model => speechService._getWhisperDevice() !== "cuda" &&
+        this._whisperModelService?.isReady(model) === true,
+      requireReady: async model => {
+        const service = this.getWhisperModelService();
+        if (!service) throw new Error("Prepare the selected voice model in Settings before recording.");
+        if (speechService._getWhisperDevice() === "cuda") throw new Error("The included speech engine uses CPU. Choose Auto or CPU in Settings; CUDA requires a custom runtime.");
+        return service.requireReady(model);
+      }
+    });
+    if (speechService.whisperCommand?.kind === "bundled") {
+      try {
+        this.getWhisperModelService()?.getStatus(speechService._getWhisperModel())
+          .catch(error => logger.warn("Saved voice model could not be checked", { error: error.message }));
+      } catch (error) {
+        logger.warn("Included speech engine could not be checked", { error: error.message });
+      }
+    }
+  }
+
+  onWhisperModelStatus(status) {
+    const visibleStatus = speechService._getWhisperDevice() === "cuda" && status.state === "ready"
+      ? { ...status, state: "error", error: "The included speech engine uses CPU. Choose Auto or CPU in Settings; CUDA requires a custom runtime." }
+      : status;
+    windowManager.broadcastToAllWindows("whisper-model-status", visibleStatus);
+    if (speechService.whisperCommand?.kind === "bundled" && status.model === speechService._getWhisperModel()) {
+      const ready = speechService._getWhisperDevice() !== "cuda" && this._whisperModelService?.isReady(status.model) === true;
+      if (speechService.isAvailable() !== ready) speechService.initializeClient();
+    }
+  }
+
+  getWhisperModelService() {
+    const { resolveWhisperRuntime } = require("./src/core/whisper-runtime");
+    const runtime = resolveWhisperRuntime({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath });
+    if (!runtime) return null;
+    if (!this._whisperModelService) {
+      const WhisperModelService = require("./src/services/whisper-model.service");
+      const { createModelValidator } = require("./src/services/whisper-model-validator");
+      this._whisperModelService = new WhisperModelService({
+        modelDir: speechService._getWhisperModelDir(),
+        validateModel: createModelValidator({
+          pythonPath: runtime.pythonPath, env: runtime.env,
+          scriptPath: speechService._getWhisperWorkerScriptPath()
+        })
+      });
+      this._whisperModelService.on("status", status => this.onWhisperModelStatus(status));
+    }
+    return this._whisperModelService;
+  }
+
   getWhisperInstaller() {
     if (!this._whisperInstaller) {
       const WhisperInstaller = require("./src/core/whisper-installer");
@@ -2580,9 +2911,72 @@ class ApplicationController {
         cwd: process.cwd(),
         dataDir: app.getPath("userData"),
         platform: process.platform,
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
       });
     }
     return this._whisperInstaller;
+  }
+
+  getAIMode() {
+    if (['direct', 'managed'].includes(process.env.AI_MODE)) return process.env.AI_MODE;
+    // Retain the configuration of existing installations until the user changes mode.
+    return this.firstRunManager.getStatus().sentinelExists ? 'direct' : 'managed';
+  }
+
+  async showOnboarding() {
+    const win = await windowManager.showOnboarding();
+    if (win && !win._setupLifecycleBound) {
+      win._setupLifecycleBound = true;
+      win.on('closed', () => {
+        if (!this._closingOnboarding && !this._quitting) {
+          this.cancelSetup({ revealMain: true }).catch(error => logger.warn('Setup close failed', { error: error.message }));
+        }
+      });
+    }
+    return { success: true };
+  }
+
+  async cancelSetup({ revealMain = false } = {}) {
+    const ownsSignIn = this._setupSignInEpoch != null;
+    if (ownsSignIn) { this.operationEpoch++; this._setupSignInEpoch = null; }
+    const cancellation = this.setupService.cancel();
+    try {
+      if (ownsSignIn && this.managedSession.status().signingIn) await this.managedSession.signOut();
+      await cancellation;
+    } finally {
+      if (revealMain && !this._quitting) await windowManager.showMainWindow();
+    }
+    return { success: true, ...this.setupService.getStatus() };
+  }
+
+  async closeOnboarding() {
+    await this.cancelSetup({ revealMain: true });
+    this._closingOnboarding = true;
+    try { windowManager.closeOnboarding(); }
+    finally { this._closingOnboarding = false; }
+    return { success: true };
+  }
+
+  getSetupStatus() {
+    const legacy = this.firstRunManager.getStatus();
+    const setup = this.setupService.getStatus();
+    return { ...legacy, ...setup,
+      needsOnboarding: !setup.completed || (setup.aiMode === 'managed' && !setup.managed.authenticated) };
+  }
+
+  async invalidateManagedWork() {
+    this.operationEpoch++;
+    this.setupService.invalidate();
+    const cancellation = this.managedSession.cancelAll();
+    clearTimeout(this._utteranceTimer);
+    this._utteranceBuffer = '';
+    this.cancelVoiceWork();
+    sessionManager.clear();
+    windowManager.broadcastToAllWindows('session-cleared');
+    windowManager.hideLLMResponse();
+    if (this.managedSession.status().signingIn) await this.managedSession.signOut();
+    await cancellation;
   }
 
   getSettings() {
@@ -2591,6 +2985,8 @@ class ApplicationController {
     // using. Empty strings are returned rather than skipped so the UI can
     // distinguish "unset" from "stale value from a previous load".
     return {
+      aiMode: this.getAIMode(),
+      managed: this.managedSession.status(),
       codingLanguage: this.codingLanguage || "cpp",
       activeSkill: this.activeSkill || "dsa",
       appIcon: this.appIcon || "terminal",
@@ -2620,6 +3016,9 @@ class ApplicationController {
 
   saveSettings(settings) {
     try {
+      if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("Invalid settings");
+      if (settings.aiMode !== undefined && !['managed', 'direct'].includes(settings.aiMode)) throw new Error('Invalid AI mode');
+      this.cancelVoiceWork();
       // ── In-memory updates + window broadcasts ──
       if (settings.codingLanguage) {
         this.codingLanguage = settings.codingLanguage;
@@ -2650,6 +3049,10 @@ class ApplicationController {
       // Writing to .env ensures they survive app restarts and are picked
       // up the next time the app boots.
       const envUpdates = {};
+      if (settings.aiMode && settings.aiMode !== this.getAIMode()) {
+        this.invalidateManagedWork().catch(() => {});
+        envUpdates.AI_MODE = settings.aiMode;
+      }
       if (settings.speechProvider === "azure" || settings.speechProvider === "whisper") {
         envUpdates.SPEECH_PROVIDER = settings.speechProvider;
       }
@@ -2783,7 +3186,8 @@ class ApplicationController {
       const providerChanged = settings.speechProvider && speechService.provider !== settings.speechProvider;
       const whisperCommandChanged = settings.whisperCommand !== undefined &&
         prevWhisperCommand !== String(settings.whisperCommand || '');
-      if (providerChanged || whisperCommandChanged) {
+      const voiceSettingsChanged = Object.keys(settings).some(key => /^(speech|whisper|azure)/i.test(key));
+      if (providerChanged || whisperCommandChanged || voiceSettingsChanged) {
         try {
           speechService.initializeClient();
           this.speechAvailable = speechService.isAvailable
@@ -2811,7 +3215,7 @@ class ApplicationController {
       }
 
       logger.info("Settings saved successfully", {
-        ...settings,
+        changedFields: Object.keys(settings),
         persistedEnvKeys: persistedKeys
       });
       return { success: true, persistedEnvKeys: persistedKeys };
@@ -2824,7 +3228,7 @@ class ApplicationController {
   persistSettings(settings) {
     // You can extend this to save to a file or database
     // For now, we'll just keep them in memory
-    logger.debug("Settings persisted", settings);
+    logger.debug("Settings persisted", { changedFields: Object.keys(settings || {}) });
   }
 
   /**

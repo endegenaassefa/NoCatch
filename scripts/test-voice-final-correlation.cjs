@@ -1,0 +1,13 @@
+"use strict";
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+function harness(){
+ const html=fs.readFileSync(path.join(__dirname,'../chat.html'),'utf8'),messages=[],callbacks={},bubbles=[];
+ const slice=(start,end)=>{const a=html.indexOf(start),b=html.indexOf(end,a);assert(a>=0&&b>a,`Production region missing: ${start}`);return html.slice(a,b)};
+ function element(){return {isConnected:true,dataset:{},appendChild(){},remove(){this.isConnected=false}};}
+ const context={console,crypto:{randomUUID:()=> 'fixture'},clearTimeout(){},hideThinkingIndicator(){},scheduleThinkingIndicator(){},document:{createElement:()=>{const e=element();bubbles.push(e);return e}},chatMessages:{appendChild(){},scrollTop:0,scrollHeight:0},addMessage:(text,type)=>messages.push({text,type}),addCodeSnippet:(language,code)=>messages.push({language,code}),whysperAPI:{onTranscriptionLlmResponse:fn=>callbacks.final=fn},Map,Set};
+ vm.createContext(context);
+ const code=slice('let chatGeneration = 0;','function saveHistory()')+'\n'+slice('function finishPendingResponse(request)','function showResponseError(')+'\n'+slice('function extractCodeBlocks(text)','function addCodeSnippet(')+'\n'+slice('function renderAssistantResponse(','// Basic IPC Event Listeners')+'\n'+slice('function beginStreamingResponse(data)','function appendStreamingChunk(data)')+'\n'+slice('whysperAPI.onTranscriptionLlmResponse((event, data) => {','if (whysperAPI.onTranscriptionLlmResponseStart)');
+ vm.runInContext(code,context);return {messages,start:id=>context.beginStreamingResponse({messageId:id}),final:(id,response,providerId=1)=>callbacks.final({}, {messageId:id,metadata:{messageId:id,requestId:providerId},response}),pending:()=>vm.runInContext('pendingResponses.size',context),stream:()=>vm.runInContext('[...pendingResponses.values()].map(r=>r.streamingBubble)',context)};
+}
+test('voice final with provider metadata request ID finalizes message-ID stream',()=>{const h=harness();h.start('tr-voice-one');const bubble=h.stream()[0];h.final('tr-voice-one','24');assert.deepEqual(h.messages,[{text:'24',type:'assistant'}]);assert.equal(h.pending(),0);assert.equal(bubble.isConnected,false);});
+test('separate voice message IDs with repeated provider request ID retain identical answers once each',()=>{const h=harness();h.start('tr-one');h.final('tr-one','24',1);h.final('tr-one','24',1);h.start('tr-two');h.final('tr-two','24',1);h.final('tr-two','24',1);assert.deepEqual(h.messages,[{text:'24',type:'assistant'},{text:'24',type:'assistant'}]);assert.equal(h.pending(),0);});

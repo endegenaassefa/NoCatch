@@ -17,12 +17,15 @@ class MainWindowUI {
         this.isRecording = false;
         this.speechAvailable = false; // track availability
         this._popoverHideTimeout = null;
-        // Renderer-side audio capture state (used for Whisper on Windows)
-        this._audioContext = null;
-        this._mediaStream = null;
-        this._scriptNode = null;
-        this._captureInterval = null;
-        
+        // Only the main renderer owns microphone commands. Recording broadcasts
+        // below update UI state; they never acquire a device.
+        this.microphoneCapture = new window.MicrophoneCapture({ api: window.electronAPI });
+        this._unsubscribeMicrophone = window.electronAPI.onMicrophoneCommand(command => this.microphoneCapture.handle(command));
+        window.addEventListener('pagehide', () => {
+            this._unsubscribeMicrophone();
+            this.microphoneCapture.dispose();
+        }, { once: true });
+
         // Define available skills for navigation
         this.availableSkills = [
             'dsa', 'ood', 'mcq', 'system-design', 'behavioral', 'programming'
@@ -47,6 +50,7 @@ class MainWindowUI {
             
             this.updateSkillIndicator();
             this.updateAllElementStates(); // Update all elements with current state
+            await this.refreshShortcutStatus();
             this.resizeWindowToContent();
             
             logger.info('Main window UI initialized', {
@@ -319,11 +323,7 @@ class MainWindowUI {
         this.micButton.addEventListener('click', async () => {
             if (this.isInteractive && this.speechAvailable) {
                 try {
-                    if (this.isRecording) {
-                        await window.electronAPI.stopSpeechRecognition();
-                    } else {
-                        await window.electronAPI.startSpeechRecognition();
-                    }
+                    await window.electronAPI.toggleSpeechRecognition();
                 } catch (error) {
                     logger.error('Speech recognition toggle failed', {
                         component: 'MainWindowUI',
@@ -496,18 +496,8 @@ class MainWindowUI {
                 this.loadSpeechAvailability();
             });
             
-            // Global keyboard shortcuts
-            document.addEventListener('keydown', (e) => {
-                if (e.altKey && e.key === 'r' && this.isInteractive) {
-                    e.preventDefault();
-                    if (!this.speechAvailable) return; // guard when unavailable
-                    if (this.isRecording) {
-                        window.electronAPI.stopSpeechRecognition();
-                    } else {
-                        window.electronAPI.startSpeechRecognition();
-                    }
-                }
-            });
+            // The main process owns Alt+R; do not toggle it a second time
+            // from a focused renderer's keydown event.
         }
         
         // Also listen via the api interface for backup
@@ -676,19 +666,6 @@ class MainWindowUI {
         if (this.micButton) {
             this.micButton.classList.add('recording');
         }
-        // On Windows and macOS, Whisper audio is captured here in the renderer
-        // (Web Audio API) rather than the main process: Windows lacks sox/rec/
-        // arecord, and macOS avoids an unbundled Homebrew `sox`. Must match the
-        // main process's useRendererCapture gate (speech.service.js). Linux uses
-        // the native recorder. navigator.userAgentData is preferred when present
-        // since navigator.platform is deprecated.
-        const platform = (typeof navigator !== 'undefined' &&
-          ((navigator.userAgentData && navigator.userAgentData.platform) ||
-            navigator.platform || '')).toLowerCase();
-        const useRendererCapture = platform.includes('win') || platform.includes('mac');
-        if (useRendererCapture) {
-            this._startRendererAudioCapture();
-        }
         logger.debug('Recording started', { component: 'MainWindowUI' });
     }
 
@@ -697,93 +674,7 @@ class MainWindowUI {
         if (this.micButton) {
             this.micButton.classList.remove('recording');
         }
-        this._stopRendererAudioCapture();
         logger.debug('Recording stopped', { component: 'MainWindowUI' });
-    }
-
-    /**
-     * Capture microphone audio in the renderer using the Web Audio API.
-     * This is used for Whisper on Windows where node-record-lpcm16's sox/rec
-     * dependencies are unavailable.
-     */
-    async _startRendererAudioCapture() {
-        try {
-            this._stopRendererAudioCapture();
-
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                    sampleRate: { ideal: 16000 }
-                }
-            });
-            this._mediaStream = stream;
-
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 16000
-            });
-            this._audioContext = audioContext;
-
-            const source = audioContext.createMediaStreamSource(stream);
-            const bufferSize = 4096;
-            const scriptNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
-            this._scriptNode = scriptNode;
-
-            scriptNode.onaudioprocess = (event) => {
-                if (!this.isRecording || !window.electronAPI || !window.electronAPI.sendAudioChunk) {
-                    return;
-                }
-                const inputData = event.inputBuffer.getChannelData(0);
-                const pcm16 = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    const s = Math.max(-1, Math.min(1, inputData[i]));
-                    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                }
-                window.electronAPI.sendAudioChunk(pcm16.buffer);
-            };
-
-            source.connect(scriptNode);
-            scriptNode.connect(audioContext.destination);
-
-            logger.info('Renderer audio capture started', { component: 'MainWindowUI' });
-        } catch (error) {
-            logger.error('Failed to start renderer audio capture', {
-                component: 'MainWindowUI',
-                error: error.message
-            });
-            // Notify main process so it can stop the recording state
-            try {
-                await window.electronAPI.stopSpeechRecognition();
-            } catch (_) { /* ignore */ }
-        }
-    }
-
-    _stopRendererAudioCapture() {
-        try {
-            if (this._scriptNode) {
-                this._scriptNode.disconnect();
-                this._scriptNode.onaudioprocess = null;
-                this._scriptNode = null;
-            }
-            if (this._mediaStream) {
-                this._mediaStream.getTracks().forEach((track) => track.stop());
-                this._mediaStream = null;
-            }
-            if (this._audioContext) {
-                this._audioContext.close().catch(() => {});
-                this._audioContext = null;
-            }
-            if (this._captureInterval) {
-                clearInterval(this._captureInterval);
-                this._captureInterval = null;
-            }
-        } catch (error) {
-            logger.error('Error stopping renderer audio capture', {
-                component: 'MainWindowUI',
-                error: error.message
-            });
-        }
     }
 
     updateSkillIndicator() {
@@ -1259,6 +1150,50 @@ class MainWindowUI {
         return separator;
     }
 
+    async refreshShortcutStatus() {
+        if (!window.electronAPI?.getShortcutStatus) return;
+        try {
+            const status = await window.electronAPI.getShortcutStatus();
+            if (this.shortcutsPopover) this.shortcutsPopover.style.maxHeight = `${Math.max(160, Math.min(600, window.screen.availHeight - 100))}px`;
+            const modifier = status.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+            const captureInstructions = document.getElementById('captureModeShortcuts');
+            if (captureInstructions) captureInstructions.hidden = !(status.platform === 'darwin' &&
+                status.shortcuts?.some(shortcut => shortcut.id === 'keystroke-capture' && shortcut.supported));
+            const label = document.getElementById('captureShortcutLabel');
+            if (label) label.textContent = `${modifier}+Shift+S`;
+            const body = this.shortcutsPopover?.querySelector('.shortcuts-table tbody');
+            if (!body || !Array.isArray(status.shortcuts)) return;
+            body.replaceChildren();
+            for (const shortcut of status.shortcuts) {
+                const row = document.createElement('tr');
+                row.dataset.shortcutId = shortcut.id;
+                const chord = document.createElement('td');
+                chord.textContent = shortcut.accelerator.replace('CommandOrControl', modifier);
+                const action = document.createElement('td');
+                action.textContent = shortcut.action;
+                if (!shortcut.registered) {
+                    const detail = document.createElement('div');
+                    detail.textContent = shortcut.reason || 'Shortcut unavailable';
+                    detail.style.cssText = 'font-size:11px;color:#e9b878;margin-top:4px';
+                    action.appendChild(detail);
+                }
+                row.append(chord, action);
+                body.appendChild(row);
+            }
+            this.resizeWindowToContent();
+        } catch (_) {
+            const body = this.shortcutsPopover?.querySelector('.shortcuts-table tbody');
+            if (body) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 2;
+                cell.textContent = 'Shortcut status is unavailable. Restart NoCatch and try again.';
+                row.appendChild(cell);
+                body.replaceChildren(row);
+            }
+        }
+    }
+
     toggleShortcutsPopover() {
         if (!this.shortcutsPopover) return;
     const isOpen = this.shortcutsPopover.classList.contains('is-open');
@@ -1276,6 +1211,7 @@ class MainWindowUI {
             this._popoverHideTimeout = null;
         }
     this.shortcutsPopover.classList.add('is-open');
+        this.refreshShortcutStatus();
         // Resize main window to fit popover
         setTimeout(() => this.resizeWindowToContent(), 50);
     }

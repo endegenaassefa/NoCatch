@@ -1,0 +1,16 @@
+{
+  "name": "opencluely-managed-server",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test ../scripts/test-managed-server.js"
+  },
+  "dependencies": {
+    "jose": "^6.1.0",
+    "screen-reader-util": "file:.."
+  }
+}

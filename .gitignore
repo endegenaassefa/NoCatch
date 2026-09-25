@@ -4,6 +4,7 @@ node_modules/
 .whisper-models/
 eng.traineddata
 dist/
+resources/bin/
 bin/
 .DS_Store
 *.log
@@ -24,3 +25,6 @@ research/probes/cgwindow-grab
 research/probes/shield-smoke
 shield/shield
 shield/*.old*
+
+.depthengine/
+managed-config.json

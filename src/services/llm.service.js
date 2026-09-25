@@ -205,7 +205,7 @@ class LLMService {
     try {
       // Build system instruction using the skill prompt (with optional language injection)
       const { promptLoader } = require('../../prompt-loader');
-      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+      const skillPrompt = this.imageSystemInstruction(activeSkill, programmingLanguage);
 
       // Build request with text + image parts
       const base64 = imageBuffer.toString('base64');
@@ -259,9 +259,7 @@ class LLMService {
       }
 
       // Enforce language in code fences if provided
-      const finalResponse = programmingLanguage
-        ? this.enforceProgrammingLanguage(responseText, programmingLanguage)
-        : responseText;
+      const finalResponse = responseText;
 
       logger.logPerformance('LLM image processing', startTime, {
         activeSkill,
@@ -291,9 +289,8 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (this._fallbackEnabled()) {
-        return this.generateFallbackResponse('[image]', activeSkill);
-      }
+      // An image that was not answered must reach the UI's error path.
+      // Generic skill advice is not an analysis of the user's screenshot.
       throw error;
     }
   }
@@ -312,7 +309,7 @@ class LLMService {
 
     try {
       const { promptLoader } = require('../../prompt-loader');
-      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+      const skillPrompt = this.imageSystemInstruction(activeSkill, programmingLanguage);
       const base64 = imageBuffer.toString('base64');
 
       const geminiRequest = {
@@ -337,9 +334,7 @@ class LLMService {
         }
       });
 
-      const finalResponse = programmingLanguage
-        ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
-        : fullText;
+      const finalResponse = fullText;
 
       logger.logPerformance('LLM image streaming', startTime, {
         activeSkill,
@@ -370,18 +365,22 @@ class LLMService {
     }
   }
 
+  imageSystemInstruction(activeSkill, programmingLanguage) {
+    const { promptLoader } = require('../../prompt-loader');
+    const reference = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+    return `Answer the actual question visible in the screenshot. Read the image before deciding what kind of task it contains.
+The selected mode (${activeSkill}) is a contextual preference, not evidence that the screenshot is a coding or interview question.
+Follow the visible question's requested answer format and explicit programming language. An explicit language in the screenshot takes priority over the selected language or skill reference. For arithmetic or ordinary factual questions, answer directly; do not invent a programming exercise, code, algorithm analysis, or interview scenario.
+Use the following skill reference ONLY when the visible task genuinely belongs to that skill. Its coding-only rules do not apply to noncoding questions.
+<conditional-skill-reference>
+${reference}
+</conditional-skill-reference>
+If the visible task is not a coding problem, ignore coding-only instructions in the reference. If it requests only a number or an option, return only that answer. If the image is unreadable or lacks a question, explain that briefly instead of inventing one.`;
+  }
+
   formatImageInstruction(activeSkill, programmingLanguage) {
-    const langNote = programmingLanguage ? ` Use only ${programmingLanguage.toUpperCase()} for any code.` : '';
-
-    const skillInstructions = {
-      'mcq': 'If this is a multiple choice question, identify the correct option and explain why in one sentence.',
-      'ood': 'If this is a design question, provide a class diagram description and explain the design decisions.',
-      'system-design': 'If this is a system design question, provide a high-level architecture description and discuss scalability trade-offs.',
-      'behavioral': 'If this is a behavioral question, provide a structured STAR-method answer.'
-    };
-
-    const extra = skillInstructions[activeSkill] || '';
-    return `Analyze this image for a ${activeSkill.toUpperCase()} question. Extract the problem concisely and provide the best possible solution with explanation and final code.${langNote} ${extra}`.trim();
+    const language = programmingLanguage ? ` For a task that actually requires code, use the language explicitly requested in the screenshot. Only when the screenshot specifies no language, use the selected default ${programmingLanguage.toUpperCase()}.` : '';
+    return `Read this screenshot and answer the question actually shown, in the requested format. Include code only if the visible task requires code.${language}`;
   }
 
   async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null) {

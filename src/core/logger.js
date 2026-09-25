@@ -3,6 +3,22 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 const path = require('path');
 const os = require('os');
 
+// Redact credentials before either console or file formatting. Settings should
+// log field names only; this also protects nested metadata from other callers.
+const sensitiveField = name => /^(?:azurekey|azurespeechkey|geminikey|deepseekkey|authorization|cookie|setcookie|subscriptionkey)$/.test(name) ||
+  /(?:apikey|subscriptionkey|authorization|password|passwd|secret|token)$/.test(name);
+function redactMetadata(value, field = '', ancestors = new Set()) {
+  if (sensitiveField(field.replace(/[^a-z0-9]/gi, '').toLowerCase())) return '[REDACTED]';
+  if (!value || typeof value !== 'object') return value;
+  if (ancestors.has(value)) return '[Circular]';
+  if (value instanceof Date) return value.toISOString();
+  const next = new Set(ancestors).add(value);
+  if (Array.isArray(value)) return value.map(item => redactMetadata(item, '', next));
+  const result = {};
+  for (const [key, item] of Object.entries(value)) result[key] = redactMetadata(item, key, next);
+  return result;
+}
+
 class Logger {
   constructor() {
     this.logDir = path.join(os.homedir(), '.screen-reader-util', 'logs');
@@ -13,6 +29,10 @@ class Logger {
     const logFormat = winston.format.combine(
       winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
       winston.format.errors({ stack: true }),
+      winston.format(info => {
+        for (const key of Object.keys(info)) info[key] = redactMetadata(info[key], key);
+        return info;
+      })(),
       winston.format.printf(({ timestamp, level, message, stack, service, ...meta }) => {
         const metaStr = Object.keys(meta).length ? JSON.stringify(meta, null, 2) : '';
         const serviceStr = service ? `[${service}]` : '';

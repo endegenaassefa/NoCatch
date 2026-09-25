@@ -1,722 +1,235 @@
-/* eslint-disable no-undef */
-/**
- * Onboarding wizard controller.
- *
- * Drives the 5-step flow rendered in onboarding.html and persists
- * everything via the electronAPI bridge exposed by preload.js:
- *
- *   1. Welcome
- *   2. Gemini API key entry + live connection test
- *   3. Speech provider choice (Whisper / Azure / Skip)
- *   4. Whisper detect + (optional) install — only shown when whisper
- *   5. Star-the-repo prompt + summary
- */
-
-(function () {
-  'use strict';
-
-  // ── DOM refs ──────────────────────────────────────────────────────
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => document.querySelectorAll(sel);
-
-  // Quote the executable portion of a command string if it contains spaces.
-  // This keeps Windows user profile paths (e.g. C:\Users\CANDAN SINGH\...) intact.
-  function quoteCommandIfNeeded(cmd) {
-    if (!cmd) return cmd;
-    const firstSpace = cmd.indexOf(' ');
-    if (firstSpace === -1) return cmd;
-    const exe = cmd.slice(0, firstSpace);
-    const rest = cmd.slice(firstSpace + 1);
-    if (exe.startsWith('"') || rest.startsWith('"')) return cmd;
-    return `"${exe}" ${rest}`;
-  }
-
-  const screens = $$('.screen');
-  const stepperDots = $$('.step-dot');
-  const stepBadge = $('#stepBadge');
-  const backBtn = $('#backBtn');
-  const nextBtn = $('#nextBtn');
-  const skipBtn = $('#skipBtn');
-  const nav = $('#wizard .nav'); // the centered nav container
-
-  // ── State ─────────────────────────────────────────────────────────
-  const state = {
-    step: 0,
-    llmProvider: 'gemini', // 'gemini' | 'deepseek'
-    geminiKey: '',
-    geminiConfigured: false, // a key already exists in .env from a prior run
-    speechProvider: null, // 'whisper' | 'azure' | 'skip'
-    azureKey: '',
-    azureRegion: '',
-    whisperCmd: null,
-    whisperDetected: false,
-    skippingWhisper: false,
-    modelDownloadChoice: null, // 'now' | 'later'
-    modelDownloading: false,
-    modelDownloaded: false,
-    finished: false,
+'use strict';
+document.addEventListener('DOMContentLoaded', () => {
+  const api = window.electronAPI;
+  const $ = id => document.getElementById(id);
+  let state, preview = null, answer = null, layout = null, busy = null;
+  let epoch = 0, refreshId = 0, initialized = false, context = null;
+  let preferredProvider = null;
+  let saves = Promise.resolve(), saveError = null;
+  const message = error => typeof error === 'string' ? error : error?.message || 'Something went wrong. Please try again.';
+  const checked = result => {
+    if (!result || result.success === false) throw new Error(message(result?.error));
+    return result;
   };
-
-  // Screens are: welcome → apikey → speech → whisper? → finish
-  // The whisper screen is only visited if state.speechProvider === 'whisper'
-  const stepScreens = ['welcome', 'apikey', 'speech'];
-
-  // ── Step rendering ────────────────────────────────────────────────
-  function totalSteps() {
-    return stepScreens.length + (state.speechProvider === 'whisper' ? 1 : 0) + 1;
-  }
-
-  function refreshStepper() {
-    const total = totalSteps();
-    const current = state.step + 1;
-    stepBadge.textContent = `Step ${current} of ${total}`;
-    stepperDots.forEach((dot, i) => {
-      dot.classList.remove('active', 'done');
-      if (i < state.step) dot.classList.add('done');
-      else if (i === state.step) dot.classList.add('active');
+  function status(text, error = false) { $('status').textContent = text; $('status').dataset.error = String(error); }
+  function clearPreview() { preview = null; $('previewImage').removeAttribute('src'); $('consent').checked = false; }
+  function save(patch = {}) {
+    const saveEpoch = epoch;
+    const progress = { draft: $('question').value, inputMode: $('inputMode').value, ...patch };
+    saves = saves.then(() => api.saveSetupProgress(progress)).then(result => {
+      checked(result); if (saveEpoch === epoch) saveError = null;
+    }).catch(error => {
+      if (saveEpoch !== epoch) return;
+      saveError = error; status(`Could not save your progress: ${message(error)}`, true);
     });
+    return saves;
   }
-
-  function showScreen(name) {
-    screens.forEach((s) => {
-      s.classList.toggle('active', s.dataset.screen === name);
-    });
-    // Welcome screen uses an inline hero CTA — hide the regular nav row.
-    const wizardEl = document.getElementById('wizard');
-    if (wizardEl) {
-      wizardEl.classList.toggle('welcome-active', name === 'welcome');
-    }
-    refreshStepper();
-    backBtn.style.visibility = state.step === 0 ? 'hidden' : 'visible';
-    // Reset next button state unless we're actively downloading a model
-    if (name !== 'model-download' || !state.modelDownloading) {
-      nextBtn.disabled = false;
-      nextBtn.classList.remove('success');
-      nextBtn.classList.add('primary');
-    }
-    // The primary action label changes by step
-    if (name === 'welcome') nextBtn.innerHTML = 'Get started <i class="fas fa-arrow-right"></i>';
-    else if (name === 'finish') nextBtn.innerHTML = 'Finish <i class="fas fa-check"></i>';
-    else if (name === 'whisper') nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
-    else nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
+  const usable = () => state && (state.aiMode === 'direct' || state.managed?.authenticated);
+  function controls() {
+    const locked = Boolean(busy);
+    for (const id of ['inputMode', 'question', 'provider', 'consent', 'sample', 'display', 'capture', 'refreshDisplays', 'screenSettings', 'discard', 'recapture']) $(id).disabled = locked;
+    const screenshot = $('inputMode').value === 'screenshot';
+    $('capture').disabled = locked || !$('display').value;
+    $('submit').disabled = locked || !usable() || !$('question').value.trim() || !$('consent').checked || !$('provider').value || (screenshot && (!preview || (state.aiMode !== 'direct' && $('provider').value !== 'gemini')));
+    $('submit').textContent = busy === 'submit' ? 'Getting your answer…' : 'Ask question';
+    $('cancelWork').hidden = !['submit', 'capture', 'displays'].includes(busy);
+    $('cancelWork').textContent = busy === 'submit' ? 'Cancel request' : 'Cancel capture';
+    $('settings').disabled = locked;
+    $('finish').disabled = locked;
+    $('wizard').setAttribute('aria-busy', String(locked || !initialized));
   }
-
-  function navigate(direction) {
-    const order = computeScreenOrder();
-    const idx = order.indexOf(currentScreenName());
-    const next = direction === 'next' ? idx + 1 : idx - 1;
-    if (next < 0 || next >= order.length) return;
-    state.step = orderScreenToStep(order[next]);
-    showScreen(order[next]);
+  function render(focus = false) {
+    if (!state) return;
+    const managed = state.managed || {};
+    const signing = busy === 'auth' || managed.signingIn;
+    const ready = usable() && !signing;
+    $('accountPanel').hidden = ready;
+    $('questionPanel').hidden = !ready || Boolean(answer);
+    $('successPanel').hidden = !ready || !answer;
+    $('stepLabel').textContent = answer && ready ? 'Step 3 of 3' : ready ? 'Step 2 of 3' : 'Step 1 of 3';
+    $('heading').textContent = answer && ready ? 'You’re ready' : ready ? 'Ask your first question' : 'Connect your account';
+    $('intro').hidden = ready;
+    $('accountText').textContent = !managed.configured ? 'Managed service is not configured in this build. A configured release is needed to sign in. No account details or provider keys can fix this here.' : signing ? 'Finish signing in in your browser, then return here. You can cancel at any time.' : 'Sign in with your OpenCluely account in your browser to continue.';
+    $('sessionNote').textContent = '';
+    $('signIn').hidden = !managed.configured || signing;
+    $('signIn').disabled = Boolean(busy);
+    $('cancelAuth').hidden = !signing;
+    $('cancelAuth').disabled = busy === 'cancel';
+    $('recheck').disabled = Boolean(busy);
+    $('identity').textContent = state.aiMode === 'direct' ? 'Using your provider settings' : managed.persistence === 'session_only' ? 'Signed in for this session' : 'Signed in';
+    $('capturePanel').hidden = $('inputMode').value !== 'screenshot';
+    $('previewPanel').hidden = !preview;
+    $('consentText').textContent = `Send this question${preview ? ' and the screenshot preview' : ''} to ${state.aiMode === 'direct' ? 'the selected AI provider' : 'the managed service and selected AI provider'}.`;
+    $('providerNote').hidden = $('inputMode').value !== 'screenshot';
+    $('providerNote').textContent = state.aiMode === 'direct'
+      ? 'Choose a provider configured in Settings.'
+      : 'Screenshot questions require Gemini.';
+    const capability = state.capabilities?.screen;
+    $('screenStatus').textContent = capability ? `Screen access: ${capability.permission}. ${capability.reason || ''}` : 'Screen access will be checked when you capture.';
+    controls();
+    if (focus) $('heading').focus();
   }
-
-  function currentScreenName() {
-    const active = Array.from(screens).find((s) => s.classList.contains('active'));
-    return active ? active.dataset.screen : 'welcome';
+  function providers() {
+    const previous = $('provider').value;
+    const allowed = state.aiMode === 'direct' ? ['gemini', 'deepseek'] : state.managed?.account?.providers || [];
+    $('provider').replaceChildren();
+    for (const id of ['gemini', 'deepseek'].filter(id => allowed.includes(id))) $('provider').add(new Option(id === 'gemini' ? 'Gemini' : 'DeepSeek', id));
+    if (!allowed.length) $('provider').add(new Option('No provider available for this account', ''));
+    if (allowed.includes(previous)) $('provider').value = previous;
+    else if (allowed.includes(preferredProvider)) $('provider').value = preferredProvider;
   }
-
-  // Order depends on choices — e.g. whisper path inserts the install screen.
-  function computeScreenOrder() {
-    const out = ['welcome', 'apikey', 'speech'];
-    if (state.speechProvider === 'whisper') out.push('whisper');
-    if (state.speechProvider === 'whisper') out.push('model-download');
-    out.push('finish');
-    return out;
-  }
-
-  // Map a screen name to its position in the stepper (0..n).
-  function orderScreenToStep(name) {
-    return computeScreenOrder().indexOf(name);
-  }
-
-  // ── Validation gates before "Continue" ───────────────────────────
-  function canAdvance() {
-    const name = currentScreenName();
-    switch (name) {
-      case 'welcome':
-        return true;
-      case 'apikey':
-        // A key already in .env is enough — don't force a re-entry.
-        return !!state.geminiKey.trim() || state.geminiConfigured;
-      case 'speech':
-        if (state.speechProvider === 'azure') {
-          return !!state.azureKey.trim() && !!state.azureRegion.trim();
-        }
-        return !!state.speechProvider;
-      case 'whisper':
-        // Allow advancing whether whisper is detected OR user skipped
-        return state.whisperDetected || state.skippingWhisper;
-      case 'model-download':
-        return !!state.modelDownloadChoice && !state.modelDownloading;
-      case 'finish':
-        return true;
-      default:
-        return true;
-    }
-  }
-
-  // ── Wire up: API key ──────────────────────────────────────────────
-  const geminiInput = $('#geminiKey');
-  const toggleVis = $('#toggleVis');
-  const keyStatus = $('#keyStatus');
-
-  // Provider choice cards + dynamic label/hint/placeholder.
-  const llmProviderCards = $$('#llmChoices .choice-card');
-  function applyProviderUI() {
-    const isDeep = state.llmProvider === 'deepseek';
-    llmProviderCards.forEach((c) => c.classList.toggle('selected', c.dataset.value === state.llmProvider));
-    const title = $('#apiKeyTitle');
-    const subtitle = $('#apiKeySubtitle');
-    const label = $('#apiKeyLabel');
-    const hint = $('#apiKeyHint');
-    if (title) title.textContent = isDeep ? 'Connect DeepSeek' : 'Connect Google Gemini';
-    if (subtitle) {
-      subtitle.textContent = isDeep
-        ? "This app uses DeepSeek's models (deepseek-flash, vision-capable) to generate answers. You'll need an API key."
-        : "This app uses Google's Gemini to generate answers. You'll need a free API key.";
-    }
-    if (label) label.textContent = isDeep ? 'DeepSeek API Key' : 'Gemini API Key';
-    geminiInput.placeholder = isDeep ? 'sk-…' : 'AIza…';
-    if (hint) {
-      hint.innerHTML = isDeep
-        ? 'Don\'t have one? Create a key at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">platform.deepseek.com/api_keys</a>. It\'s stored locally in <code>.env</code> — never sent anywhere except DeepSeek.'
-        : 'Don\'t have one? Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>. It\'s stored locally in <code>.env</code> — never sent anywhere except Google.';
-    }
-  }
-  llmProviderCards.forEach((card) => {
-    card.addEventListener('click', () => {
-      state.llmProvider = card.dataset.value;
-      applyProviderUI();
-    });
-  });
-  applyProviderUI();
-
-  function setKeyStatus(state_, text) {
-    keyStatus.className = `status-pill ${state_}`;
-    keyStatus.style.display = 'inline-flex';
-    const icon = keyStatus.querySelector('i');
-    const txt = keyStatus.querySelector('.text');
-    if (state_ === 'testing') {
-      icon.className = 'fas fa-circle-notch fa-spin';
-    } else if (state_ === 'success') {
-      icon.className = 'fas fa-check-circle';
-    } else if (state_ === 'error') {
-      icon.className = 'fas fa-circle-xmark';
-    } else {
-      icon.className = 'fas fa-circle-info';
-    }
-    txt.textContent = text;
-  }
-
-  geminiInput.addEventListener('input', () => {
-    state.geminiKey = geminiInput.value.trim();
-    if (!state.geminiKey) {
-      keyStatus.style.display = 'none';
-    } else if (keyStatus.classList.contains('success')) {
-      // Keep success state — they had a valid key, may be editing
-    } else {
-      setKeyStatus('idle', 'Key entered');
-    }
-  });
-
-  toggleVis.addEventListener('click', () => {
-    const showing = geminiInput.type === 'text';
-    geminiInput.type = showing ? 'password' : 'text';
-    toggleVis.innerHTML = showing
-      ? '<i class="fas fa-eye"></i>'
-      : '<i class="fas fa-eye-slash"></i>';
-  });
-
-  // ── Wire up: Speech choices ───────────────────────────────────────
-  $$('#speechChoices .choice-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      const value = card.dataset.value;
-      state.speechProvider = value;
-      $$('#speechChoices .choice-card').forEach((c) => c.classList.remove('selected'));
-      card.classList.add('selected');
-      const azurePanel = $('#azurePanel');
-      azurePanel.style.display = value === 'azure' ? 'block' : 'none';
-      if (value !== 'azure') {
-        state.azureKey = '';
-        state.azureRegion = '';
-      }
-    });
-  });
-
-  $('#azureKey').addEventListener('input', (e) => { state.azureKey = e.target.value.trim(); });
-  $('#azureRegion').addEventListener('input', (e) => { state.azureRegion = e.target.value.trim(); });
-
-  // ── Wire up: Whisper screen ───────────────────────────────────────
-  const installLog = $('#installLog');
-  const detectCmd = $('#detectCmd');
-  const detectStatus = $('#detectStatus');
-  const installList = $('#installList');
-  const installCardTitle = $('#installCardTitle');
-
-  function appendLog(line) {
-    installLog.textContent += (installLog.textContent ? '\n' : '') + line;
-    installLog.scrollTop = installLog.scrollHeight;
-  }
-
-  function setDetectStatus(state_, text) {
-    detectStatus.className = `status-pill ${state_}`;
-    const icon = detectStatus.querySelector('i');
-    if (state_ === 'success') icon.className = 'fas fa-check-circle';
-    else if (state_ === 'error') icon.className = 'fas fa-circle-xmark';
-    else if (state_ === 'idle') icon.className = 'fas fa-circle-info';
-    else icon.className = 'fas fa-circle-notch fa-spin';
-    detectStatus.querySelector('.text').textContent = text;
-  }
-
-  async function runWhisperDetect() {
-    detectCmd.textContent = 'scanning…';
-    setDetectStatus('testing', 'Probing');
+  async function refresh(initial = false) {
+    const id = ++refreshId, currentEpoch = epoch;
     try {
-      const r = await window.electronAPI.detectWhisper();
-      if (r.found) {
-        state.whisperDetected = true;
-        state.whisperCmd = r.command;
-        detectCmd.textContent = r.command;
-        setDetectStatus('success', `Found v${r.version || '?'}`);
-        appendLog(`✓ Detected Whisper CLI: ${r.command}`);
-      } else {
-        detectCmd.textContent = 'not found';
-        setDetectStatus('error', 'Not installed');
-        appendLog('✗ No Whisper CLI detected on PATH or in known venvs');
+      let next = checked(await api.getSetupState());
+      if (id !== refreshId || currentEpoch !== epoch) return;
+      const nextContext = JSON.stringify([next.aiMode, next.managed?.configured, next.managed?.authenticated, next.managed?.account?.subject]);
+      if (context && nextContext !== context && busy !== 'auth') {
+        epoch++; busy = null; clearPreview(); answer = null;
+        status('Your account or AI mode changed. Review your question before continuing.');
       }
-    } catch (e) {
-      setDetectStatus('error', 'Probe failed');
-      appendLog(`! Detection error: ${e.message || e}`);
-    }
+      context = nextContext;
+      if (initial) {
+        if (next.busy || next.hasPreview) { checked(await api.cancelSetup()); next = checked(await api.getSetupState()); }
+        if (next.aiMode === 'direct') {
+          try {
+            const setup = checked(await api.getFirstRunStatus());
+            preferredProvider = ['gemini', 'deepseek'].includes(setup.llmProvider) ? setup.llmProvider : null;
+            if (preferredProvider === 'gemini' && !setup.geminiConfigured && setup.deepseekConfigured) preferredProvider = 'deepseek';
+            if (preferredProvider === 'deepseek' && !setup.deepseekConfigured && setup.geminiConfigured) preferredProvider = 'gemini';
+          } catch (_) { /* The provider selector remains usable. */ }
+        }
+        if (id !== refreshId || currentEpoch !== epoch) return;
+        state = next;
+        $('question').value = next.draft || '';
+        $('inputMode').value = next.inputMode || 'text';
+        status(next.inputMode === 'screenshot' ? 'Draft restored. Capture a new preview.' : ['question', 'answer', 'success'].includes(next.step) ? 'Draft restored. Send when you’re ready.' : '');
+        initialized = true;
+      } else {
+        state = next;
+        if (preview && !next.hasPreview) { clearPreview(); status('The preview expired or was invalidated. Capture a new preview.'); }
+      }
+      providers(); render(initial);
+      if (initial && usable() && $('inputMode').value === 'screenshot') await displays();
+    } catch (error) { status(message(error), true); $('recheck').disabled = false; $('accountPanel').hidden = false; $('signIn').hidden = true; }
   }
-
-  async function runWhisperInstall() {
-    const btn = document.getElementById('installWhisperBtn');
-    installLog.textContent = '';
-    setDetectStatus('testing', 'Installing');
-    appendLog('Starting install…');
-
-    // Lock the button while installing so the user can't double-click
-    // and spawn parallel installs. Change the label to "Installing…"
-    // with a spinner so they see real progress.
-    if (btn) {
-      btn.disabled = true;
-      btn.dataset.originalHtml = btn.dataset.originalHtml || btn.innerHTML;
-      btn.innerHTML = '<span class="spinner"></span> Installing…';
-    }
-
-    // Subscribe to streamed progress lines from the main process.
-    // `installWhisper()` only returns once install completes; live
-    // output comes through `onInstallProgress` events.
-    let progressHandler = null;
-    if (window.electronAPI && window.electronAPI.onInstallProgress) {
-      progressHandler = (line) => appendLog(line);
-      window.electronAPI.onInstallProgress(progressHandler);
-    }
-
+  async function run(kind, action) {
+    if (busy) return;
+    busy = kind; const token = ++epoch; refreshId++; render();
+    try { await action(() => token === epoch); }
+    catch (error) { if (token === epoch) status(message(error), true); }
+    finally { if (token === epoch) { busy = null; render(); } }
+  }
+  async function displays() {
+    return run('displays', async current => {
+      const result = checked(await api.listDisplays());
+      if (!current()) return;
+      layout = result;
+      const previous = $('display').value;
+      $('display').replaceChildren(new Option('Choose a display', ''));
+      for (const display of result.displays) $('display').add(new Option(`${display.label || 'Display ' + display.id} · ${display.bounds.width} × ${display.bounds.height}`, String(display.id)));
+      if (result.displays.some(display => String(display.id) === previous)) $('display').value = previous;
+    });
+  }
+  async function capture() {
+    const display = layout?.displays.find(item => String(item.id) === $('display').value);
+    if (!display) { status('Choose a display first.', true); return; }
+    return run('capture', async current => {
+      clearPreview(); render(); status('Capturing the selected display…');
+      await save({ step: 'capture' }); if (!current() || saveError) return;
+      const result = checked(await api.captureSetupPreview({ displayId: display.id, layoutRevision: layout.layoutRevision,
+        area: { x: 0, y: 0, width: display.bounds.width, height: display.bounds.height }, areaCoordinateSpace: 'display-dip' }));
+      if (!current()) return;
+      preview = result; $('previewImage').src = result.dataUrl;
+      await save({ step: 'preview' }); if (!current() || saveError) return;
+      status('Review your preview. Nothing has been sent yet.');
+    });
+  }
+  $('signIn').addEventListener('click', () => run('auth', async current => {
+    status('Waiting for sign-in in your browser…');
+    await save({ step: 'account' }); if (!current() || saveError) return;
+    checked(await api.signIn()); if (!current()) return;
+    busy = null; await refresh(); status('Signed in. Ask your first question.'); $('heading').focus();
+  }));
+  async function cancel(auth = false) {
+    const wasSubmitting = busy === 'submit';
+    epoch++; refreshId++; busy = 'cancel'; clearPreview(); answer = null; render();
     try {
-      const r = await window.electronAPI.installWhisper();
-      if (r.ok) {
-        state.whisperDetected = true;
-        state.whisperCmd = r.command;
-        detectCmd.textContent = r.command;
-        setDetectStatus('success', 'Installed');
-        appendLog(`\n✓ ${r.message}`);
-        if (btn) {
-          // Keep button disabled — install is done. Show a checkmark
-          // so the user sees the final state at a glance.
-          btn.innerHTML = '<i class="fas fa-check-circle"></i> Installed';
-          btn.classList.remove('primary');
-          btn.classList.add('success');
-        }
-      } else {
-        setDetectStatus('error', 'Install failed');
-        appendLog(`\n✗ ${r.message}`);
-        // Restore the button so the user can retry.
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = btn.dataset.originalHtml || '<i class="fas fa-download"></i> Install Whisper now';
-        }
-      }
-    } catch (e) {
-      setDetectStatus('error', 'Install error');
-      appendLog(`\n! ${e.message || e}`);
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = btn.dataset.originalHtml || '<i class="fas fa-download"></i> Install Whisper now';
-      }
-    } finally {
-      if (progressHandler && window.electronAPI.removeAllListeners) {
-        try { window.electronAPI.removeAllListeners('install-progress'); } catch (_) { /* ignore */ }
-      }
-    }
+      checked(await (auth ? api.signOut() : api.cancelSetup()));
+      busy = null; await refresh();
+      status(auth ? 'Sign-in cancelled. You can try again.' : wasSubmitting ? 'Cancelled. Accepted requests may still count toward your allowance.' : 'Cancelled. No question was sent by this action.');
+    } catch (error) { status(`Cancellation could not be confirmed: ${message(error)}`, true); }
+    finally { busy = null; render(); $('heading').focus(); }
   }
-
-  // Whisper screen logic
-  let whisperInitialized = false;
-  function enterWhisperScreen() {
-    if (whisperInitialized) return;
-    whisperInitialized = true;
-    const hints = {
-      win32: {
-        title: "We'll create a project-local venv and install openai-whisper",
-        steps: [
-          'Python 3.10+ must be on PATH (download from python.org if missing).',
-          'A new <code>.venv-whisper\\</code> folder will be created in the app directory.',
-          'Whisper will be installed into that venv (pip download, no admin rights needed).',
-          'First transcription downloads the <code>small</code> model (~461 MB).',
-        ],
-      },
-      darwin: {
-        title: "We'll create a project-local venv and install openai-whisper",
-        steps: [
-          'Uses your existing Python 3 (install via Homebrew if missing).',
-          'A new <code>.venv-whisper/</code> folder is created in the app data directory.',
-          'Whisper installs into that venv — no <code>sudo</code> required.',
-          'First transcription downloads the <code>small</code> model (~461 MB).',
-        ],
-      },
-      other: {
-        title: "We'll create a project-local venv and install openai-whisper",
-        steps: [
-          'Uses your system Python 3 (needs <code>python3-venv</code> on Debian/Ubuntu).',
-          'A new <code>.venv-whisper/</code> folder is created in the app data directory.',
-          'Whisper installs into that venv — avoids the externally-managed-environment error.',
-          'First transcription downloads the <code>small</code> model (~461 MB).',
-        ],
-      },
-    };
-    const plat = navigator.platform.toLowerCase().includes('win')
-      ? 'win32'
-      : navigator.platform.toLowerCase().includes('mac')
-        ? 'darwin'
-        : 'other';
-    const h = hints[plat];
-    installCardTitle.textContent = h.title;
-    installList.innerHTML = h.steps.map((s) => `<li>${s}</li>`).join('');
-    runWhisperDetect();
-  }
-
-  // ── Wire up: Model Download screen ───────────────────────────────
-  const modelDownloadLog = $('#modelDownloadLog');
-  const modelDownloadChoices = $('#modelDownloadChoices');
-
-  function appendModelLog(line) {
-    modelDownloadLog.textContent += (modelDownloadLog.textContent ? '\n' : '') + line;
-    modelDownloadLog.scrollTop = modelDownloadLog.scrollHeight;
-  }
-
-  let modelDownloadInitialized = false;
-  function enterModelDownloadScreen() {
-    if (!modelDownloadInitialized) {
-      modelDownloadInitialized = true;
-
-      // Set up choice card click handlers once
-      $$('#modelDownloadChoices .choice-card').forEach((card) => {
-        card.addEventListener('click', () => {
-          const value = card.dataset.value;
-          state.modelDownloadChoice = value;
-          $$('#modelDownloadChoices .choice-card').forEach((c) => c.classList.remove('selected'));
-          card.classList.add('selected');
-          
-          if (value === 'now') {
-            // Start downloading the model immediately
-            startModelDownload();
-          } else {
-            nextBtn.disabled = false;
-          }
-        });
-      });
-    }
-
-    // Restore selection state when navigating back
-    $$('#modelDownloadChoices .choice-card').forEach((card) => {
-      card.classList.toggle('selected', card.dataset.value === state.modelDownloadChoice);
+  $('cancelAuth').addEventListener('click', () => cancel(true));
+  $('cancelWork').addEventListener('click', () => cancel());
+  $('recheck').addEventListener('click', () => refresh(!initialized));
+  $('inputMode').addEventListener('change', async () => {
+    const token = epoch;
+    clearPreview(); status(''); await save({ step: 'question' });
+    if (token !== epoch || saveError) return;
+    render();
+    if ($('inputMode').value === 'screenshot') await displays();
+  });
+  $('question').addEventListener('input', () => { $('consent').checked = false; save({ step: 'question' }); controls(); });
+  $('sample').addEventListener('click', async () => {
+    const token = epoch;
+    clearPreview(); $('inputMode').value = 'text'; $('question').value = 'Explain the difference between a list and a set with a simple example.';
+    await save({ step: 'question' }); if (token !== epoch || saveError) return;
+    render(); $('question').focus();
+  });
+  $('provider').addEventListener('change', () => { $('consent').checked = false; controls(); });
+  $('consent').addEventListener('change', controls);
+  $('display').addEventListener('change', () => { clearPreview(); render(); });
+  $('refreshDisplays').addEventListener('click', () => { clearPreview(); render(); displays(); });
+  $('capture').addEventListener('click', capture);
+  $('recapture').addEventListener('click', capture);
+  $('discard').addEventListener('click', async () => {
+    await cancel(); const token = epoch;
+    await save({ step: 'question' }); if (token !== epoch || saveError) return;
+    status('Preview discarded.'); $('capture').focus();
+  });
+  $('screenSettings').addEventListener('click', () => run('settings', async () => { checked(await api.openPermissionSettings('screen')); status('Return here after changing screen access, then capture again.'); }));
+  $('submit').addEventListener('click', () => {
+    if ($('submit').disabled) return;
+    run('submit', async current => {
+      status('Waiting for an answer… You can cancel this request.');
+      await save({ step: 'question' }); if (!current() || saveError) return;
+      const input = { text: $('question').value, provider: $('provider').value, consent: $('consent').checked };
+      if ($('inputMode').value === 'screenshot' && preview) input.previewId = preview.id;
+      const result = checked(await api.submitSetupQuestion(input)); if (!current()) return;
+      if (!result.text?.trim()) throw new Error('No answer was returned. You can explicitly try again.');
+      answer = result.text; $('answerText').textContent = answer;
+      $('readiness').textContent = input.previewId ? 'This screenshot question succeeded. Microphone access has not been tested.' : 'Your text question succeeded. Screen capture and microphone access have not been tested.';
+      clearPreview(); await save({ step: 'success' }); if (!current() || saveError) return;
+      status('Answer received. You can finish setup.'); render(); $('answerHeading').focus();
     });
-
-    // Re-enable continue button if a choice has been made and not actively downloading
-    if (state.modelDownloadChoice && !state.modelDownloading) {
-      nextBtn.disabled = false;
-    }
-  }
-
-  async function startModelDownload() {
-    state.modelDownloading = true;
-    nextBtn.disabled = true;
-    nextBtn.innerHTML = '<span class="spinner"></span> Downloading…';
-
-    appendModelLog('Starting model download…');
-
-    let progressHandler = null;
-    if (window.electronAPI && window.electronAPI.onInstallProgress) {
-      progressHandler = (line) => appendModelLog(line);
-      window.electronAPI.onInstallProgress(progressHandler);
-    }
-
+  });
+  $('finish').addEventListener('click', () => run('finish', async () => { checked(await api.completeFirstRun()); checked(await api.closeOnboarding()); }));
+  $('later').addEventListener('click', async () => {
+    if (busy === 'close') return;
+    epoch++; refreshId++; busy = 'close'; render();
+    try { await saves; checked(await api.closeOnboarding()); }
+    catch (error) { status(message(error), true); busy = null; render(); }
+  });
+  $('minimize').addEventListener('click', async () => {
+    try { checked(await api.minimizeOnboarding()); }
+    catch (error) { status(message(error), true); }
+  });
+  $('quit').addEventListener('click', async () => {
+    if (busy === 'close') return;
+    epoch++; refreshId++; busy = 'close'; render();
     try {
-      const r = await window.electronAPI.downloadWhisperModel('small');
-      state.modelDownloading = false;
-      if (r.ok) {
-        state.modelDownloaded = true;
-        appendModelLog(`\n✓ Model downloaded successfully: ${r.path}`);
-        nextBtn.disabled = false;
-        nextBtn.classList.remove('primary');
-        nextBtn.classList.add('success');
-        nextBtn.innerHTML = '<i class="fas fa-check-circle"></i> Continue';
-      } else {
-        appendModelLog(`\n✗ Download failed: ${r.message}`);
-        // Let user continue anyway; they'll download on first use
-        nextBtn.disabled = false;
-      }
-    } catch (e) {
-      state.modelDownloading = false;
-      appendModelLog(`\n! Error: ${e.message || e}`);
-      nextBtn.disabled = false;
-    } finally {
-      if (progressHandler && window.electronAPI.removeAllListeners) {
-        try { window.electronAPI.removeAllListeners('install-progress'); } catch (_) { /* ignore */ }
-      }
-    }
-  }
-
-  // ── Wire up: Finish screen ────────────────────────────────────────
-  function populateSummary() {
-    const rows = [];
-    rows.push({
-      label: `<i class="fas fa-key"></i> ${state.llmProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} API`,
-      value: (state.geminiKey || state.geminiConfigured) ? 'Configured' : 'Missing',
-      cls: (state.geminiKey || state.geminiConfigured) ? 'ok' : 'skip',
-    });
-    if (state.speechProvider === 'whisper') {
-      rows.push({
-        label: '<i class="fas fa-microphone"></i> Speech',
-        value: state.whisperDetected ? `Whisper (${state.whisperCmd || 'cli'})` : 'Whisper (not installed)',
-        cls: state.whisperDetected ? 'ok' : 'skip',
-      });
-    } else if (state.speechProvider === 'azure') {
-      rows.push({
-        label: '<i class="fas fa-cloud"></i> Speech',
-        value: 'Azure',
-        cls: 'ok',
-      });
-    } else {
-      rows.push({
-        label: '<i class="fas fa-microphone"></i> Speech',
-        value: 'Skipped (configure later)',
-        cls: 'skip',
-      });
-    }
-    rows.push({
-      label: '<i class="fas fa-file-lines"></i> Config saved to',
-      value: '.env',
-      cls: 'ok',
-    });
-    $('#summaryList').innerHTML = rows
-      .map((r) => `
-        <div class="summary-row">
-          <div class="label">${r.label}</div>
-          <div class="value ${r.cls}">${r.value}</div>
-        </div>
-      `)
-      .join('');
-  }
-
-  const starBtn = $('#starBtn');
-  if (starBtn) {
-    starBtn.addEventListener('click', () => {
-      // Finish setup — same as completing the wizard
-      const nextBtn = $('#nextBtn');
-      if (nextBtn) nextBtn.click();
-    });
-  }
-
-  // ── Wire up: Hero CTA (welcome screen) ────────────────────────────
-  // The big inline "Get Started" button on the welcome screen reuses
-  // the existing nav-button handler so all validation, persistence,
-  // and navigation logic stays in one place.
-  const heroCtaBtn = $('#heroCtaBtn');
-  if (heroCtaBtn) {
-    heroCtaBtn.addEventListener('click', () => nextBtn.click());
-  }
-
-  // ── Wire up: nav buttons ──────────────────────────────────────────
-  nextBtn.addEventListener('click', async () => {
-    const name = currentScreenName();
-    if (!canAdvance()) {
-      // Lightly nudge the user
-      if (name === 'apikey') setKeyStatus('error', `Enter a ${state.llmProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} API key`);
-      return;
-    }
-
-    // Persist settings on speech selection (Azure path), since we
-    // already saved geminiKey on test; do it here too if user skipped
-    // testing.
-    if (name === 'apikey' && state.geminiKey && window.electronAPI) {
-      try {
-        const payload = { llmProvider: state.llmProvider };
-        if (state.llmProvider === 'deepseek') {
-          payload.deepseekKey = state.geminiKey;
-        } else {
-          payload.geminiKey = state.geminiKey;
-        }
-        await window.electronAPI.saveSettings(payload);
-      } catch (_) { /* surfaced elsewhere */ }
-    }
-    if (name === 'speech' && window.electronAPI) {
-      try {
-        const payload = {
-          speechProvider:
-            state.speechProvider === 'skip' ? 'whisper' : state.speechProvider,
-        };
-        if (state.speechProvider === 'azure') {
-          payload.azureKey = state.azureKey;
-          payload.azureRegion = state.azureRegion;
-        }
-        if (state.speechProvider === 'whisper' && state.whisperCmd) {
-          payload.whisperCommand = quoteCommandIfNeeded(state.whisperCmd);
-        }
-        await window.electronAPI.saveSettings(payload);
-      } catch (_) { /* surfaced elsewhere */ }
-    }
-
-    // Whisper screen: kick off detection on entry
-    if (name === 'speech' && state.speechProvider === 'whisper') {
-      // (deferred: will run via enterWhisperScreen)
-    }
-
-    // Whisper screen "Continue" — if user wants to skip install, mark and proceed
-    if (name === 'whisper') {
-      // Persist whatever whisper command we found (could be empty if skipped)
-      if (window.electronAPI && state.whisperCmd) {
-        try {
-          await window.electronAPI.saveSettings({ whisperCommand: quoteCommandIfNeeded(state.whisperCmd) });
-        } catch (_) { /* ignore */ }
-      }
-    }
-
-    // Model download screen: persist choice
-    if (name === 'model-download') {
-      if (window.electronAPI && state.modelDownloadChoice) {
-        try {
-          await window.electronAPI.saveSettings({ whisperModelDownload: state.modelDownloadChoice });
-        } catch (_) { /* ignore */ }
-      }
-    }
-
-    // Finish: close onboarding
-    if (name === 'finish') {
-      try {
-        await window.electronAPI.completeFirstRun();
-      } catch (_) { /* ignore */ }
-      try {
-        await window.electronAPI.closeOnboarding();
-      } catch (_) { /* ignore */ }
-      state.finished = true;
-      return;
-    }
-
-    // Move forward, with whisper-screen insertion handled by order logic
-    const order = computeScreenOrder();
-    const idx = order.indexOf(name);
-    const nextName = order[idx + 1];
-    if (!nextName) return;
-
-    // Compute new step index
-    state.step = orderScreenToStep(nextName);
-    showScreen(nextName);
-    if (nextName === 'whisper') enterWhisperScreen();
-    if (nextName === 'model-download') enterModelDownloadScreen();
-    if (nextName === 'finish') populateSummary();
-
-    // Re-render stepper with new total
-    refreshStepper();
+      await saves;
+      checked(await api.cancelSetup());
+      api.quit();
+    } catch (error) { status(message(error), true); busy = null; render(); }
   });
-
-  backBtn.addEventListener('click', () => {
-    const name = currentScreenName();
-    const order = computeScreenOrder();
-    const idx = order.indexOf(name);
-    const prevName = order[idx - 1];
-    if (!prevName) return;
-    state.step = orderScreenToStep(prevName);
-    showScreen(prevName);
-  });
-
-  // Skip button: only shown on the whisper screen, lets user skip install
-  // even if the CLI isn't present (they can configure later).
-  function refreshSkipVisibility() {
-    skipBtn.style.display = currentScreenName() === 'whisper' && !state.whisperDetected
-      ? 'inline-flex'
-      : 'none';
-  }
-
-  // Hook into showScreen to keep skip visibility in sync
-  const _origShowScreen = showScreen;
-  showScreen = function (name) {
-    _origShowScreen(name);
-    refreshSkipVisibility();
-    refreshStepper();
-  };
-
-  skipBtn.addEventListener('click', () => {
-    state.skippingWhisper = true;
-    // Jump to finish without installing
-    const order = computeScreenOrder();
-    const finishName = order[order.length - 1];
-    state.step = orderScreenToStep(finishName);
-    showScreen(finishName);
-    populateSummary();
-  });
-
-  // ── Manual install button (added dynamically) ─────────────────────
-  function addManualInstallButton() {
-    if (document.getElementById('installWhisperBtn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'installWhisperBtn';
-    btn.type = 'button';
-    btn.className = 'btn primary';
-    btn.style.marginTop = '12px';
-    btn.innerHTML = '<i class="fas fa-download"></i> Install Whisper now';
-    btn.addEventListener('click', runWhisperInstall);
-    document.querySelector('[data-screen="whisper"]').appendChild(btn);
-  }
-
-  // Show install button after detection runs and finds nothing
-  const _origDetect = runWhisperDetect;
-  runWhisperDetect = async function () {
-    await _origDetect();
-    if (!state.whisperDetected) addManualInstallButton();
-  };
-
-  // ── Boot ──────────────────────────────────────────────────────────
-  showScreen('welcome');
-
-  // Pre-populate API key info from existing .env (if any) so users with
-  // a partial config don't have to retype.
-  if (window.electronAPI && window.electronAPI.getFirstRunStatus) {
-    window.electronAPI.getFirstRunStatus().then((s) => {
-      if (s && (s.geminiConfigured || s.deepseekConfigured)) {
-        // We can't read the key back (settings returns empty for keys),
-        // but we can mark status as success if the env file already has one
-        // and let the user advance without retyping it.
-        state.geminiConfigured = true;
-        if (s.llmProvider === 'deepseek' || s.llmProvider === 'gemini') {
-          state.llmProvider = s.llmProvider;
-          applyProviderUI();
-        }
-        setKeyStatus('success', 'Already configured — click Continue');
-        geminiInput.placeholder = '•••••••••••••••• (already set)';
-      }
-    }).catch(() => {});
-  }
-})();
-
-// Keystroke-capture target reporting: the wizard is a focusable:false panel,
-// so typing reaches it only through capture mode. Tell the main process when
-// the user clicks into an input so keystrokes route to this window.
-document.addEventListener('focusin', (e) => {
-  const target = e.target;
-  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-    if (window.api && window.api.send) window.api.send('input-target-focused');
-  }
+  $('settings').addEventListener('click', () => run('settings', async () => { await saves; checked(await api.showSettings()); }));
+  const onFocus = () => { if (initialized && !['cancel', 'close'].includes(busy)) refresh(); };
+  window.addEventListener('focus', onFocus);
+  const unsubscribe = api?.onManagedStatus?.(() => { if (initialized && !['auth', 'cancel', 'close'].includes(busy)) refresh(); });
+  window.addEventListener('beforeunload', () => { epoch++; unsubscribe?.(); window.removeEventListener('focus', onFocus); });
+  document.addEventListener('focusin', event => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) window.api?.send('input-target-focused'); });
+  if (api) refresh(true); else { status('The desktop connection is unavailable. Reopen setup from the app.', true); $('wizard').setAttribute('aria-busy', 'false'); }
 });

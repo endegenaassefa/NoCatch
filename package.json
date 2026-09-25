@@ -4,22 +4,21 @@
   "description": "Personal desktop reading assistant",
   "main": "main.js",
   "scripts": {
-    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
-    "dev": "env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox --disable-gpu",
+    "start": "node scripts/start.js",
+    "dev": "node scripts/start.js --no-sandbox --disable-gpu",
+    "test:packaging": "node --test scripts/test-packaging.js scripts/test-managed-config-packaging.js",
     "test-speech": "node scripts/test-speech.js",
-    "build": "electron-builder",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux",
-    "build:all": "electron-builder --mac --win --linux",
+    "build": "node scripts/build.js",
+    "build:mac": "node scripts/build.js mac",
+    "build:win": "node scripts/build.js win",
+    "build:linux": "node scripts/build.js linux",
+    "build:all": "node scripts/build.js all",
     "dist": "npm run build",
-    "pack": "electron-builder --dir",
-    "clean": "rm -rf dist/",
+    "pack": "node scripts/build.js --dir",
+    "clean": "node scripts/clean.js",
     "rebuild": "npm run clean && npm run build",
-    "release": "npm run clean && npm run build:all",
-    "postinstall": "electron-builder install-app-deps",
-    "prebuild": "bash scripts/build-capture-helper.sh",
-    "prebuild:mac": "bash scripts/build-capture-helper.sh"
+    "release": "node scripts/build.js --release",
+    "postinstall": "electron-builder install-app-deps"
   },
   "author": {
     "name": "screen-reader-util contributors"
@@ -38,28 +37,42 @@
     "winston-daily-rotate-file": "^4.7.1"
   },
   "devDependencies": {
-    "electron": "^29.1.0",
-    "electron-builder": "^24.13.3"
+    "electron": "44.4.4",
+    "electron-builder": "26.15.3",
+    "js-yaml": "4.3.2"
   },
   "build": {
     "appId": "com.screenreaderutil.app",
     "productName": "screen-reader-util",
+    "artifactName": "OpenCluely-${version}-${os}-${arch}.${ext}",
+    "beforePack": "scripts/before-pack.js",
+    "afterPack": "scripts/verify-package.js",
+    "publish": {
+      "provider": "github",
+      "owner": "rodriguezzfabricio",
+      "repo": "NoCatch",
+      "releaseType": "draft"
+    },
     "directories": {
       "output": "dist"
     },
     "files": [
-      "**/*",
-      "!dist/**/*",
-      "!*.md",
-      "!.git/**/*",
-      "!.env*",
-      "!.venv-whisper/**/*",
-      "!.whisper-models/**/*",
-      "!bin/**/*",
-      "!scripts/__pycache__/**/*",
-      "!**/*.pyc",
-      "!eng.traineddata",
-      "!resources/bin/**/*"
+      "main.js",
+      "preload.js",
+      "prompt-loader.js",
+      "speech-recognition.js",
+      "onboarding.js",
+      "managed-config.json",
+      "*.html",
+      "src/**/*",
+      "lib/**/*",
+      "assets/**/*",
+      "prompts/**/*",
+      "scripts/whisper_worker.py",
+      "env.example",
+      "LICENSE",
+      "!**/__pycache__/**/*",
+      "!**/*.pyc"
     ],
     "asarUnpack": [
       "assets/icons/**/*",
@@ -68,6 +81,7 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
+      "minimumSystemVersion": "13.0.0",
       "target": [
         {
           "target": "dmg",
@@ -85,32 +99,41 @@
         }
       ],
       "darkModeSupport": true,
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "binaries": [
+        "Contents/Resources/bin/keystroke-capture"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/bin/${arch}",
+          "to": "bin"
+        }
+      ],
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "screen-reader-util uses the microphone to transcribe your speech locally with Whisper.",
+        "NSMicrophoneUsageDescription": "screen-reader-util uses the microphone for local Whisper or Azure cloud transcription, according to your selected voice provider.",
         "NSCameraUsageDescription": "screen-reader-util does not record video; this entitlement is only present for media-capture compatibility.",
         "NSScreenCaptureUsageDescription": "screen-reader-util captures the screen to read on-screen content for AI assistance."
       }
     },
     "win": {
+      "extraResources": [{"from": ".depthengine/speech-runtime/windows-x64", "to": "speech-runtime/windows-x64", "filter": ["**/*"]}],
       "target": [
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         },
         {
           "target": "portable",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         }
-      ],
-      "sign": null
+      ]
     },
     "linux": {
       "target": [
@@ -159,7 +182,10 @@
       "perMachine": false,
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
-      "artifactName": "screen-reader-util-Setup-${version}.${ext}"
+      "artifactName": "OpenCluely-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "OpenCluely-Portable-${version}-${arch}.${ext}"
     },
     "dmg": {
       "title": "screen-reader-util",
@@ -168,12 +194,6 @@
         "width": 600,
         "height": 400
       }
-    },
-    "extraResources": [
-      {
-        "from": "resources/bin",
-        "to": "bin"
-      }
-    ]
+    }
   }
 }

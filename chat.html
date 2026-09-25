@@ -712,7 +712,7 @@
           <select class="skill-select" id="chatSkillSelect" title="Question type">
             <option value="dsa">DSA</option>
           </select>
-          <button class="icon-button" id="chatCaptureBtn" title="Take a picture — answer lands in this chat (⌘⇧Space)">
+          <button class="icon-button" id="chatCaptureBtn" title="Take a picture — answer lands in this chat (Ctrl/Cmd+Shift+S)">
             <span aria-hidden="true">📷</span>
           </button>
           <button class="icon-button" id="chatExamBtn" title="Arm exam mode — shield captures, answers land in this chat">
@@ -724,6 +724,7 @@
         </div>
       </div>
 
+      <div id="speechStatus" role="status" aria-live="polite" style="padding: 4px 16px; font-size: 12px; color: #a9b6cc; min-height: 24px;">Microphone idle</div>
       <div class="exam-banner" id="examModeBanner">
         🛡️ Exam mode armed — the shield captures and answers land in this chat. Mic, question types and typing keep working. Click 🛡️ or press ⌃⌥⇧E to restore.
       </div>
@@ -767,6 +768,7 @@
 
       const chatMessages = document.getElementById('chatMessages');
       const recordingIndicator = document.getElementById('recordingIndicator');
+      const speechStatus = document.getElementById('speechStatus');
       const messageInput = document.getElementById('messageInput');
       const sendButton = document.getElementById('sendButton');
       const micButton = document.getElementById('micButton');
@@ -790,6 +792,31 @@
       let listeningStartTime = null;
       let listeningTimer = null;
       let speechAvailable = false;
+      let thinkingTimer = null;
+      let chatGeneration = 0;
+      let requestSequence = 0;
+      const requestPrefix = `chat-ui-${crypto.randomUUID()}-`;
+      const pendingResponses = new Map();
+      const retiredRequests = new Set();
+
+      // Request ownership is established before invoking IPC, including capture
+      // work that has not started an LLM stream yet.
+      function beginRequest(id = `${requestPrefix}${++requestSequence}`) {
+        if (retiredRequests.has(id)) return null;
+        if (!pendingResponses.has(id)) {
+          pendingResponses.set(id, { id, generation: chatGeneration });
+        }
+        return pendingResponses.get(id);
+      }
+
+      function responseId(data) {
+        return data && (data.requestId || data.metadata?.requestId || data.messageId || data.metadata?.messageId);
+      }
+
+      function pendingResponse(data) {
+        const request = pendingResponses.get(responseId(data));
+        return request && request.generation === chatGeneration ? request : null;
+      }
 
       // Chat persistence and deduplication
       const CHAT_HISTORY_KEY = 'sru_chat_history_v1';
@@ -844,6 +871,10 @@
           const ok = confirm('Clear chat history?');
           if (!ok) return;
         }
+        chatGeneration++;
+        for (const request of pendingResponses.values()) finishPendingResponse(request);
+        hideThinkingIndicator();
+        recentResponseHashes.clear();
         chatHistory = [];
         saveHistory();
         // Clear DOM
@@ -879,10 +910,29 @@
       // Also capture generic LLM responses (from OCR/screenshot flows)
       if (whysperAPI && whysperAPI.onLlmResponse) {
         whysperAPI.onLlmResponse((event, data) => {
-          try { hideThinkingIndicator(); } catch (_) {}
+          const request = pendingResponse(data);
+          if (responseId(data) && !request) return;
+          if (request) finishPendingResponse(request);
           if (data && data.response) {
-            renderAssistantResponse(data.response);
+            renderAssistantResponse(data.response, responseId(data));
           }
+        });
+      }
+
+      if (whysperAPI && whysperAPI.onLlmError) {
+        whysperAPI.onLlmError((event, data) => {
+          showResponseError('Could not get an answer', data, pendingResponse(data));
+        });
+      }
+      if (whysperAPI && whysperAPI.onOcrError) {
+        whysperAPI.onOcrError((event, data) => {
+          showResponseError('Could not answer the screenshot', data, pendingResponse(data));
+        });
+      }
+
+      if (whysperAPI && whysperAPI.onChatRequestStarted) {
+        whysperAPI.onChatRequestStarted((event, data) => {
+          if (data && data.requestId) beginRequest(data.requestId);
         });
       }
 
@@ -1040,11 +1090,15 @@
       if (chatCaptureBtn) {
         chatCaptureBtn.addEventListener('click', async () => {
           if (!whysperAPI || !whysperAPI.takeScreenshot) return;
-          addMessage('📷 Taking a picture…', 'system', true);
+          const request = beginRequest();
+          request.captureStatus = addMessage('📷 Taking a picture…', 'system', true);
           try {
-            await whysperAPI.takeScreenshot();
+            const result = await whysperAPI.takeScreenshot(request.id);
+            if (result && result.success === false) {
+              showResponseError('Capture failed', result.error, request);
+            }
           } catch (e) {
-            addMessage('Capture failed: ' + e.message, 'error');
+            showResponseError('Capture failed', e, request);
           }
         });
       }
@@ -1098,6 +1152,7 @@
           chatHistory.push({ kind: 'message', type, text });
           saveHistory();
         }
+        return messageDiv;
       }
 
       // Markdown formatter using markdown.js library
@@ -1127,11 +1182,29 @@
         }
       }
 
+      // Own the delay so completion, errors and clearing can cancel it.
+      function scheduleThinkingIndicator(request = null) {
+        hideThinkingIndicator(request);
+        const timer = setTimeout(() => {
+          if (request) {
+            request.thinkingTimer = null;
+            if (pendingResponses.get(request.id) !== request || request.generation !== chatGeneration) return;
+          } else {
+            thinkingTimer = null;
+          }
+          showThinkingIndicator(request);
+        }, 300);
+        if (request) request.thinkingTimer = timer;
+        else thinkingTimer = timer;
+      }
+
       // Show thinking indicator
-      function showThinkingIndicator() {
+      function showThinkingIndicator(request = null) {
+        if (request ? request.thinkingIndicator : document.getElementById('thinking-indicator')) return;
         const thinkingDiv = document.createElement('div');
         thinkingDiv.className = 'message assistant thinking';
-        thinkingDiv.id = 'thinking-indicator';
+        thinkingDiv.id = request ? `thinking-${request.id}` : 'thinking-indicator';
+        if (request) request.thinkingIndicator = thinkingDiv;
 
         const timeDiv = document.createElement('div');
         timeDiv.className = 'message-time';
@@ -1148,12 +1221,39 @@
         chatMessages.scrollTop = chatMessages.scrollHeight;
       }
 
-      // Hide thinking indicator
-      function hideThinkingIndicator() {
+      // Hide the indicator and cancel any display that is still scheduled.
+      function hideThinkingIndicator(request = null) {
+        if (request) {
+          clearTimeout(request.thinkingTimer);
+          request.thinkingTimer = null;
+          if (request.thinkingIndicator) request.thinkingIndicator.remove();
+          request.thinkingIndicator = null;
+          return;
+        }
+        clearTimeout(thinkingTimer);
+        thinkingTimer = null;
         const thinkingIndicator = document.getElementById('thinking-indicator');
         if (thinkingIndicator) {
           thinkingIndicator.remove();
         }
+      }
+
+      function finishPendingResponse(request) {
+        if (!request) return;
+        hideThinkingIndicator(request);
+        if (request.streamingBubble) request.streamingBubble.remove();
+        if (request.captureStatus) request.captureStatus.remove();
+        request.streamingBubble = null;
+        request.captureStatus = null;
+        pendingResponses.delete(request.id);
+        retiredRequests.add(request.id);
+      }
+
+      function showResponseError(context, error, request) {
+        if (!request || request.generation !== chatGeneration || pendingResponses.get(request.id) !== request) return;
+        finishPendingResponse(request);
+        const detail = typeof error === 'string' ? error : error && (error.error || error.message);
+        addMessage(`${context}${detail ? ': ' + detail : '.'} Please try again.`, 'error');
       }
 
       // Minimalist Listening Animation Functions
@@ -1204,7 +1304,9 @@
 
       // Recording Event Handlers
       function handleRecordingStarted() {
+        if (isRecording) return;
         isRecording = true;
+        if (speechStatus) speechStatus.textContent = 'Listening…';
 
         if (recordingIndicator) {
           recordingIndicator.style.display = 'block';
@@ -1217,6 +1319,7 @@
       }
 
       function handleRecordingStopped() {
+        if (!isRecording) return;
         isRecording = false;
 
         if (recordingIndicator) {
@@ -1227,23 +1330,16 @@
         }
 
         hideListeningAnimation();
-        addMessage('Stopped Listening', 'system');
+        if (speechStatus) speechStatus.textContent = 'Microphone stopped';
       }
 
       function handleTranscription(text) {
         if (text && typeof text === 'string' && text.trim().length > 0) {
-          // Hide listening animation first
-          hideListeningAnimation();
+          // VAD can deliver a transcript while capture is still listening.
+          if (!isRecording) hideListeningAnimation();
 
-          // Show transcribed text with slight delay for smooth transition
-          setTimeout(() => {
-            addMessage(text.trim(), 'transcription');
-            
-            // Show thinking indicator after transcription
-            setTimeout(() => {
-              showThinkingIndicator();
-            }, 300);
-          }, 200);
+          addMessage(text.trim(), 'transcription');
+          scheduleThinkingIndicator();
         } else {
           console.warn('Invalid or empty transcription text - ignoring:', text);
         }
@@ -1311,11 +1407,12 @@
           saveHistory();
         }
       }
-      function renderAssistantResponse(response) {
+      function renderAssistantResponse(response, requestId = null) {
         if (!response || typeof response !== 'string') return;
-        // Deduplication: avoid processing the same response twice
+        // Separate requests can legitimately produce identical answers.
+        // Legacy events without an ID retain content-based deduplication.
         const normalized = response.trim();
-        const h = hashString(normalized);
+        const h = requestId ? `request:${requestId}` : `content:${hashString(normalized)}`;
         if (recentResponseHashes.has(h)) return;
         recentResponseHashes.add(h);
         if (recentResponseHashes.size > RECENT_HASH_LIMIT) {
@@ -1354,13 +1451,9 @@
         // Listen for speech status
         whysperAPI.onSpeechStatus((event, data) => {
           if (data && data.status) {
-            addMessage(data.status, 'system');
-
-            if (data.status.includes('started') || data.status.includes('Recording')) {
-              handleRecordingStarted();
-            } else if (data.status.includes('stopped') || data.status.includes('ended')) {
-              handleRecordingStopped();
-            }
+            // Progress text is display-only. Explicit lifecycle events own the
+            // indicator; e.g. "Recording stopped" must never restart it.
+            if (speechStatus) speechStatus.textContent = data.status;
           }
         });
 
@@ -1369,6 +1462,7 @@
           if (data && data.error) {
             addMessage(`Error in recognizing speech`, 'error');
             handleRecordingStopped();
+            if (speechStatus) speechStatus.textContent = 'Speech failed. Check microphone access and retry.';
           }
         });
 
@@ -1388,13 +1482,16 @@
         // Streaming answer lifecycle: a plain-text bubble grows as token
         // chunks arrive (transcription-llm-response-chunk), then the final
         // event replaces it with the fully formatted markdown render.
-        let streamingBubble = null;
-
-        function beginStreamingResponse(messageId) {
-          try { hideThinkingIndicator(); } catch (_) {}
-          // Remove any leftover streaming bubble.
-          if (streamingBubble) streamingBubble.remove();
-          streamingBubble = document.createElement('div');
+        function beginStreamingResponse(data) {
+          const request = beginRequest(responseId(data));
+          if (!request || request.streamingBubble) return;
+          // Voice starts carry messageId; retire only their pre-stream indicator.
+          if (!data.requestId) hideThinkingIndicator();
+          if (request.captureStatus) request.captureStatus.remove();
+          request.captureStatus = null;
+          const streamingBubble = document.createElement('div');
+          request.streamingBubble = streamingBubble;
+          request.messageId = data.messageId;
           streamingBubble.className = 'message assistant';
           const timeDiv = document.createElement('div');
           timeDiv.className = 'message-time';
@@ -1406,10 +1503,15 @@
           streamingBubble.appendChild(textDiv);
           chatMessages.appendChild(streamingBubble);
           chatMessages.scrollTop = chatMessages.scrollHeight;
+          scheduleThinkingIndicator(request);
         }
 
-        function appendStreamingChunk(messageId, delta) {
-          if (!streamingBubble) return;
+        function appendStreamingChunk(data) {
+          const request = pendingResponse(data);
+          const streamingBubble = request && request.streamingBubble;
+          const delta = data.delta || '';
+          if (!streamingBubble || !delta || request.messageId !== data.messageId) return;
+          hideThinkingIndicator(request);
           const textDiv = streamingBubble.querySelector('.message-text');
           if (!textDiv) return;
           textDiv.dataset.streamingText = (textDiv.dataset.streamingText || '') + (delta || '');
@@ -1417,33 +1519,24 @@
           chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        function finalizeStreamingResponse(messageId) {
-          // The final response renders via renderAssistantResponse below;
-          // the streaming bubble is only removed — it must not leave a
-          // duplicate unformatted copy in the transcript.
-          if (streamingBubble) {
-            streamingBubble.remove();
-            streamingBubble = null;
-          }
-        }
-
-        // Replace transcription LLM handler to store text + snippets
+        // Replace the temporary stream with one formatted final response.
         whysperAPI.onTranscriptionLlmResponse((event, data) => {
+          const request = pendingResponse(data);
+          if (responseId(data) && !request) return;
+          if (request) finishPendingResponse(request);
           if (data && data.response) {
-            try { hideThinkingIndicator(); } catch (_) {}
-            finalizeStreamingResponse(data.messageId);
-            renderAssistantResponse(data.response);
+            renderAssistantResponse(data.response, responseId(data));
           }
         });
 
         if (whysperAPI.onTranscriptionLlmResponseStart) {
           whysperAPI.onTranscriptionLlmResponseStart((event, data) => {
-            if (data && data.messageId) beginStreamingResponse(data.messageId);
+            if (data && data.messageId) beginStreamingResponse(data);
           });
         }
         if (whysperAPI.onTranscriptionLlmResponseChunk) {
           whysperAPI.onTranscriptionLlmResponseChunk((event, data) => {
-            if (data && data.messageId) appendStreamingChunk(data.messageId, data.delta || '');
+            if (data && data.messageId) appendStreamingChunk(data);
           });
         }
 
@@ -1572,14 +1665,8 @@
           }
 
           try {
-            if (isRecording) {
-              if (whysperAPI) {
-                const result = await whysperAPI.stopSpeechRecognition();
-              }
-            } else {
-              if (whysperAPI) {
-                const result = await whysperAPI.startSpeechRecognition();
-              }
+            if (whysperAPI) {
+              await whysperAPI.toggleSpeechRecognition();
             }
           } catch (error) {
             addMessage("Error in recognizing speech", 'error');
@@ -1587,28 +1674,26 @@
         });
       }
 
-      if (sendButton) {
-        sendButton.addEventListener('click', async () => {
-          const text = messageInput.value.trim();
-          if (text) {
-            addMessage(text, 'user');
-            messageInput.value = '';
-            
-            // Show thinking indicator after user message
-            setTimeout(() => {
-              showThinkingIndicator();
-            }, 300);
-            
-            // Send to main process for session memory storage and LLM processing
-            try {
-              if (whysperAPI && whysperAPI.sendChatMessage) {
-                await whysperAPI.sendChatMessage(text);
-              }
-            } catch (error) {
-              console.error('Failed to send chat message to main process:', error);
-            }
+      async function sendMessage() {
+        const text = messageInput.value.trim();
+        if (!text) return;
+        const request = beginRequest();
+        addMessage(text, 'user');
+        messageInput.value = '';
+        autoGrow(messageInput);
+        scheduleThinkingIndicator(request);
+        try {
+          if (!whysperAPI || !whysperAPI.sendChatMessage) {
+            throw new Error('Chat is unavailable');
           }
-        });
+          await whysperAPI.sendChatMessage(text, request.id);
+        } catch (error) {
+          showResponseError('Could not send your message', error, request);
+        }
+      }
+
+      if (sendButton) {
+        sendButton.addEventListener('click', sendMessage);
       }
 
       // Auto-resize for multiline textarea
@@ -1628,33 +1713,14 @@
         messageInput.addEventListener('keydown', async (e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            const text = messageInput.value.trim();
-            if (text) {
-              addMessage(text, 'user');
-              messageInput.value = '';
-              autoGrow(messageInput);
-              setTimeout(() => { showThinkingIndicator(); }, 300);
-              try {
-                if (whysperAPI && whysperAPI.sendChatMessage) {
-                  await whysperAPI.sendChatMessage(text);
-                }
-              } catch (error) {
-                console.error('Failed to send chat message to main process:', error);
-              }
-            }
+            await sendMessage();
           }
           // If Shift+Enter, allow default to insert newline
         });
       }
 
-      // Global keyboard shortcuts
-      document.addEventListener('keydown', (e) => {
-        if (e.altKey && e.key === 'r') {
-          e.preventDefault();
-          if (!isInteractive || !speechAvailable) return;
-          micButton && micButton.click();
-        }
-      });
+      // Global shortcuts are owned by the main process. A second local
+      // Alt+R handler can toggle the same recording twice in a focused window.
 
       // Initialize
       // NOTE: the previous default message claimed "Recording in Progress"

@@ -1,384 +1,3 @@
-// Enhanced polyfills for Azure Speech SDK in Node.js environment
-if (typeof window === 'undefined') {
-  global.window = {
-    navigator: {
-      userAgent: 'Node.js',
-      platform: 'node',
-      mediaDevices: {
-        getUserMedia: () => Promise.resolve({
-          getAudioTracks: () => [],
-          getTracks: () => [],
-          stop: () => {}
-        }),
-        getSupportedConstraints: () => ({
-          audio: true,
-          video: false,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: true,
-          sampleSize: true,
-          channelCount: true
-        }),
-        enumerateDevices: () => Promise.resolve([
-          {
-            deviceId: 'default',
-            kind: 'audioinput',
-            label: 'Default - Microphone',
-            groupId: 'default'
-          }
-        ])
-      }
-    },
-    document: {
-      createElement: (tagName) => {
-        const element = {
-          addEventListener: () => {},
-          removeEventListener: () => {},
-          setAttribute: () => {},
-          getAttribute: () => null,
-          style: {},
-          tagName: tagName.toUpperCase(),
-          nodeType: 1,
-          nodeName: tagName.toUpperCase(),
-          appendChild: () => {},
-          removeChild: () => {},
-          insertBefore: () => {},
-          cloneNode: () => element,
-          hasAttribute: () => false,
-          removeAttribute: () => {},
-          click: () => {},
-          focus: () => {},
-          blur: () => {}
-        };
-
-        if (tagName.toLowerCase() === 'audio') {
-          Object.assign(element, {
-            play: () => Promise.resolve(),
-            pause: () => {},
-            load: () => {},
-            canPlayType: () => 'probably',
-            volume: 1,
-            muted: false,
-            paused: true,
-            ended: false,
-            currentTime: 0,
-            duration: 0,
-            playbackRate: 1,
-            defaultPlaybackRate: 1,
-            readyState: 4,
-            networkState: 1,
-            autoplay: false,
-            loop: false,
-            controls: false,
-            crossOrigin: null,
-            preload: 'metadata',
-            src: '',
-            currentSrc: ''
-          });
-        }
-
-        return element;
-      },
-      getElementById: () => null,
-      getElementsByTagName: () => [],
-      getElementsByClassName: () => [],
-      querySelector: () => null,
-      querySelectorAll: () => [],
-      body: {
-        appendChild: () => {},
-        removeChild: () => {},
-        insertBefore: () => {},
-        style: {}
-      },
-      head: {
-        appendChild: () => {},
-        removeChild: () => {},
-        insertBefore: () => {},
-        style: {}
-      }
-    },
-    location: {
-      href: 'file:///',
-      protocol: 'file:',
-      host: '',
-      hostname: '',
-      port: '',
-      pathname: '/',
-      search: '',
-      hash: '',
-      origin: 'file://'
-    },
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    setTimeout: global.setTimeout,
-    clearTimeout: global.clearTimeout,
-    setInterval: global.setInterval,
-    clearInterval: global.clearInterval,
-    requestAnimationFrame: (callback) => global.setTimeout(callback, 16),
-    cancelAnimationFrame: global.clearTimeout,
-    console: global.console || {
-      log: () => {},
-      error: () => {},
-      warn: () => {},
-      info: () => {},
-      debug: () => {}
-    },
-    AudioContext: class AudioContext {
-      constructor() {
-        this.state = 'running';
-        this.sampleRate = 16000;
-        this.currentTime = 0;
-        this.listener = {
-          setPosition: () => {},
-          setOrientation: () => {}
-        };
-        this.destination = {
-          connect: () => {},
-          disconnect: () => {},
-          channelCount: 2,
-          channelCountMode: 'explicit',
-          channelInterpretation: 'speakers'
-        };
-      }
-      createMediaStreamSource(stream) {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          mediaStream: stream
-        };
-      }
-      createGain() {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          gain: {
-            value: 1,
-            setValueAtTime: () => {},
-            linearRampToValueAtTime: () => {},
-            exponentialRampToValueAtTime: () => {}
-          }
-        };
-      }
-      createScriptProcessor(bufferSize = 4096, inputChannels = 1, outputChannels = 1) {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          onaudioprocess: null,
-          bufferSize,
-          numberOfInputs: inputChannels,
-          numberOfOutputs: outputChannels
-        };
-      }
-      createAnalyser() {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          fftSize: 2048,
-          frequencyBinCount: 1024,
-          minDecibels: -100,
-          maxDecibels: -30,
-          smoothingTimeConstant: 0.8,
-          getByteFrequencyData: () => {},
-          getByteTimeDomainData: () => {},
-          getFloatFrequencyData: () => {},
-          getFloatTimeDomainData: () => {}
-        };
-      }
-      decodeAudioData() {
-        return Promise.resolve({
-          length: 44100,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          duration: 1,
-          getChannelData: () => new Float32Array(44100)
-        });
-      }
-      suspend() {
-        this.state = 'suspended';
-        return Promise.resolve();
-      }
-      resume() {
-        this.state = 'running';
-        return Promise.resolve();
-      }
-      close() {
-        this.state = 'closed';
-        return Promise.resolve();
-      }
-    },
-    webkitAudioContext: class webkitAudioContext {
-      constructor() {
-        this.state = 'running';
-        this.sampleRate = 16000;
-        this.currentTime = 0;
-        this.listener = {
-          setPosition: () => {},
-          setOrientation: () => {}
-        };
-        this.destination = {
-          connect: () => {},
-          disconnect: () => {},
-          channelCount: 2,
-          channelCountMode: 'explicit',
-          channelInterpretation: 'speakers'
-        };
-      }
-      createMediaStreamSource(stream) {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          mediaStream: stream
-        };
-      }
-      createGain() {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          gain: {
-            value: 1,
-            setValueAtTime: () => {},
-            linearRampToValueAtTime: () => {},
-            exponentialRampToValueAtTime: () => {}
-          }
-        };
-      }
-      createScriptProcessor(bufferSize = 4096, inputChannels = 1, outputChannels = 1) {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          onaudioprocess: null,
-          bufferSize,
-          numberOfInputs: inputChannels,
-          numberOfOutputs: outputChannels
-        };
-      }
-      createAnalyser() {
-        return {
-          connect: () => {},
-          disconnect: () => {},
-          fftSize: 2048,
-          frequencyBinCount: 1024,
-          minDecibels: -100,
-          maxDecibels: -30,
-          smoothingTimeConstant: 0.8,
-          getByteFrequencyData: () => {},
-          getByteTimeDomainData: () => {},
-          getFloatFrequencyData: () => {},
-          getFloatTimeDomainData: () => {}
-        };
-      }
-      decodeAudioData() {
-        return Promise.resolve({
-          length: 44100,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          duration: 1,
-          getChannelData: () => new Float32Array(44100)
-        });
-      }
-      suspend() {
-        this.state = 'suspended';
-        return Promise.resolve();
-      }
-      resume() {
-        this.state = 'running';
-        return Promise.resolve();
-      }
-      close() {
-        this.state = 'closed';
-        return Promise.resolve();
-      }
-    },
-    URL: class URL {
-      constructor(url) {
-        this.href = url;
-        this.protocol = 'https:';
-        this.host = 'localhost';
-        this.hostname = 'localhost';
-        this.port = '';
-        this.pathname = '/';
-        this.search = '';
-        this.hash = '';
-        this.origin = 'https://localhost';
-      }
-      toString() {
-        return this.href;
-      }
-    },
-    Blob: class Blob {
-      constructor(parts = [], options = {}) {
-        this.size = 0;
-        this.type = options.type || '';
-        this.parts = parts;
-      }
-      slice() {
-        return new Blob();
-      }
-      stream() {
-        return new ReadableStream();
-      }
-      text() {
-        return Promise.resolve('');
-      }
-      arrayBuffer() {
-        return Promise.resolve(new ArrayBuffer(0));
-      }
-    },
-    File: class File {
-      constructor(parts, name, options = {}) {
-        this.name = name;
-        this.size = 0;
-        this.type = options.type || '';
-        this.lastModified = Date.now();
-        this.parts = parts;
-      }
-      slice() {
-        return new File([], this.name);
-      }
-      stream() {
-        return new ReadableStream();
-      }
-      text() {
-        return Promise.resolve('');
-      }
-      arrayBuffer() {
-        return Promise.resolve(new ArrayBuffer(0));
-      }
-    }
-  };
-  global.document = global.window.document;
-  global.navigator = global.window.navigator;
-  global.AudioContext = global.window.AudioContext;
-  global.webkitAudioContext = global.window.webkitAudioContext;
-  global.URL = global.window.URL;
-  global.Blob = global.window.Blob;
-  global.File = global.window.File;
-
-  if (!global.performance) {
-    global.performance = {
-      now: () => Date.now(),
-      mark: () => {},
-      measure: () => {},
-      clearMarks: () => {},
-      clearMeasures: () => {},
-      getEntriesByName: () => [],
-      getEntriesByType: () => []
-    };
-  }
-
-  if (!global.crypto) {
-    global.crypto = {
-      getRandomValues: (arr) => {
-        for (let i = 0; i < arr.length; i++) {
-          arr[i] = Math.floor(Math.random() * 256);
-        }
-        return arr;
-      }
-    };
-  }
-}
-
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -387,6 +6,7 @@ const { EventEmitter } = require('events');
 const logger = require('../core/logger').createServiceLogger('SPEECH');
 const config = require('../core/config');
 const WhisperWorkerService = require('./whisper-worker.service');
+const { resolveWhisperRuntime } = require('../core/whisper-runtime');
 
 let sdk = null;
 try {
@@ -434,7 +54,7 @@ class SpeechService extends EventEmitter {
   }
 
   initializeClient() {
-    this._cleanup();
+    this.cancelRecording();
     this.provider = 'disabled';
     this.available = false;
     this.speechConfig = null;
@@ -464,7 +84,7 @@ class SpeechService extends EventEmitter {
         throw new Error('Azure Speech SDK dependency is not installed');
       }
 
-      if (!recorder || typeof recorder.record !== 'function') {
+      if (process.platform === 'linux' && (!recorder || typeof recorder.record !== 'function')) {
         throw new Error('Local microphone recorder dependency is not installed');
       }
 
@@ -527,212 +147,170 @@ class SpeechService extends EventEmitter {
         return;
       }
 
-      this.available = true;
+      this.available = this.whisperCommand.kind !== 'bundled' ||
+        this.modelPreparation?.isReady?.(this._getWhisperModel()) === true;
       this._configureWhisperWorker();
       logger.info('Local Whisper service initialized successfully', {
         command: [this.whisperCommand.command, ...this.whisperCommand.baseArgs].join(' '),
         model: this._getWhisperModel(),
         language: this._getWhisperLanguage()
       });
-      this.emit('status', 'Local Whisper ready');
+      this.emit('status', this.available ? 'Local Whisper ready' : 'Prepare the selected voice model in Settings before recording.');
     } catch (error) {
       logger.error('Failed to initialize local Whisper client', {
         error: error.message,
         stack: error.stack
       });
       this.available = false;
-      this.emit('status', 'Local Whisper unavailable');
+      this.emit('status', error.code?.startsWith('BUNDLED_RUNTIME_') ? error.message : 'Local Whisper unavailable');
     }
+  }
+
+  setRendererCapture(adapter) {
+    this.cancelRecording();
+    this.rendererCapture = adapter;
+  }
+
+  setModelPreparation(service) {
+    this.modelPreparation = service;
   }
 
   startRecording() {
-    try {
-      if (!this.available) {
-        const errorMsg = `Speech provider "${this.provider}" is not available`;
-        logger.error(errorMsg);
-        this.emit('error', errorMsg);
-        return;
-      }
-
-      if (this.isRecording) {
-        logger.warn('Recording already in progress');
-        return;
-      }
-
-      if (this.isProcessingAudio) {
-        this.emit('status', 'Please wait for the current transcription to finish');
-        return;
-      }
-
-      this.sessionStartTime = Date.now();
-      this.retryCount = 0;
-
-      if (this.provider === 'azure') {
-        this._startAzureRecording();
-        return;
-      }
-
-      if (this.provider === 'whisper') {
-        this._startWhisperRecording();
-        return;
-      }
-
-      throw new Error(`Unsupported speech provider: ${this.provider}`);
-    } catch (error) {
-      logger.error('Critical error in startRecording', { error: error.message, stack: error.stack });
-      this.emit('error', `Speech recognition failed to start: ${error.message}`);
-      this.isRecording = false;
+    if (this._shutdownPromise) return Promise.resolve();
+    if (this.whisperCommand?.kind !== 'bundled' || this.provider !== 'whisper' ||
+        !this.available || this.isRecording || this.isProcessingAudio || this._stopping) {
+      return this._startRecordingReady();
     }
+    if (this._preparingRecordingPromise) return this._preparingRecordingPromise;
+    const generation = this._generation || 0;
+    const pending = Promise.resolve().then(async () => {
+      if (!this.modelPreparation) throw new Error('Prepare the selected voice model in Settings before recording.');
+      const checkpoint = await this.modelPreparation.requireReady(this._getWhisperModel());
+      if ((this._generation || 0) !== generation) return;
+      this._preparedModelPath = checkpoint;
+      return this._startRecordingReady();
+    }).catch(error => {
+      if ((this._generation || 0) === generation) this.emit('error', error.message);
+    }).finally(() => {
+      if (this._preparingRecordingPromise === pending) this._preparingRecordingPromise = null;
+    });
+    this._preparingRecordingPromise = pending;
+    this.emit('status', 'Checking the selected voice model…');
+    return pending;
   }
 
-  _startAzureRecording() {
-    if (!this.speechConfig) {
-      throw new Error('Azure Speech client not initialized');
+  _startRecordingReady() {
+    if (!this.available) {
+      this.emit('error', `Speech provider "${this.provider}" is not available`);
+      return Promise.resolve();
     }
-
-    this.isRecording = true;
-    this.emit('recording-started');
-    this.emit('status', 'Azure recording started');
+    if (this.isRecording) return this._startPromise || Promise.resolve();
+    if (this.isProcessingAudio || this._stopping) {
+      this.emit('status', 'Please wait for the current transcription to finish');
+      return Promise.resolve();
+    }
     this._cleanup();
-
-    try {
-      this.pushStream = sdk.AudioInputStream.createPushStream();
-      this.audioConfig = sdk.AudioConfig.fromStreamInput(this.pushStream);
-      this._startMicrophoneCapture();
-      this.recognizer = new sdk.SpeechRecognizer(this.speechConfig, this.audioConfig);
-    } catch (error) {
-      logger.error('Failed to start Azure recording session', { error: error.message });
-      this.emit('error', `Audio configuration failed: ${error.message}`);
-      this.isRecording = false;
-      return;
-    }
-
-    this.recognizer.recognizing = (s, e) => {
-      try {
-        if (e.result.reason === sdk.ResultReason.RecognizingSpeech) {
-          this.emit('interim-transcription', e.result.text);
-        }
-      } catch (error) {
-        logger.error('Error in recognizing handler', { error: error.message });
-      }
-    };
-
-    this.recognizer.recognized = (s, e) => {
-      try {
-        if (e.result.reason === sdk.ResultReason.RecognizedSpeech && e.result.text && e.result.text.trim()) {
-          this.emit('transcription', e.result.text);
-        }
-      } catch (error) {
-        logger.error('Error in recognized handler', { error: error.message });
-      }
-    };
-
-    this.recognizer.canceled = (s, e) => {
-      logger.warn('Recognition session canceled', {
-        reason: e.reason,
-        errorCode: e.errorCode,
-        errorDetails: e.errorDetails
-      });
-
-      if (e.reason === sdk.CancellationReason.Error) {
-        const details = e.errorDetails || '';
-        if (details.includes('1006')) {
-          this.emit('error', 'Network connection failed. Please check your internet connection.');
-        } else if (details.includes('InvalidServiceCredentials')) {
-          this.emit('error', 'Invalid Azure Speech credentials. Please check AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.');
-        } else if (details.includes('Forbidden')) {
-          this.emit('error', 'Access denied. Please check your Azure Speech service subscription and region.');
-        } else if (details.includes('AudioInputMicrophone_InitializationFailure')) {
-          this.emit('error', 'Microphone initialization failed. Please check microphone permissions and availability.');
-        } else {
-          this.emit('error', `Recognition error: ${details}`);
-        }
-      }
-
-      this.stopRecording();
-    };
-
-    this.recognizer.sessionStarted = (s, e) => {
-      logger.info('Recognition session started', { sessionId: e.sessionId });
-    };
-
-    this.recognizer.sessionStopped = () => {
-      this.stopRecording();
-    };
-
-    const startTimeout = setTimeout(() => {
-      logger.error('Recognition start timeout');
-      this.emit('error', 'Speech recognition start timeout. Please try again.');
-      this.stopRecording();
-    }, 10000);
-
-    this.recognizer.startContinuousRecognitionAsync(
-      () => {
-        clearTimeout(startTimeout);
-        logger.info('Continuous Azure speech recognition started successfully');
-      },
-      (error) => {
-        clearTimeout(startTimeout);
-        logger.error('Failed to start continuous recognition', { error: error.toString() });
-        this.emit('error', `Recognition startup failed: ${error}`);
-        this.isRecording = false;
-        this._cleanup();
-      }
-    );
-  }
-
-  _startWhisperRecording() {
-    this._cleanup();
-    this.isRecording = true;
-    this.segmentBuffers = [];
-    this.segmentBytes = 0;
-    this.transcriptionInFlight = false;
-    this.pendingFlush = false;
-    this.pendingFinal = false;
-    this.manualStopRequested = false;
-    this._resetVadState();
-    this.emit('recording-started');
-    this.emit('status', 'Local Whisper recording started');
-
-    if (this.whisperWorker.isConfigured()) {
-      this.whisperWorker.warmup({
-        model: this._getWhisperModel(),
-        modelDir: this._getWhisperModelDir(),
-        device: this._getWhisperDevice()
-      }).then((result) => {
-        logger.info('Whisper GPU warmup completed while recording', {
-          model: result.model,
-          device: result.device,
-          gpu: result.gpu
-        });
-      }).catch((error) => {
-        logger.warn('Whisper warmup failed; transcription will use fallback', {
-          error: error.message
-        });
-      });
-    }
-
-    // Capture microphone audio in the renderer via the Web Audio API on Windows
-    // and macOS. Windows lacks the Unix sox/rec/arecord tools node-record-lpcm16
-    // needs; macOS would otherwise require a Homebrew `sox` install (not bundled)
-    // and a child-process mic that the system TCC prompt can't attribute. The
-    // renderer path uses getUserMedia, which macOS prompts for cleanly via the
-    // app's NSMicrophoneUsageDescription. Linux keeps the native recorder path.
+    const generation = this._generation = (this._generation || 0) + 1;
     this.useRendererCapture = process.platform === 'win32' || process.platform === 'darwin';
-    if (this.useRendererCapture) {
-      this.emit('status', 'Waiting for microphone audio…');
-      // The renderer starts sending chunks once it receives the recording-started event.
-      if (!this._isManualCaptureMode()) {
-        this._startSegmentWatchdog();
+    this.sessionStartTime = Date.now();
+    this.isRecording = true;
+    this._captureReady = false;
+    this.manualStopRequested = false;
+    this.emit('status', 'Waiting for microphone audio…');
+    this._startPromise = (async () => {
+      try {
+        if (this.provider === 'azure') await this._startAzureRecording(generation);
+        else if (this.provider === 'whisper') await this._startWhisperRecording(generation);
+        else throw new Error('Unsupported speech provider');
+        // Capture and provider startup must both belong to this live session.
+        // A late Azure callback after stop/cancel cannot illuminate the UI.
+        if (this._generation === generation && this.isRecording && this._captureReady && !this._stopping) {
+          this.emit('recording-started');
+        }
+      } catch (_) {
+        if (this._generation === generation) {
+          this.cancelRecording();
+          this.emit('error', 'Speech capture could not start. Check microphone access and the selected speech provider, then retry.');
+        }
       }
-      return;
-    }
+    })();
+    return this._startPromise;
+  }
 
-    this._startMicrophoneCapture();
-    if (!this._isManualCaptureMode()) {
-      this._startSegmentWatchdog();
+  async _startCapture(generation) {
+    if (this.useRendererCapture) {
+      if (!this.rendererCapture) throw new Error('Renderer capture unavailable');
+      await this.rendererCapture.start();
+    } else {
+      this._startMicrophoneCapture();
     }
+    if (this._generation !== generation || !this.isRecording || this._stopping) return false;
+    this._captureReady = true;
+    return true;
+  }
 
+  async _startAzureRecording(generation) {
+    if (!this.speechConfig) throw new Error('Azure Speech client not initialized');
+    this.pushStream = sdk.AudioInputStream.createPushStream(sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
+    this.audioConfig = sdk.AudioConfig.fromStreamInput(this.pushStream);
+    const recognizer = this.recognizer = new sdk.SpeechRecognizer(this.speechConfig, this.audioConfig);
+    const current = () => this._generation === generation && this.recognizer === recognizer;
+    recognizer.recognizing = (_sender, event) => {
+      if (current() && event.result.reason === sdk.ResultReason.RecognizingSpeech) {
+        this.emit('interim-transcription', event.result.text);
+      }
+    };
+    recognizer.recognized = (_sender, event) => {
+      if (current() && event.result.reason === sdk.ResultReason.RecognizedSpeech && event.result.text?.trim()) {
+        this.emit('transcription', event.result.text);
+      }
+    };
+    recognizer.canceled = (_sender, event) => {
+      if (!current()) return;
+      if (event.reason === sdk.CancellationReason.Error) {
+        this.cancelRecording();
+        this.emit('error', 'Azure speech stopped. Check your connection and Azure speech settings, then retry.');
+      } else if (!this._stopping) this.stopRecording();
+    };
+    recognizer.sessionStopped = () => {
+      if (current() && !this._stopping) this.stopRecording();
+    };
+    if (!await this._startCapture(generation) || !current() || this._stopping) return;
+    await new Promise((resolve, reject) => {
+      const finish = error => {
+        clearTimeout(timer);
+        if (this._abortAzureStart === abort) this._abortAzureStart = null;
+        if (error) reject(error); else resolve();
+      };
+      const abort = () => finish(new Error('Azure startup cancelled'));
+      const timer = setTimeout(() => finish(new Error('Azure startup timed out')), 10000);
+      this._abortAzureStart = abort;
+      try {
+        recognizer.startContinuousRecognitionAsync(() => finish(), () => finish(new Error('Azure startup failed')));
+      } catch (_) { finish(new Error('Azure startup failed')); }
+    });
+    if (current() && !this._stopping) this.emit('status', 'Azure recording started');
+  }
+
+  async _startWhisperRecording(generation) {
+    const model = this.whisperCommand?.kind === 'bundled' ? this._preparedModelPath : this._getWhisperModel();
+    if (this.whisperCommand?.kind === 'bundled' && (!model || !path.isAbsolute(model))) {
+      throw new Error('Prepare the selected voice model in Settings before recording.');
+    }
+    if (!await this._startCapture(generation)) return;
+    this.emit('status', 'Local Whisper recording started');
+    if (this.whisperWorker.isConfigured()) {
+      try {
+        // Optional warmup shares transcription's confirmed-exit barrier.
+        this._assertWhisperProcessAvailable();
+        this.whisperWorker.warmup({
+          model, modelDir: this._getWhisperModelDir(), device: this._getWhisperDevice()
+        }).catch(() => { /* Transcription retains the existing CLI fallback. */ });
+      } catch (_) {
+        // Capture can continue; transcription rechecks ownership before use.
+      }
+    }
+    if (!this._isManualCaptureMode()) this._startSegmentWatchdog();
   }
 
   /**
@@ -794,14 +372,8 @@ class SpeechService extends EventEmitter {
    * the current Whisper segment buffer.
    */
   handleAudioChunkFromRenderer(chunk) {
-    if (!this.isRecording || this.provider !== 'whisper' || !this.useRendererCapture) {
-      return;
-    }
-    if (!chunk || !chunk.length) {
-      return;
-    }
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    this._ingestWhisperAudio(buffer);
+    if (!this.isRecording || !this.useRendererCapture || !chunk?.length) return;
+    this._handleAudioChunk(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
 
   /**
@@ -841,7 +413,8 @@ class SpeechService extends EventEmitter {
       if (!this.manualStopRequested && capturedMs >= this._getManualCaptureMaxMs()) {
         this.manualStopRequested = true;
         this.emit('status', 'Maximum recording duration reached; processing audio');
-        setImmediate(() => this.stopRecording());
+        const generation = this._generation;
+        setImmediate(() => { if (this._generation === generation) this.stopRecording(); });
       }
       return;
     }
@@ -951,84 +524,111 @@ class SpeechService extends EventEmitter {
   }
 
   stopRecording() {
-    if (!this.isRecording) {
-      return;
+    if (this._preparingRecordingPromise && !this.isRecording) {
+      this.cancelRecording();
+      return Promise.resolve();
     }
-
-    this.isRecording = false;
-    const sessionDuration = this.sessionStartTime ? Date.now() - this.sessionStartTime : 0;
-    logger.info('Stopping speech recognition session', {
-      provider: this.provider,
-      sessionDuration: `${sessionDuration}ms`
-    });
-
-    if (this.provider === 'azure' && this.recognizer) {
-      try {
-        this.recognizer.stopContinuousRecognitionAsync(
-          () => {
-            this._finalizeStop('Recording stopped');
-          },
-          (error) => {
-            logger.error('Error during recognition stop', { error: error.toString() });
-            this._finalizeStop('Recording stopped');
-          }
-        );
-      } catch (error) {
-        logger.error('Error stopping recognizer', { error: error.message });
-        this._finalizeStop('Recording stopped');
-      }
-      return;
+    if (this._stopPromise) return this._stopPromise;
+    if (!this.isRecording) return Promise.resolve();
+    if (!this._captureReady) {
+      this.cancelRecording();
+      return Promise.resolve();
     }
-
-    if (this.provider === 'whisper') {
-      this.isProcessingAudio = true;
-      this.emit('recording-stopped');
-      this.emit('status', 'Processing local speech…');
-      this._finalizeWhisperStop({ captureAlreadyStopped: true });
-      return;
-    }
-
-    this._finalizeStop('Recording stopped');
+    const generation = this._generation;
+    this._stopping = true;
+    this.isProcessingAudio = true;
+    clearInterval(this.segmentTimer);
+    this.segmentTimer = null;
+    // Keep accepting owned PCM until the renderer's stopped ACK: its final
+    // worklet tail precedes that ACK on the same ordered IPC channel.
+    this._stopPromise = Promise.resolve().then(() => this._drainRecording(generation));
+    return this._stopPromise;
   }
 
-  async _finalizeWhisperStop({ captureAlreadyStopped = false } = {}) {
-    if (this.segmentTimer) {
-      clearInterval(this.segmentTimer);
-      this.segmentTimer = null;
-    }
-
-    if (this.recording) {
-      try {
-        this.recording.stop();
-      } catch (error) {
-        logger.error('Error stopping audio recording', { error: error.message });
-      }
-      this.recording = null;
-    }
-
+  async _drainRecording(generation) {
+    // A queued stop may belong to a capture cancelled before this microtask ran.
+    // Check ownership before touching the shared adapter or native recorder.
+    if (this._generation !== generation) return;
+    let incompleteCapture = false;
     try {
-      await this._flushWhisperSegment({ final: true });
-    } catch (error) {
-      logger.error('Final Whisper transcription failed', { error: error.message });
-      this.emit('error', `Whisper transcription failed: ${error.message}`);
-    } finally {
-      this._cleanup();
-      this.isProcessingAudio = false;
-      this.whisperWorker.releaseWhenIdle();
-      if (!captureAlreadyStopped) {
-        this.emit('recording-stopped');
+      if (this.useRendererCapture) {
+        const receipt = await this.rendererCapture.stop();
+        incompleteCapture = receipt?.incomplete === true;
+        if (incompleteCapture && this._generation === generation) this.emit('status', 'Microphone stopped before the final audio arrived. Processing the audio already received.');
       }
-      this.emit('status', 'Recording stopped');
+      else if (this.recording) {
+        const recording = this.recording;
+        this.recording = null;
+        recording.stop();
+      }
+      if (this._generation !== generation) return;
+      this.isRecording = false;
+      this.emit('recording-stopped');
+      if (this.provider === 'whisper') {
+        this.emit('status', 'Processing local speech…');
+        await this._flushWhisperSegment({ final: true });
+      } else if (this.recognizer) {
+        // EOF follows the final PCM. Keep recognized callbacks valid until
+        // the SDK's stop callback (or bounded failure), then close this session.
+        this.pushStream?.close();
+        const recognizer = this.recognizer;
+        await new Promise(resolve => {
+          const finish = () => {
+            clearTimeout(timer);
+            if (this._finishAzureStop === finish) this._finishAzureStop = null;
+            resolve();
+          };
+          const timer = setTimeout(finish, 3000);
+          this._finishAzureStop = finish;
+          try { recognizer.stopContinuousRecognitionAsync(finish, finish); }
+          catch (_) { finish(); }
+        });
+      }
+    } catch (_) {
+      if (this._generation === generation) this.emit('error', 'Speech processing failed. Check the selected speech provider and retry.');
+    } finally {
+      // An old stop must never close a newer microphone or reset its buffers.
+      if (this._generation === generation) {
+        this._generation = (this._generation || 0) + 1;
+        this._cleanup();
+        this.isRecording = false;
+        this.isProcessingAudio = false;
+        this._stopping = false;
+        this._stopPromise = null;
+        this.whisperWorker?.releaseWhenIdle();
+        this.emit('status', incompleteCapture ? 'Recording stopped. The final audio could not be recovered; only received audio was processed.' : 'Recording stopped');
+      }
     }
   }
 
-  _finalizeStop(statusMessage) {
+  cancelRecording() {
+    const wasActive = this.isRecording || this.isProcessingAudio || Boolean(this._preparingRecordingPromise);
+    this._preparingRecordingPromise = null;
+    this._preparedModelPath = null;
+    this._generation = (this._generation || 0) + 1;
+    this.isRecording = false;
+    this.isProcessingAudio = false;
+    this._stopping = false;
+    this._stopPromise = null;
+    this._startPromise = null;
+    this._captureReady = false;
+    this.rendererCapture?.cancel();
     this._cleanup();
-    this.emit('recording-stopped');
-    this.emit('status', statusMessage);
+    this.whisperWorker?.close();
+    for (const child of this._whisperChildren || []) {
+      this._whisperCancellations?.get(child)?.();
+    }
+    if (wasActive) {
+      this.emit('recording-stopped');
+      this.emit('recording-cancelled');
+      this.emit('status', 'Recording cancelled');
+    }
   }
 
   _cleanup() {
+    this._abortAzureStart?.();
+    this._finishAzureStop?.();
+    this._flushPromise = null;
     if (this.segmentTimer) {
       clearInterval(this.segmentTimer);
       this.segmentTimer = null;
@@ -1036,6 +636,10 @@ class SpeechService extends EventEmitter {
 
     if (this.recognizer) {
       try {
+        this.recognizer.recognizing = undefined;
+        this.recognizer.recognized = undefined;
+        this.recognizer.canceled = undefined;
+        this.recognizer.sessionStopped = undefined;
         this.recognizer.close();
       } catch (error) {
         logger.error('Error closing recognizer', { error: error.message });
@@ -1045,7 +649,10 @@ class SpeechService extends EventEmitter {
 
     if (this.audioConfig) {
       try {
-        if (typeof this.audioConfig.close === 'function') {
+        // Push-stream lifetime is owned by pushStream.close(). The SDK's
+        // AudioConfig.close() assumes a Promise-returning source, which its
+        // push source does not supply. File/native sources retain close().
+        if (!this.pushStream && typeof this.audioConfig.close === 'function') {
           this.audioConfig.close();
         }
       } catch (error) {
@@ -1127,11 +734,12 @@ class SpeechService extends EventEmitter {
       }
 
       try {
-        const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
+        const stream = sdk.AudioInputStream.createPushStream(sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
+        const audioConfig = sdk.AudioConfig.fromStreamInput(stream);
         const recognizer = new sdk.SpeechRecognizer(this.speechConfig, audioConfig);
         recognizer.close();
-        audioConfig.close();
-        return { success: true, message: 'Azure connection test successful' };
+        stream.close();
+        return { success: true, message: 'Azure SDK configuration is ready. Start recording to test microphone access and the live service.' };
       } catch (error) {
         return { success: false, message: error.message };
       }
@@ -1167,6 +775,7 @@ class SpeechService extends EventEmitter {
     return {
       provider: this.provider,
       isRecording: this.isRecording,
+      isStarting: Boolean(this._preparingRecordingPromise) || Boolean(this.isRecording && !this._captureReady),
       isProcessingAudio: this.isProcessingAudio,
       isInitialized: this.provider === 'azure' ? !!this.speechConfig : !!this.whisperCommand,
       sessionDuration: this.sessionStartTime ? Date.now() - this.sessionStartTime : 0,
@@ -1208,14 +817,19 @@ class SpeechService extends EventEmitter {
   }
 
   shutdown() {
-    this.isRecording = false;
-    this.isProcessingAudio = false;
-    this._cleanup();
-    this.whisperWorker.close();
+    if (this._shutdownPromise) return this._shutdownPromise;
+    // Subscribe before cancellation can close a child. A sent kill signal does
+    // not establish that its process or inherited stdio have exited.
+    const children = new Set(this._whisperChildren || []);
+    if (this.whisperWorker?.process) children.add(this.whisperWorker.process);
+    const closed = [...children].map(child => new Promise(resolve => child.once('close', resolve)));
+    this._shutdownPromise = Promise.all(closed);
+    this.cancelRecording();
+    return this._shutdownPromise;
   }
 
   updateSettings(settings = {}) {
-    const speechKeys = ['speechProvider', 'azureKey', 'azureRegion', 'whisperCommand', 'whisperModelDir', 'whisperModel', 'whisperLanguage', 'whisperCaptureMode', 'whisperDevice', 'whisperSegmentMs'];
+    const speechKeys = ['speechProvider', 'azureKey', 'azureRegion', 'whisperCommand', 'whisperModelDir', 'whisperModel', 'whisperLanguage', 'whisperCaptureMode', 'whisperDevice', 'whisperSegmentMs', 'whisperVadEnabled', 'whisperSilenceHangoverMs', 'whisperMinUtteranceMs', 'whisperMaxUtteranceMs', 'whisperPreRollMs', 'whisperVadEnergyFloor'];
     let changed = false;
 
     for (const key of speechKeys) {
@@ -1358,6 +972,7 @@ class SpeechService extends EventEmitter {
   }
 
   _getWhisperPythonPath() {
+    if (this.whisperCommand?.kind === 'bundled') return this.whisperCommand.pythonPath;
     const configuredPython = String(process.env.WHISPER_PYTHON || '').trim();
     if (configuredPython) {
       const resolvedPython = path.isAbsolute(configuredPython)
@@ -1368,11 +983,8 @@ class SpeechService extends EventEmitter {
       }
     }
 
-    const userDataCandidate = this._getUserDataWhisperCandidate();
-    if (userDataCandidate && fs.existsSync(userDataCandidate.command)) {
-      return userDataCandidate.command;
-    }
-
+    // The resolved command already applies explicit-config/app-venv priority.
+    // Derive its interpreter instead of silently switching runtimes here.
     if (!this.whisperCommand) {
       return null;
     }
@@ -1394,16 +1006,14 @@ class SpeechService extends EventEmitter {
 
   _getWhisperWorkerScriptPath() {
     const sourcePath = path.resolve(__dirname, '..', '..', 'scripts', 'whisper_worker.py');
-    return sourcePath.includes('app.asar')
-      ? sourcePath.replace('app.asar', 'app.asar.unpacked')
-      : sourcePath;
+    return sourcePath.split(path.sep).map(part => part === 'app.asar' ? 'app.asar.unpacked' : part).join(path.sep);
   }
 
   _configureWhisperWorker() {
     const pythonPath = this._getWhisperPythonPath();
     const scriptPath = this._getWhisperWorkerScriptPath();
     const idleUnloadMs = Math.max(10000, Number(process.env.WHISPER_GPU_IDLE_MS || 60000));
-    this.whisperWorker.configure({ pythonPath, scriptPath, idleUnloadMs });
+    this.whisperWorker.configure({ pythonPath, scriptPath, idleUnloadMs, env: this.whisperCommand?.env || null });
 
     logger.info('Whisper worker configuration', {
       configured: this.whisperWorker.isConfigured(),
@@ -1436,6 +1046,13 @@ class SpeechService extends EventEmitter {
   }
 
   _resolveWhisperCommand() {
+    let isPackaged = false;
+    try { isPackaged = Boolean(require('electron').app.isPackaged); } catch (_) { /* Node tooling */ }
+    const bundled = resolveWhisperRuntime({
+      isPackaged, resourcesPath: process.resourcesPath,
+      configuredCommand: this._getSetting('whisperCommand')
+    });
+    if (bundled) return bundled;
     const configured = this._getSetting('whisperCommand') || process.env.WHISPER_COMMAND;
     const candidates = [];
 
@@ -1670,6 +1287,7 @@ class SpeechService extends EventEmitter {
 
   _startMicrophoneCapture() {
     if (!recorder || typeof recorder.record !== 'function') {
+      this.cancelRecording();
       this.emit('error', 'Local microphone capture dependency is missing. Run npm install to restore speech recording support.');
       return;
     }
@@ -1678,11 +1296,8 @@ class SpeechService extends EventEmitter {
     // `recorder` is the option it actually reads (the old `recordProgram` name
     // was silently ignored, so every attempt fell back to sox). Each entry maps
     // the recorder module to the binary we must verify is on PATH.
-    //   - macOS: sox (via Homebrew)
-    //   - Linux: arecord (ALSA, usually preinstalled) then sox
-    const candidates = process.platform === 'darwin'
-      ? [{ recorder: 'sox', bin: 'sox' }]
-      : [{ recorder: 'arecord', bin: 'arecord' }, { recorder: 'sox', bin: 'sox' }];
+    // Linux remains on ALSA/sox; Windows and macOS use the owned renderer.
+    const candidates = [{ recorder: 'arecord', bin: 'arecord' }, { recorder: 'sox', bin: 'sox' }];
     this._startMicrophoneCaptureWithFallback(candidates);
   }
 
@@ -1707,19 +1322,16 @@ class SpeechService extends EventEmitter {
   }
 
   _startMicrophoneCaptureWithFallback(candidates) {
+    const generation = this._generation;
     const available = candidates.filter((c) => this._audioProgramExists(c.bin));
 
     if (available.length === 0) {
-      const hint = process.platform === 'darwin'
-        ? 'Install one with `brew install sox`.'
-        : process.platform === 'linux'
-          ? 'Install one with `sudo apt install alsa-utils` (arecord) or `sudo apt install sox`.'
-          : 'No supported microphone capture tool was found.';
+      const hint = 'Install one with `sudo apt install alsa-utils` (arecord) or `sudo apt install sox`.';
       logger.warn('No audio capture program available', {
         tried: candidates.map((c) => c.bin),
         platform: process.platform,
       });
-      this.isRecording = false;
+      this.cancelRecording();
       this.emit('error', `Microphone capture needs sox or arecord, but none was found. ${hint}`);
       return;
     }
@@ -1727,9 +1339,10 @@ class SpeechService extends EventEmitter {
     const queue = [...available];
 
     const tryNextProgram = () => {
+      if (this._generation !== generation || !this.isRecording || this._stopping) return;
       const candidate = queue.shift();
       if (!candidate) {
-        this.isRecording = false;
+        this.cancelRecording();
         this.emit('error', 'Could not start microphone capture with any available audio program');
         return;
       }
@@ -1746,7 +1359,8 @@ class SpeechService extends EventEmitter {
           silence: '10.0s'
         });
 
-        const stream = this.recording.stream();
+        const ownedRecording = this.recording;
+        const stream = ownedRecording.stream();
         this.audioProgram = program;
 
         // Guard the spawned child process directly. A spawn failure (e.g. the
@@ -1756,6 +1370,7 @@ class SpeechService extends EventEmitter {
         const child = this.recording.process;
         if (child && typeof child.on === 'function') {
           child.on('error', (error) => {
+            if (this._generation !== generation || this.recording !== ownedRecording) return;
             logger.error('Audio recording process error', { error: error.message, program });
             if (this.recording) {
               try { this.recording.stop(); } catch (_) { /* ignore */ }
@@ -1766,6 +1381,7 @@ class SpeechService extends EventEmitter {
         }
 
         stream.on('error', (error) => {
+          if (this._generation !== generation || this.recording !== ownedRecording) return;
           logger.error('Audio recording stream error', { error: error.message, program });
           if (this.recording) {
             try {
@@ -1782,7 +1398,7 @@ class SpeechService extends EventEmitter {
         });
 
         stream.on('data', (chunk) => {
-          this._handleAudioChunk(chunk);
+          if (this._generation === generation && this.recording === ownedRecording) this._handleAudioChunk(chunk);
         });
       } catch (error) {
         logger.error('Failed to start microphone capture program', { program, error: error.message });
@@ -1802,7 +1418,8 @@ class SpeechService extends EventEmitter {
       try {
         this.pushStream.write(chunk);
       } catch (error) {
-        logger.error('Error writing audio data to Azure push stream', { error: error.message });
+        this.cancelRecording();
+        this.emit('error', 'Azure audio capture failed. Check the selected provider and retry.');
       }
       return;
     }
@@ -1812,48 +1429,44 @@ class SpeechService extends EventEmitter {
     }
   }
 
-  async _flushWhisperSegment({ final }) {
-    if (this.transcriptionInFlight) {
-      // A flush was requested while a transcription is still running. Record
-      // that we owe a follow-up flush for ANY request (not just a final one),
-      // otherwise an utterance that ended mid-transcription stays stranded in
-      // the buffer until the next utterance ends or the session stops. Track
-      // final-ness separately so a queued stop still finalises correctly.
+  _flushWhisperSegment({ final }) {
+    if (this._flushPromise) {
       this.pendingFlush = true;
-      if (final) {
-        this.pendingFinal = true;
-      }
-      return;
+      this.pendingFinal = this.pendingFinal || final;
+      return this._flushPromise;
     }
-
-    if (!this.segmentBytes) {
-      return;
-    }
-
-    const audioBuffer = Buffer.concat(this.segmentBuffers, this.segmentBytes);
-    this.segmentBuffers = [];
-    this.segmentBytes = 0;
-
+    if (!this.segmentBytes) return Promise.resolve();
+    const generation = this._generation;
     this.transcriptionInFlight = true;
-
-    try {
-      const transcript = await this._transcribeWhisperBuffer(audioBuffer);
-      const clean = transcript ? transcript.trim() : '';
-      if (clean && !this._isHallucinatedTranscript(clean)) {
-        this.emit('transcription', clean);
-      } else if (clean) {
-        logger.debug('Dropped likely Whisper silence hallucination', { transcript: clean });
-      }
-    } finally {
-      this.transcriptionInFlight = false;
-
-      if (this.pendingFlush) {
+    const drain = async () => {
+      let failure;
+      do {
         this.pendingFlush = false;
-        const runFinal = this.pendingFinal;
         this.pendingFinal = false;
-        await this._flushWhisperSegment({ final: runFinal });
-      }
-    }
+        const audioBuffer = Buffer.concat(this.segmentBuffers, this.segmentBytes);
+        this.segmentBuffers = [];
+        this.segmentBytes = 0;
+        try {
+          const transcript = await this._transcribeWhisperBuffer(audioBuffer);
+          if (this._generation !== generation) return;
+          const clean = transcript ? transcript.trim() : '';
+          if (clean && !this._isHallucinatedTranscript(clean)) this.emit('transcription', clean);
+        } catch (error) {
+          if (this._generation !== generation) return;
+          failure = error;
+        }
+      } while (this._generation === generation && this.pendingFlush && this.segmentBytes);
+      if (failure) throw failure;
+    };
+    const promise = drain().finally(() => {
+      if (this._generation !== generation) return;
+      this.transcriptionInFlight = false;
+      this.pendingFlush = false;
+      this.pendingFinal = false;
+      this._flushPromise = null;
+    });
+    this._flushPromise = promise;
+    return promise;
   }
 
   /**
@@ -1889,29 +1502,61 @@ class SpeechService extends EventEmitter {
   async _transcribeWhisperBuffer(audioBuffer) {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sru-whisper-'));
     const audioFilePath = path.join(tempDir, 'segment.wav');
+    // The operation holds one lease across worker-to-CLI fallback. Each
+    // reader holds another until its response or confirmed process close.
+    let owners = 0;
+    const retainInput = () => {
+      owners++;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        if (--owners === 0) this._removeTempDir(tempDir);
+      };
+    };
+    const releaseInput = retainInput();
 
     try {
       fs.writeFileSync(audioFilePath, this._createWavBuffer(audioBuffer));
-      return await this._transcribeWhisperFile(audioFilePath);
+      return await this._transcribeWhisperFile(audioFilePath, retainInput);
     } finally {
-      this._removeTempDir(tempDir);
+      releaseInput();
     }
   }
 
-  async _transcribeWhisperFile(audioFilePath) {
+  _assertWhisperProcessAvailable() {
+    if (this.whisperWorker.isTerminationPending?.()) {
+      throw new Error('Whisper worker termination is unconfirmed; retry after the process exits');
+    }
+    if (this._whisperChildren?.size) {
+      throw new Error('Whisper CLI is still running or awaiting confirmed termination; retry after the process exits');
+    }
+  }
+
+  async _transcribeWhisperFile(audioFilePath, retainInput) {
+    const generation = this._generation;
     if (!this.whisperCommand) {
       throw new Error('Local Whisper CLI not configured');
     }
+    let model = this._getWhisperModel();
+    if (this.whisperCommand.kind === 'bundled') {
+      if (!this.modelPreparation) throw new Error('Prepare the selected voice model in Settings before recording.');
+      model = await this.modelPreparation.requireReady(model);
+      if (this._generation !== generation) throw new Error('Transcription cancelled');
+    }
+    this._assertWhisperProcessAvailable();
 
     if (this.whisperWorker.isConfigured()) {
       const startedAt = Date.now();
       try {
         const result = await this.whisperWorker.transcribe(audioFilePath, {
-          model: this._getWhisperModel(),
+          model,
           language: this._getWhisperLanguage(),
           modelDir: this._getWhisperModelDir(),
-          device: this._getWhisperDevice()
+          device: this._getWhisperDevice(),
+          retainInput
         });
+        if (this._generation !== generation) throw new Error('Transcription cancelled');
         logger.info('Persistent Whisper transcription completed', {
           processingTime: Date.now() - startedAt,
           model: result.model,
@@ -1921,6 +1566,16 @@ class SpeechService extends EventEmitter {
         });
         return result.text || '';
       } catch (error) {
+        if (this._generation !== generation) throw new Error('Transcription cancelled');
+        if (this.whisperCommand.allowCliFallback === false) {
+          if (!['WHISPER_WORKER_CLOSED', 'WHISPER_WORKER_TERMINATION_UNCONFIRMED'].includes(error.code)) {
+            error.message = `The included speech engine could not transcribe: ${error.message}. Check the voice model in Settings, then restart the app. If the engine still cannot start, reinstall the app.`;
+          }
+          throw error;
+        }
+        if (error.code === 'WHISPER_WORKER_CLOSED' || error.code === 'WHISPER_WORKER_TERMINATION_UNCONFIRMED' || this.whisperWorker.isTerminationPending?.()) {
+          throw error;
+        }
         logger.warn('Persistent Whisper worker failed; falling back to CLI', {
           error: error.message,
           workerTraceback: error.workerTraceback
@@ -1928,6 +1583,10 @@ class SpeechService extends EventEmitter {
       }
     }
 
+    if (this.whisperCommand.allowCliFallback === false) {
+      throw new Error('The included speech worker is unavailable. Restart the app and retry.');
+    }
+    this._assertWhisperProcessAvailable();
     const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sru-whisper-out-'));
     const args = [
       ...this.whisperCommand.baseArgs,
@@ -1949,28 +1608,77 @@ class SpeechService extends EventEmitter {
       args.push('--model_dir', this._getWhisperModelDir());
     }
 
+    const device = this._getWhisperDevice();
+    if (device === 'cpu' || device === 'cuda') {
+      args.push('--device', device);
+    }
+
+    let child = null;
+    let closed = false;
+    let finished = false;
     try {
       await new Promise((resolve, reject) => {
-        const child = spawn(this.whisperCommand.command, args, {
-          stdio: ['ignore', 'pipe', 'pipe']
+        child = spawn(this.whisperCommand.command, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true
         });
 
+        this._whisperChildren ||= new Set();
+        this._whisperChildren.add(child);
+        const releaseInput = retainInput?.();
+        let settled = false;
+        let failure = null;
+        let executionTimer = null;
+        let terminationTimer = null;
+        const settle = (error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(executionTimer);
+          clearTimeout(terminationTimer);
+          if (error) reject(error);
+          else resolve();
+        };
+        const terminate = (error) => {
+          if (failure || closed) return;
+          failure = error;
+          clearTimeout(executionTimer);
+          terminationTimer = setTimeout(() => {
+            settle(new Error(`${failure.message}; process termination is unconfirmed`));
+          }, 5000);
+          try { child.kill(); } catch (_) { /* Wait for close or the grace deadline. */ }
+        };
+        this._whisperCancellations ||= new Map();
+        this._whisperCancellations.set(child, () => {
+          const error = new Error('Transcription cancelled');
+          terminate(error);
+          settle(error);
+        });
+        executionTimer = setTimeout(() => {
+          terminate(new Error('Whisper CLI timed out after 180000ms'));
+        }, 180000);
+
+        // Drain both pipes so child output cannot stall transcription.
+        child.stdout.resume();
         let stderr = '';
         child.stderr.on('data', (chunk) => {
-          stderr += chunk.toString();
+          stderr = (stderr + chunk.toString()).slice(-16384);
         });
 
         child.on('error', (error) => {
-          reject(error);
+          terminate(error);
         });
 
-        child.on('close', (code) => {
-          if (code === 0) {
-            resolve();
-            return;
-          }
-
-          reject(new Error(stderr.trim() || `Whisper exited with code ${code}`));
+        child.once('close', (code) => {
+          closed = true;
+          this._whisperChildren.delete(child);
+          this._whisperCancellations.delete(child);
+          releaseInput?.();
+          const error = failure || (this._generation !== generation
+            ? new Error('Transcription cancelled')
+            : code === 0 ? null : new Error(stderr.trim() || `Whisper exited with code ${code}`));
+          settle(error);
+          // If the grace deadline already rejected, close now owns cleanup.
+          if (finished) this._removeTempDir(outputDir);
         });
       });
 
@@ -1981,7 +1689,9 @@ class SpeechService extends EventEmitter {
 
       return fs.readFileSync(transcriptPath, 'utf8').trim();
     } finally {
-      this._removeTempDir(outputDir);
+      finished = true;
+      // Do not delete output while a timed-out child could still be writing.
+      if (!child || closed) this._removeTempDir(outputDir);
     }
   }
 

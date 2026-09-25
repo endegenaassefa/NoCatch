@@ -20,6 +20,7 @@
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { resolveWhisperRuntime } = require('./whisper-runtime');
 
 const PROBE_TIMEOUT_MS = 30000; // first `import whisper` (torch) is slow on a cold cache
 const INSTALL_TIMEOUT_MS = 300000; // pip downloads can be slow on cold cache
@@ -28,7 +29,7 @@ const INSTALL_TIMEOUT_MS = 300000; // pip downloads can be slow on cold cache
  * Run a command, streaming stdout/stderr lines to `onProgress` as they
  * arrive. Resolves with the full result once the process exits.
  */
-function runExec(cmd, args, { timeout = PROBE_TIMEOUT_MS, onProgress } = {}) {
+function runExec(cmd, args, { timeout = PROBE_TIMEOUT_MS, onProgress, env = process.env } = {}) {
   const log = (line) => {
     if (typeof onProgress === 'function' && line) {
       try { onProgress(line); } catch (_) { /* swallow handler errors */ }
@@ -49,7 +50,7 @@ function runExec(cmd, args, { timeout = PROBE_TIMEOUT_MS, onProgress } = {}) {
     try {
       child = spawn(cmd, args, {
         windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+        env: { ...env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
       });
     } catch (e) {
       finish({ ok: false, error: e.message, stderr: e.message, stdout: '', code: null });
@@ -132,6 +133,18 @@ class WhisperInstaller {
     this.dataDir = options.dataDir || this.cwd;
     this.platform = options.platform || process.platform;
     this.runExec = options.runExec || runExec;
+    this.runtimeOptions = options;
+  }
+
+  _bundledRuntime() {
+    return resolveWhisperRuntime({
+      platform: this.platform,
+      isPackaged: Boolean(this.runtimeOptions.isPackaged),
+      resourcesPath: this.runtimeOptions.resourcesPath || process.resourcesPath,
+      configuredCommand: this.runtimeOptions.configuredCommand,
+      configuredPython: this.runtimeOptions.configuredPython,
+      env: this.runtimeOptions.env || process.env
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -175,8 +188,21 @@ class WhisperInstaller {
   // ─────────────────────────────────────────────────────────────────
 
   async detect() {
-    // 1. Honor WHISPER_COMMAND env if user has it set already
-    const fromEnv = (process.env.WHISPER_COMMAND || '').trim();
+    const bundled = this._bundledRuntime();
+    if (bundled) {
+      // Persist the default selector, never a portable EXE's extraction path.
+      return { found: true, command: 'whisper', version: bundled.manifest.id,
+        source: 'bundled', pythonPath: bundled.pythonPath };
+    }
+    const env = this.runtimeOptions.env || process.env;
+    const python = String(this.runtimeOptions.configuredPython || env.WHISPER_PYTHON || '').trim();
+    if (python) {
+      const probe = await this._probe([python, '-m', 'whisper']);
+      return { found: probe.ok, command: probe.ok ? `"${python}" -m whisper` : null,
+        version: probe.version || null, source: 'custom Python' };
+    }
+    // Explicit settings and environment use the same priority as transcription.
+    const fromEnv = String(this.runtimeOptions.configuredCommand || env.WHISPER_COMMAND || '').trim();
     if (fromEnv) {
       const parsed = this._parseCommandString(fromEnv);
       if (parsed && parsed.length > 0) {
@@ -233,6 +259,10 @@ class WhisperInstaller {
    * @returns {Promise<{ok: boolean, command: string|null, message: string, logs: string}>}
    */
   async install({ onProgress } = {}) {
+    const bundled = this._bundledRuntime();
+    if (bundled) {
+      return { ok: true, command: 'whisper', message: 'The speech engine is included. Prepare a model to use voice.', logs: '' };
+    }
     const log = (line) => {
       if (typeof onProgress === 'function') onProgress(line);
     };
@@ -560,6 +590,7 @@ class WhisperInstaller {
       }
     };
 
+    const bundled = this._bundledRuntime();
     let pythonCmd = this._resolveWhisperPython();
     if (!pythonCmd) {
       const detectResult = await this.detect();
@@ -578,6 +609,7 @@ class WhisperInstaller {
     ], {
       timeout: 600000,
       onProgress: log,
+      ...(bundled ? { env: bundled.env } : {}),
     });
 
     if (!loadResult.ok) {
@@ -590,10 +622,16 @@ class WhisperInstaller {
   }
 
   _resolveWhisperPython() {
+    const bundled = this._bundledRuntime();
+    if (bundled) return bundled.pythonPath;
+    const env = this.runtimeOptions.env || process.env;
+    const python = String(this.runtimeOptions.configuredPython || env.WHISPER_PYTHON || '').trim();
+    if (python) return python;
+    const configured = String(this.runtimeOptions.configuredCommand || env.WHISPER_COMMAND || '').trim();
+    if (configured && configured.toLowerCase() !== 'whisper') return this._pythonFromCommand(configured);
     const vp = this.venvPaths;
     if (fs.existsSync(vp.python)) return vp.python;
 
-    const configured = (process.env.WHISPER_COMMAND || '').trim();
     if (configured) return this._pythonFromCommand(configured);
     return null;
   }

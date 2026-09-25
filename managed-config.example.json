@@ -1,0 +1,8 @@
+{
+  "issuer": "https://identity.example.invalid/",
+  "clientId": "REPLACE_WITH_PUBLIC_NATIVE_CLIENT_ID",
+  "apiBaseUrl": "https://api.example.invalid",
+  "audience": "REPLACE_WITH_API_AUDIENCE",
+  "scopes": ["openid", "offline_access", "answers:write"],
+  "loopbackPorts": [0]
+}

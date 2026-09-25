@@ -270,6 +270,15 @@
         .settings-note code {
             color: rgba(255, 255, 255, 0.9);
         }
+        .settings-container { background: #151515; }
+        [hidden] { display: none !important; }
+        .account-actions { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+        #accountMessage { margin-top:8px; overflow-wrap:anywhere; }
+        #managedAccountStatus { overflow-wrap:anywhere; }
+        #advancedSettings > summary { cursor:pointer; padding:12px 0; margin-bottom:12px; font-weight:600; }
+        #aiMode { display:block; width:100%; margin:12px 0; }
+        button:focus-visible, select:focus-visible, summary:focus-visible { outline:2px solid white; outline-offset:3px; }
+        @media (max-width:480px) { .settings-content { padding:14px; } .settings-item { flex-direction:column; align-items:stretch; gap:8px; } .input-field { width:100%; max-width:100%; } }
     </style>
 </head>
 <body>
@@ -292,6 +301,33 @@
         </div>
         
         <div class="settings-content">
+            <section class="settings-section" aria-labelledby="accountHeading">
+                <h2 class="settings-section-title" id="accountHeading">Your account</h2>
+                <div class="settings-section-content">
+                    <p id="managedAccountStatus">Checking your account…</p>
+                    <p id="accountMessage" class="settings-note" role="status" aria-live="polite"></p>
+                    <div class="account-actions">
+                        <button class="btn" id="accountSignIn" disabled>Sign in</button>
+                        <button class="btn" id="accountSignOut" hidden>Sign out</button>
+                        <button class="btn" id="resumeSetup">Resume setup</button>
+                        <button class="btn" id="accountRecheck">Check again</button>
+                    </div>
+                    <p class="settings-note">Sign-out stops requests and removes saved sign-in on this device. It does not delete server records. The pilot service retains answers and events for 24 hours by default; already-issued access tokens may remain valid until expiry.</p>
+                </div>
+            </section>
+            <details id="advancedSettings">
+                <summary>Advanced Settings</summary>
+                <section class="settings-section" aria-labelledby="aiModeLabel">
+                    <div class="settings-section-content">
+                        <label id="aiModeLabel" for="aiMode">AI connection</label>
+                        <select class="input-field" id="aiMode" disabled>
+                            <option value="managed">OpenCluely account</option>
+                            <option value="direct">My own provider keys</option>
+                        </select>
+                        <p class="settings-note">Managed AI uses your OpenCluely account. Direct AI uses the keys below. Voice is optional and has its own configuration; a packaged local speech runtime is not included yet.</p>
+                    </div>
+                </section>
+
             <div class="settings-section">
                 <div class="settings-section-title">
                     <i class="fas fa-code"></i>
@@ -386,13 +422,32 @@
                         </div>
                     </div>
 
+                    <datalist id="whisperModelOptions">
+                        <option value="tiny.en"><option value="tiny"><option value="base.en"><option value="base">
+                        <option value="small.en"><option value="small"><option value="medium.en"><option value="medium">
+                        <option value="large-v1"><option value="large-v2"><option value="large-v3"><option value="large">
+                        <option value="large-v3-turbo"><option value="turbo">
+                    </datalist>
                     <!-- Whisper fields (shown only when Whisper is selected) -->
                     <div id="whisperFields" class="settings-group">
+                        <div class="settings-item" id="whisperModelSetup">
+                            <div class="settings-stack">
+                                <div class="settings-item-label">Prepare local voice</div>
+                                <div class="settings-item-description">Download your selected model once. Audio is transcribed on this computer.</div>
+                                <div id="whisperModelSize" class="settings-item-description"></div>
+                                <div id="whisperModelStatus" role="status" aria-live="polite">Checking the speech engine…</div>
+                                <progress id="whisperModelProgress" max="100" value="0" hidden aria-label="Voice model download" style="width:100%"></progress>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px">
+                                    <button class="btn" id="prepareWhisperModelButton" disabled>Prepare model</button>
+                                    <button class="btn" id="cancelWhisperModelButton" hidden>Cancel</button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="settings-item">
                             <div class="settings-stack">
                                 <div>
                                     <div class="settings-item-label">Whisper Command</div>
-                                    <div class="settings-item-description">CLI command for local Whisper, such as <code>whisper</code> or <code>python3 -m whisper</code></div>
+                                    <div class="settings-item-description">Advanced: leave as whisper to use the included Windows engine, or enter your custom runtime command.</div>
                                 </div>
                                 <input type="text" class="input-field" id="whisperCommand" placeholder="whisper" style="max-width: 100%;">
                             </div>
@@ -400,9 +455,9 @@
                         <div class="settings-item">
                             <div>
                                 <div class="settings-item-label">Whisper Model</div>
-                                <div class="settings-item-description">Local model name used by the Whisper CLI</div>
+                                <div class="settings-item-description">Choose a model before preparing voice. The default is small.</div>
                             </div>
-                            <input type="text" class="input-field" id="whisperModel" placeholder="small">
+                            <input type="text" class="input-field" id="whisperModel" placeholder="small" list="whisperModelOptions">
                         </div>
                         <div class="settings-item">
                             <div>
@@ -414,7 +469,7 @@
                         <div class="settings-item">
                             <div>
                                 <div class="settings-item-label">Compute Device</div>
-                                <div class="settings-item-description">Automatically use CUDA when available, or force CPU/GPU</div>
+                                <div class="settings-item-description">The included Windows engine uses CPU. CUDA requires a custom runtime.</div>
                             </div>
                             <select class="input-field" id="whisperDevice">
                                 <option value="auto">Auto</option>
@@ -563,9 +618,12 @@
                     </div>
                 </div>
             </div>
+            </details>
         </div>
     </div>
 
     <script src="./src/ui/settings-window.js"></script>
+    <script src="./src/ui/whisper-model-setup.js"></script>
+    <script src="./src/ui/account-settings.js"></script>
 </body>
 </html>

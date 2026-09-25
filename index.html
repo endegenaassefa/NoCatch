@@ -9,13 +9,14 @@
       body {
         margin: 0;
         padding: 0;
-        width: fit-content;
+        width: 100%;
         height: fit-content;
         background: transparent;
         -webkit-app-region: no-drag;
       }
 
   .command-tab {
+        box-sizing: border-box;
         height: 28px;
         background: linear-gradient(
           135deg,
@@ -27,8 +28,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 16px;
-        padding: 0 12px;
+        gap: 8px;
+        padding: 0 8px;
         color: rgba(255, 255, 255, 0.9);
         font-size: 11px;
         font-weight: 600;
@@ -45,7 +46,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 6px 10px;
+        padding: 6px 6px;
         border-radius: 6px;
         color: rgba(255, 255, 255, 0.9);
         font-size: 12px;
@@ -54,6 +55,7 @@
         -webkit-app-region: no-drag;
   /* Allow items to shrink so the bar can collapse to one icon width */
   flex-shrink: 1;
+  min-width: 0;
       }
 
       .command-item:hover {
@@ -191,6 +193,12 @@
         text-shadow: 0 1px 2px rgba(255, 167, 38, 0.3);
       }
 
+      /* Keep the nested select inside the 28px toolbar. */
+      #languageSelector {
+        padding-top: 0;
+        padding-bottom: 0;
+      }
+
       .command-item select {
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
         border: 1px solid rgba(255, 255, 255, 0.2);
@@ -256,7 +264,9 @@
       /* Info popover styles */
       .shortcuts-popover {
         position: absolute;
+        box-sizing: border-box;
         top: 36px; /* below command bar */
+        left: 8px;
         right: 8px;
         background: linear-gradient(
           135deg,
@@ -269,7 +279,9 @@
         color: rgba(255, 255, 255, 0.95);
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
         padding: 12px;
-        min-width: 340px;
+        min-width: 0;
+        max-height: 600px;
+        overflow-y: auto;
         z-index: 1000;
         -webkit-app-region: no-drag;
         /* Hidden by default: do not intercept clicks */
@@ -300,6 +312,8 @@
       .shortcuts-table {
         width: 100%;
         border-collapse: collapse;
+        table-layout: fixed;
+        overflow-wrap: anywhere;
         font-size: 12px;
       }
 
@@ -355,7 +369,7 @@
     <div class="command-tab">
       <div class="command-item">
         <i class="fas fa-camera"></i>
-        <span>⌘⇧S</span>
+        <span id="captureShortcutLabel">Ctrl/Cmd+Shift+S</span>
       </div>
       <div class="command-separator"></div>
       <div class="command-item" id="micButton">
@@ -463,6 +477,7 @@
         </tbody>
       </table>
 
+      <section id="captureModeShortcuts" hidden>
       <div class="shortcuts-title" style="margin-top:10px;">
         <i class="fas fa-keyboard"></i> While Capturing
       </div>
@@ -512,12 +527,14 @@
           </tr>
         </tbody>
       </table>
+      </section>
       <div class="shortcuts-footer">
-        <span>Tip: everything in the menu works without touching the mouse — nothing shows on a shared screen.</span>
+        <span>Unavailable shortcuts are marked above. Use another available shortcut or the app controls.</span>
         <a href="https://techycsr.dev" target="_blank" rel="noreferrer noopener">Made by @TechyCSR</a>
       </div>
     </div>
 
+    <script src="./src/ui/microphone-capture.js"></script>
     <script src="./src/ui/main-window.js"></script>
   </body>
 </html>

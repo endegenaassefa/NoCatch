@@ -1,0 +1,15 @@
+# Adopt existing work without rewriting it
+
+Apply when a project predates the harness, when importing another agent's work, or when upgrading policy during an active project.
+
+1. Identify the exact project and any run IDs. Read canonical state without scheduling or migrating it. `active=null` is not proof that a conversational editor is idle. Agree on a concrete handoff with the current owner; let its in-flight work reach a checkpoint. Do not silently stop it, replenish its budget, change its tests or replace the runtime it uses.
+2. Preserve dirty source and evidence. Run `scripts/adopt.py --project PROJECT --output FRESH_EXTERNAL_DIRECTORY --checkpoint` only at a handoff. It creates a source archive and hash inventory without touching source/runtime state; it refuses active recorded runs, changing source, existing output or output inside the project. Exclusions include git metadata, dependencies, dist, generated evidence and common credential-file names: it is not a complete machine backup. Copy runtime state separately through SQLite backup if needed.
+3. Independently discover the important user journeys and current behavior. Read prior tests/reviews/build records as historical evidence. Classify each behavior as demonstrated at a specified revision, reproducibly broken, unverified, environment-blocked or a product choice. Missing evidence is not a proven defect.
+4. QA first adopts useful old tests and validates their sensitivity, then adds only material coverage gaps. Run the new suite against the baseline BEFORE allocating repairs. Preserve the existing implementation when it passes. Avoid broad modernization/refactoring unrelated to failures.
+5. Create a NEW version-2 run with QA-owned contract, baseline/evidence pointers and bounded repair tasks. Link predecessor IDs in context/decisions. Do not retroactively mark old runs compliant, completed or failed under the new rules. The upgraded runtime reads/controls legacy state but refuses new execution of legacy runs; a preserved prior runtime may be used for an explicitly chosen old-contract continuation.
+
+Independent read-only agents can inspect separate journeys, but only one writer owns source. Findings must carry reproduction/evidence and source version. Do not launch a swarm that changes old code simultaneously. Customer/native deployment qualification remains separate from local fixture success.
+
+A checkpoint is complete only when both `baseline.json` and its referenced archive exist and match. Ordinary report-write failures clean this invocation's files; a hard process/machine crash can leave partial output. Preserve and inspect that output before retrying with a fresh directory. Credential filename exclusions are case-insensitive but not a secret-content scanner; keep archives local.
+
+A conversation already in progress keeps its loaded contract until an explicit checkpoint. Read an updated skill for the next task or deliberately reviewed replacement run; installing files does not rewrite loaded context. Preserve project-specific history in that project's handoff, rather than embedding it as a global skill rule.

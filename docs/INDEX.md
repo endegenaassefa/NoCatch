@@ -25,6 +25,7 @@ the pointers — nothing here is a dead end.
 
 | Doc | What it covers |
 |---|---|
+| [`depthengine/README.md`](depthengine/README.md) | Project-local Depth Engine skill and the compact historical instance snapshot |
 | [`BUILDING.md`](BUILDING.md) | Cross-platform build commands, signing inputs, artifact verification, draft-release behavior and remaining qualification gates |
 | [`CROSS-PLATFORM-DESIGN.md`](CROSS-PLATFORM-DESIGN.md) | Proposed full-feature Windows/macOS design: managed sign-in, parity inventory, platform boundaries, setup recovery, migration and release gates |
 | [`CROSS-PLATFORM-REVIEW.md`](CROSS-PLATFORM-REVIEW.md) | Isolated Codex design review and source-verified findings; initial scope superseded by the full-parity requirement |

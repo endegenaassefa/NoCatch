@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "id": "mattpocock-diagnosing-bugs",
+      "entrypoint": "vendor/mattpocock-diagnosing-bugs/SKILL.md",
+      "files": {
+        "vendor/mattpocock-diagnosing-bugs/agents/openai.yaml": "3e430dbe4334a87597488c060cb3dc3786bb00c9182877d6f5ec41f62490e90b",
+        "vendor/mattpocock-diagnosing-bugs/LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "vendor/mattpocock-diagnosing-bugs/scripts/hitl-loop.template.sh": "35103539fc36873eea36074769ad454f9379d6fc8b2dc0e26ce987fd3bfe5503",
+        "vendor/mattpocock-diagnosing-bugs/SKILL.md": "77f3cf31bc99b2f49af943222526531fcc9fc41d047626d3640e875e85af3e84"
+      },
+      "domains": [
+        "development"
+      ],
+      "modes": [
+        "debug"
+      ],
+      "roles": [
+        "build",
+        "research"
+      ],
+      "automatic": true,
+      "adaptation": "Use the real symptom/probe/minimize/repair/original-scenario loop. Source inspection to locate the reproduction is allowed. The builder never authors tests: independent QA owns regression authoring/calibration. Do not stop useful read-only diagnosis merely because reproduction is unavailable; label it unconfirmed. No mandatory Bash/HITL script or user checkpoint for routine engineering choices. No nested delegation."
+    },
+    {
+      "id": "mattpocock-codebase-design",
+      "entrypoint": "vendor/mattpocock-codebase-design/SKILL.md",
+      "files": {
+        "vendor/mattpocock-codebase-design/agents/openai.yaml": "edebc9e4fcfe102114012575eaa9600b9b5fd08c311664f389c36e7bc717740f",
+        "vendor/mattpocock-codebase-design/DEEPENING.md": "f3dd099ce99289bd213914d8ee3e2429b78309c3957ca4583f7659551b1d53c1",
+        "vendor/mattpocock-codebase-design/DESIGN-IT-TWICE.md": "8e740bf98446dbd4dfdc132ac4346d9a7eedaf93de6a495889171cf7f99f16bd",
+        "vendor/mattpocock-codebase-design/LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "vendor/mattpocock-codebase-design/SKILL.md": "2c20617f87ec8af6a434859f381b2f061a69b530444e74eb39e78bb016a6d1e2"
+      },
+      "domains": [
+        "development"
+      ],
+      "modes": [
+        "refactor"
+      ],
+      "roles": [
+        "build",
+        "research"
+      ],
+      "automatic": true,
+      "adaptation": "Apply small useful interfaces and testability at real public boundaries. Preserve existing project vocabulary instead of forcing glossary renames. Do not spawn alternative-design subagents from a delegated worker. Refactor only within the requested scope; QA retains test ownership."
+    },
+    {
+      "id": "mattpocock-tdd",
+      "entrypoint": "vendor/mattpocock-tdd/SKILL.md",
+      "files": {
+        "vendor/mattpocock-tdd/agents/openai.yaml": "ea6f01cf1b8c06a4b0f5b649d74b1b8ce8685e72af1b38d70d877693e092af0b",
+        "vendor/mattpocock-tdd/LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "vendor/mattpocock-tdd/mocking.md": "3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef",
+        "vendor/mattpocock-tdd/SKILL.md": "cb01f66bebfaa25fa1f88e6b7e769cd9fd9f35b1120b8563749820738814c927",
+        "vendor/mattpocock-tdd/tests.md": "859f9e592c188fda4fc7277dd180e4ce9c7a2e13f6efe1f6f29eccc9d28c106a"
+      },
+      "domains": [
+        "development"
+      ],
+      "modes": [
+        "feature",
+        "debug"
+      ],
+      "roles": [
+        "qa"
+      ],
+      "automatic": true,
+      "adaptation": "You are independent QA, not the builder. Select test boundaries from user requirements and existing project contracts without asking about routine implementation details. Author/calibrate tests before the corresponding build run freezes; give the builder read/run access only. Keep each contract small; new behavior requires a reviewed new run. Preserve useful existing tests. Refactoring is allowed when authorized and verified; this skill does not override repository practice."
+    },
+    {
+      "id": "pstack-create-verification-skill",
+      "entrypoint": "vendor/pstack-create-verification-skill/SKILL.md",
+      "files": {
+        "vendor/pstack-create-verification-skill/LICENSE": "bc957ca6bee02792566a1a028d105e02e247c6e77cf057061674273da77b200e",
+        "vendor/pstack-create-verification-skill/references/feature-map-example/create-note.md": "644a44c74f35d38c2feb7cd05a0121fdebbb623e8dc376c185b565a581d1ccf7",
+        "vendor/pstack-create-verification-skill/references/feature-map-example/README.md": "cb7bd782cf89968a4ba3d58a5151db837430db92d19a6f52a906973b77b516ba",
+        "vendor/pstack-create-verification-skill/references/feature-map-example/search.md": "6e87b9e7f2791a7776ba1bb83f371cd285c306c67f19d245cc4dd6ca3015c823",
+        "vendor/pstack-create-verification-skill/SKILL.md": "644f2551403c1bca01a2855b34611b6e7be0ce0dc5b204514c376c0f6a6e6ac4"
+      },
+      "domains": [
+        "development",
+        "frontend",
+        "devops"
+      ],
+      "modes": [
+        "verify"
+      ],
+      "roles": [
+        "qa"
+      ],
+      "automatic": false,
+      "adaptation": "Use only when the project lacks a usable verification map/harness. Use project-native documentation or .depthengine evidence paths, not mandatory .cursor directories. Independently create the launch/doctor/drive/evidence/cleanup instructions and user-facing feature map; execute a mapped path before calling it verified. QA may edit only its owned map/check assets before freezing, never product code. Report broken product startup rather than repairing production. No external publication, automatic maintenance schedule, or nested coordinator."
+    },
+    {
+      "id": "pstack-maintain-verification-skill",
+      "entrypoint": "vendor/pstack-maintain-verification-skill/SKILL.md",
+      "files": {
+        "vendor/pstack-maintain-verification-skill/LICENSE": "bc957ca6bee02792566a1a028d105e02e247c6e77cf057061674273da77b200e",
+        "vendor/pstack-maintain-verification-skill/SKILL.md": "515c0eaa054b3f6be1b1fb06f2c2f173c80fddb58bbcac57576f89c479bc68e8"
+      },
+      "domains": [
+        "development",
+        "frontend",
+        "devops"
+      ],
+      "modes": [
+        "verify"
+      ],
+      "roles": [
+        "qa"
+      ],
+      "automatic": false,
+      "adaptation": "Use only for an existing verification map needing audit. Source and live coverage are distinct; report product regressions instead of rewriting expected behavior. Use native host tools and existing docs locations. As a delegated worker, do source checks yourself; coordinator may assign independent reads separately. No automatic PR, publication or fixed cadence. Freeze QA changes before a new build contract."
+    },
+    {
+      "id": "anthropics-frontend-design",
+      "entrypoint": "vendor/anthropics-frontend-design/SKILL.md",
+      "files": {
+        "vendor/anthropics-frontend-design/LICENSE.txt": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "vendor/anthropics-frontend-design/SKILL.md": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+      },
+      "domains": [
+        "frontend"
+      ],
+      "modes": [
+        "design"
+      ],
+      "roles": [
+        "build"
+      ],
+      "automatic": true,
+      "adaptation": "Apply only for a requested visual design or redesign. The actual brief, supplied screenshots and established design system prevail over studio persona, novelty or anti-pattern preferences. Do not assume the client rejected prior designs or consult personal memory. Infer routine design choices and ask only consequential unresolved product choices. Inspect rendered screens with verified tools; a self-critique does not replace independent QA."
+    },
+    {
+      "id": "depth-research",
+      "entrypoint": "references/research.md",
+      "files": {
+        "references/adoption.md": "b3dfd00d5bae10a770898ce9b52c78e6a966ef95b8bccf0efeb24ec73b88bbaa",
+        "references/discovery.md": "2960d1e1fe54036c9b35fdfe6b1555757207a3bd53f57800789aebc15a07867d",
+        "references/engineering.md": "576b08590997c53fd06f40af8328fa2e1fa6955b5f2360e286603848e7ede7f8",
+        "references/exploratory-qa.md": "d7db9e0636d447a8a57c84b185f8e86cff207901360b3ff3492951bb60cd7781",
+        "references/improvement.md": "6558c9e29e52b7a0fe52350844299dce49b083f0645d09216f11ece5df109e9c",
+        "references/native-dispatch.md": "80a0dae8f272d7b89dbf89011c2f60c758fc273019729af1c16a593f42e386fd",
+        "references/operations.md": "f0f81a90f36c3e0e4c2b330bcdc76b1119591c2e77a9ad89ebd4f6d6a353cfc9",
+        "references/product-design.md": "9fbd43be8048a3532ed56e4cfdd201b7bfab4ad192df9c290811c65b90b06b19",
+        "references/quality.md": "46cca4ac6aeb09988aa978c3ec176a3b5ef410584ec3b05fdc68fec974fb880e",
+        "references/research.md": "8e189dee9e9a6141fb98f37b35a4484d357a717f10b537a315824e4b0c46a3c6",
+        "references/review.md": "15473c7df104233111e1a2754f3e2c1da7b13102dd7fb496641ecf7ba7a83b3a",
+        "references/routing-context.md": "a4417928659a11619915348bc8c3d9bf4f35543264fd6b0779a7122efa983ded",
+        "references/runtime.md": "e2498308ace6a36467cece07e571430af3fa8d2917eaa8981da5cda2dd328fcc",
+        "references/skill-composition.md": "7e17127293179f13a3e5c25e40590229493da8769f2d105876d29634654d86c8",
+        "references/tools.md": "38b60a9dbe4f422f8612063f73bbc02e7678e900a9a838cebf3d92706bb2a347",
+        "scripts/adapters.py": "f250ced18675a238c18810b65195a5d958ca5057f57a05bd359597b44a718375",
+        "scripts/adopt.py": "7f20fa55d24cc2f0243e7c08c410e03e6a1409664dfe16d9f4a5c84d94b19e2d",
+        "scripts/browser_read.py": "ebb12c2a22b510f34bc5313ac9062973391b8d5ea11a1d52f5dfea02cb83dbb5",
+        "scripts/depth.py": "d727e6b6ee0ee36fa01cc3845c1dbae8f3e928b2be0b7c80a919a8aaf9ad724f",
+        "scripts/desktop.py": "08750317c10aec5f3ecb9fc0718e1bb090fef35dd66515b69f53351d95b04cc0",
+        "scripts/dispatch.py": "40f496ae2e7c3d1e7bf8c28448f5fd877b354c1e21688cf24af3b74039e51f01",
+        "scripts/launch.py": "26be5539b20518291beca243c1a55351e70300f940a237ff0aa21285141c777d",
+        "scripts/quality.py": "4dfc8a9922572bfce97d28fc9fbbbdd9dc202bfbad5b2a689d35bad70f4c57ef",
+        "scripts/review.py": "cccac3f1f6aa02674a1808a58c453470c31a188749494c68776a0a18cc17f4e5",
+        "scripts/routing.py": "5655bd03bcf27eb449737a5bd98bed57ec72ae2b36d2f1de80d6f48d564aa32c",
+        "scripts/state.py": "1c0482258171b56902b2e87e28e5c9d10a06cf915e194e043ae8ab21e8e0ee8b",
+        "scripts/supervise.py": "58b8527d610114d5e4231725d621d10cf3f983f158641c9f5a50ba9018db60b7",
+        "scripts/tooling.py": "3188dfc8281fb726079012f7c10a49895604a1d31b9586c836f22af42be726b5",
+        "evals/protocol.md": "7cbe63fe8d239e9f8ff897504bcbb489c38ca05b6e53c4a1c078dd9a6789ec75",
+        "evals/scenarios.md": "9115d43709660815208b106f1d28257fed5bf5c8efe4b99c68d32ea8920df9aa",
+        "evals/test_browser_read.py": "d17471b1a232573bb5c1fc3c0cb26e8c6e0fa34c347ab1621ec8830d72a697e3",
+        "evals/test_dispatch.py": "c338a8681a8c1660dda6a2e62963c17f237f5e169cf74a1ce8e3f8941146ee73",
+        "SKILL.md": "8e57d0fc69bf02fd340795b89307aafb432a8b9646b8ffb303b9fc07e531d457"
+      },
+      "domains": [
+        "research"
+      ],
+      "modes": [
+        "research"
+      ],
+      "roles": [
+        "research"
+      ],
+      "adaptation": "Use this Depth Engine playbook within the task scope; local linked references remain relative to this entrypoint."
+    },
+    {
+      "id": "depth-operations",
+      "entrypoint": "references/operations.md",
+      "files": {
+        "references/adoption.md": "b3dfd00d5bae10a770898ce9b52c78e6a966ef95b8bccf0efeb24ec73b88bbaa",
+        "references/discovery.md": "2960d1e1fe54036c9b35fdfe6b1555757207a3bd53f57800789aebc15a07867d",
+        "references/engineering.md": "576b08590997c53fd06f40af8328fa2e1fa6955b5f2360e286603848e7ede7f8",
+        "references/exploratory-qa.md": "d7db9e0636d447a8a57c84b185f8e86cff207901360b3ff3492951bb60cd7781",
+        "references/improvement.md": "6558c9e29e52b7a0fe52350844299dce49b083f0645d09216f11ece5df109e9c",
+        "references/native-dispatch.md": "80a0dae8f272d7b89dbf89011c2f60c758fc273019729af1c16a593f42e386fd",
+        "references/operations.md": "f0f81a90f36c3e0e4c2b330bcdc76b1119591c2e77a9ad89ebd4f6d6a353cfc9",
+        "references/product-design.md": "9fbd43be8048a3532ed56e4cfdd201b7bfab4ad192df9c290811c65b90b06b19",
+        "references/quality.md": "46cca4ac6aeb09988aa978c3ec176a3b5ef410584ec3b05fdc68fec974fb880e",
+        "references/research.md": "8e189dee9e9a6141fb98f37b35a4484d357a717f10b537a315824e4b0c46a3c6",
+        "references/review.md": "15473c7df104233111e1a2754f3e2c1da7b13102dd7fb496641ecf7ba7a83b3a",
+        "references/routing-context.md": "a4417928659a11619915348bc8c3d9bf4f35543264fd6b0779a7122efa983ded",
+        "references/runtime.md": "e2498308ace6a36467cece07e571430af3fa8d2917eaa8981da5cda2dd328fcc",
+        "references/skill-composition.md": "7e17127293179f13a3e5c25e40590229493da8769f2d105876d29634654d86c8",
+        "references/tools.md": "38b60a9dbe4f422f8612063f73bbc02e7678e900a9a838cebf3d92706bb2a347",
+        "scripts/adapters.py": "f250ced18675a238c18810b65195a5d958ca5057f57a05bd359597b44a718375",
+        "scripts/adopt.py": "7f20fa55d24cc2f0243e7c08c410e03e6a1409664dfe16d9f4a5c84d94b19e2d",
+        "scripts/browser_read.py": "ebb12c2a22b510f34bc5313ac9062973391b8d5ea11a1d52f5dfea02cb83dbb5",
+        "scripts/depth.py": "d727e6b6ee0ee36fa01cc3845c1dbae8f3e928b2be0b7c80a919a8aaf9ad724f",
+        "scripts/desktop.py": "08750317c10aec5f3ecb9fc0718e1bb090fef35dd66515b69f53351d95b04cc0",
+        "scripts/dispatch.py": "40f496ae2e7c3d1e7bf8c28448f5fd877b354c1e21688cf24af3b74039e51f01",
+        "scripts/launch.py": "26be5539b20518291beca243c1a55351e70300f940a237ff0aa21285141c777d",
+        "scripts/quality.py": "4dfc8a9922572bfce97d28fc9fbbbdd9dc202bfbad5b2a689d35bad70f4c57ef",
+        "scripts/review.py": "cccac3f1f6aa02674a1808a58c453470c31a188749494c68776a0a18cc17f4e5",
+        "scripts/routing.py": "5655bd03bcf27eb449737a5bd98bed57ec72ae2b36d2f1de80d6f48d564aa32c",
+        "scripts/state.py": "1c0482258171b56902b2e87e28e5c9d10a06cf915e194e043ae8ab21e8e0ee8b",
+        "scripts/supervise.py": "58b8527d610114d5e4231725d621d10cf3f983f158641c9f5a50ba9018db60b7",
+        "scripts/tooling.py": "3188dfc8281fb726079012f7c10a49895604a1d31b9586c836f22af42be726b5",
+        "evals/protocol.md": "7cbe63fe8d239e9f8ff897504bcbb489c38ca05b6e53c4a1c078dd9a6789ec75",
+        "evals/scenarios.md": "9115d43709660815208b106f1d28257fed5bf5c8efe4b99c68d32ea8920df9aa",
+        "evals/test_browser_read.py": "d17471b1a232573bb5c1fc3c0cb26e8c6e0fa34c347ab1621ec8830d72a697e3",
+        "evals/test_dispatch.py": "c338a8681a8c1660dda6a2e62963c17f237f5e169cf74a1ce8e3f8941146ee73",
+        "SKILL.md": "8e57d0fc69bf02fd340795b89307aafb432a8b9646b8ffb303b9fc07e531d457"
+      },
+      "domains": [
+        "devops"
+      ],
+      "modes": [
+        "operations"
+      ],
+      "roles": [
+        "build",
+        "research",
+        "qa"
+      ],
+      "adaptation": "Use this Depth Engine playbook within the task scope; local linked references remain relative to this entrypoint."
+    },
+    {
+      "id": "depth-product",
+      "entrypoint": "references/product-design.md",
+      "files": {
+        "references/adoption.md": "b3dfd00d5bae10a770898ce9b52c78e6a966ef95b8bccf0efeb24ec73b88bbaa",
+        "references/discovery.md": "2960d1e1fe54036c9b35fdfe6b1555757207a3bd53f57800789aebc15a07867d",
+        "references/engineering.md": "576b08590997c53fd06f40af8328fa2e1fa6955b5f2360e286603848e7ede7f8",
+        "references/exploratory-qa.md": "d7db9e0636d447a8a57c84b185f8e86cff207901360b3ff3492951bb60cd7781",
+        "references/improvement.md": "6558c9e29e52b7a0fe52350844299dce49b083f0645d09216f11ece5df109e9c",
+        "references/native-dispatch.md": "80a0dae8f272d7b89dbf89011c2f60c758fc273019729af1c16a593f42e386fd",
+        "references/operations.md": "f0f81a90f36c3e0e4c2b330bcdc76b1119591c2e77a9ad89ebd4f6d6a353cfc9",
+        "references/product-design.md": "9fbd43be8048a3532ed56e4cfdd201b7bfab4ad192df9c290811c65b90b06b19",
+        "references/quality.md": "46cca4ac6aeb09988aa978c3ec176a3b5ef410584ec3b05fdc68fec974fb880e",
+        "references/research.md": "8e189dee9e9a6141fb98f37b35a4484d357a717f10b537a315824e4b0c46a3c6",
+        "references/review.md": "15473c7df104233111e1a2754f3e2c1da7b13102dd7fb496641ecf7ba7a83b3a",
+        "references/routing-context.md": "a4417928659a11619915348bc8c3d9bf4f35543264fd6b0779a7122efa983ded",
+        "references/runtime.md": "e2498308ace6a36467cece07e571430af3fa8d2917eaa8981da5cda2dd328fcc",
+        "references/skill-composition.md": "7e17127293179f13a3e5c25e40590229493da8769f2d105876d29634654d86c8",
+        "references/tools.md": "38b60a9dbe4f422f8612063f73bbc02e7678e900a9a838cebf3d92706bb2a347",
+        "scripts/adapters.py": "f250ced18675a238c18810b65195a5d958ca5057f57a05bd359597b44a718375",
+        "scripts/adopt.py": "7f20fa55d24cc2f0243e7c08c410e03e6a1409664dfe16d9f4a5c84d94b19e2d",
+        "scripts/browser_read.py": "ebb12c2a22b510f34bc5313ac9062973391b8d5ea11a1d52f5dfea02cb83dbb5",
+        "scripts/depth.py": "d727e6b6ee0ee36fa01cc3845c1dbae8f3e928b2be0b7c80a919a8aaf9ad724f",
+        "scripts/desktop.py": "08750317c10aec5f3ecb9fc0718e1bb090fef35dd66515b69f53351d95b04cc0",
+        "scripts/dispatch.py": "40f496ae2e7c3d1e7bf8c28448f5fd877b354c1e21688cf24af3b74039e51f01",
+        "scripts/launch.py": "26be5539b20518291beca243c1a55351e70300f940a237ff0aa21285141c777d",
+        "scripts/quality.py": "4dfc8a9922572bfce97d28fc9fbbbdd9dc202bfbad5b2a689d35bad70f4c57ef",
+        "scripts/review.py": "cccac3f1f6aa02674a1808a58c453470c31a188749494c68776a0a18cc17f4e5",
+        "scripts/routing.py": "5655bd03bcf27eb449737a5bd98bed57ec72ae2b36d2f1de80d6f48d564aa32c",
+        "scripts/state.py": "1c0482258171b56902b2e87e28e5c9d10a06cf915e194e043ae8ab21e8e0ee8b",
+        "scripts/supervise.py": "58b8527d610114d5e4231725d621d10cf3f983f158641c9f5a50ba9018db60b7",
+        "scripts/tooling.py": "3188dfc8281fb726079012f7c10a49895604a1d31b9586c836f22af42be726b5",
+        "evals/protocol.md": "7cbe63fe8d239e9f8ff897504bcbb489c38ca05b6e53c4a1c078dd9a6789ec75",
+        "evals/scenarios.md": "9115d43709660815208b106f1d28257fed5bf5c8efe4b99c68d32ea8920df9aa",
+        "evals/test_browser_read.py": "d17471b1a232573bb5c1fc3c0cb26e8c6e0fa34c347ab1621ec8830d72a697e3",
+        "evals/test_dispatch.py": "c338a8681a8c1660dda6a2e62963c17f237f5e169cf74a1ce8e3f8941146ee73",
+        "SKILL.md": "8e57d0fc69bf02fd340795b89307aafb432a8b9646b8ffb303b9fc07e531d457"
+      },
+      "domains": [
+        "frontend"
+      ],
+      "modes": [
+        "feature",
+        "design",
+        "verify"
+      ],
+      "roles": [
+        "build",
+        "qa"
+      ],
+      "adaptation": "Use this Depth Engine playbook within the task scope; local linked references remain relative to this entrypoint."
+    }
+  ]
+}

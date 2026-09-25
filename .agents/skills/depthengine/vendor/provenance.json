@@ -1,0 +1,59 @@
+{
+  "inspected": "2026-09-24",
+  "bundles": [
+    {
+      "id": "mattpocock-diagnosing-bugs",
+      "source_repo": "mattpocock/skills",
+      "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "source_path": "skills/engineering/diagnosing-bugs",
+      "license": "MIT (repo LICENSE, retained in mattpocock/LICENSE)",
+      "local_root": "vendor/mattpocock-diagnosing-bugs",
+      "adaptation": "Use the real symptom/probe/minimize/repair/original-scenario loop. Source inspection to locate the reproduction is allowed. The builder never authors tests: independent QA owns regression authoring/calibration. Do not stop useful read-only diagnosis merely because reproduction is unavailable; label it unconfirmed. No mandatory Bash/HITL script or user checkpoint for routine engineering choices. No nested delegation."
+    },
+    {
+      "id": "mattpocock-codebase-design",
+      "source_repo": "mattpocock/skills",
+      "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "source_path": "skills/engineering/codebase-design",
+      "license": "MIT (repo LICENSE, retained in mattpocock/LICENSE)",
+      "local_root": "vendor/mattpocock-codebase-design",
+      "adaptation": "Apply small useful interfaces and testability at real public boundaries. Preserve existing project vocabulary instead of forcing glossary renames. Do not spawn alternative-design subagents from a delegated worker. Refactor only within the requested scope; QA retains test ownership."
+    },
+    {
+      "id": "mattpocock-tdd",
+      "source_repo": "mattpocock/skills",
+      "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "source_path": "skills/engineering/tdd",
+      "license": "MIT (repo LICENSE, retained in mattpocock/LICENSE)",
+      "local_root": "vendor/mattpocock-tdd",
+      "adaptation": "You are independent QA, not the builder. Select test boundaries from user requirements and existing project contracts without asking about routine implementation details. Author/calibrate tests before the corresponding build run freezes; give the builder read/run access only. Keep each contract small; new behavior requires a reviewed new run. Preserve useful existing tests. Refactoring is allowed when authorized and verified; this skill does not override repository practice."
+    },
+    {
+      "id": "pstack-create-verification-skill",
+      "source_repo": "cursor/plugins",
+      "commit": "12d587dfb20741cafc376c42c696c5f6e2a64487",
+      "source_path": "pstack/skills/create-verification-skill",
+      "license": "MIT (pstack/LICENSE, retained in cursor-pstack/LICENSE)",
+      "local_root": "vendor/pstack-create-verification-skill",
+      "adaptation": "Use only when the project lacks a usable verification map/harness. Use project-native documentation or .depthengine evidence paths, not mandatory .cursor directories. Independently create the launch/doctor/drive/evidence/cleanup instructions and user-facing feature map; execute a mapped path before calling it verified. QA may edit only its owned map/check assets before freezing, never product code. Report broken product startup rather than repairing production. No external publication, automatic maintenance schedule, or nested coordinator."
+    },
+    {
+      "id": "pstack-maintain-verification-skill",
+      "source_repo": "cursor/plugins",
+      "commit": "12d587dfb20741cafc376c42c696c5f6e2a64487",
+      "source_path": "pstack/skills/maintain-verification-skill",
+      "license": "MIT (pstack/LICENSE, retained in cursor-pstack/LICENSE)",
+      "local_root": "vendor/pstack-maintain-verification-skill",
+      "adaptation": "Use only for an existing verification map needing audit. Source and live coverage are distinct; report product regressions instead of rewriting expected behavior. Use native host tools and existing docs locations. As a delegated worker, do source checks yourself; coordinator may assign independent reads separately. No automatic PR, publication or fixed cadence. Freeze QA changes before a new build contract."
+    },
+    {
+      "id": "anthropics-frontend-design",
+      "source_repo": "anthropics/skills",
+      "commit": "34040c9c568585f6929bedeaad110ad08f079624",
+      "source_path": "skills/frontend-design",
+      "license": "Apache-2.0 (LICENSE.txt retained in skill root)",
+      "local_root": "vendor/anthropics-frontend-design",
+      "adaptation": "Apply only for a requested visual design or redesign. The actual brief, supplied screenshots and established design system prevail over studio persona, novelty or anti-pattern preferences. Do not assume the client rejected prior designs or consult personal memory. Infer routine design choices and ask only consequential unresolved product choices. Inspect rendered screens with verified tools; a self-critique does not replace independent QA."
+    }
+  ]
+}

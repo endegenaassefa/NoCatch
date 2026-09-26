@@ -1,0 +1,12 @@
+<Sysmon schemaversion="4.82">
+  <EventFiltering>
+    <!-- All sources, all process starts/exits. The recorder selects relevant rows. -->
+    <ProcessCreate onmatch="exclude" />
+    <ProcessTerminate onmatch="exclude" />
+    <!-- Keep access volume bounded to the real target and the scratch canary. -->
+    <ProcessAccess onmatch="include">
+      <TargetImage condition="end with">\screen-reader-util.exe</TargetImage>
+      <TargetImage condition="end with">\ping.exe</TargetImage>
+    </ProcessAccess>
+  </EventFiltering>
+</Sysmon>

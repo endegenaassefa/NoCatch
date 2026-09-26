@@ -6,7 +6,8 @@ param(
   [string]$Capture = '',
   [string]$SysmonExe = '',
   [switch]$AuditOnly,
-  [int]$DurationSeconds = 0
+  [int]$DurationSeconds = 0,
+  [string]$StopWhenProcessExit = ''
 )
 
 Set-StrictMode -Version 2.0
@@ -314,7 +315,7 @@ function Invoke-Start {
   $runDir = Join-Path $CaptureRoot $stamp
   New-Item -ItemType Directory -Path $runDir -Force | Out-Null
   $start = (Get-Date).ToUniversalTime()
-  $state = [ordered]@{ capture = $runDir; mode = $mode; rootPid = $TargetPid; rootCreated = $rootCreated; watcherPid = $PID; startedUtc = $start.ToString('o'); sysmon = (Get-SysmonReady); auditOnly = $AuditOnly.IsPresent }
+  $state = [ordered]@{ capture = $runDir; mode = $mode; rootPid = $TargetPid; rootCreated = $rootCreated; watcherPid = $PID; startedUtc = $start.ToString('o'); sysmon = (Get-SysmonReady); auditOnly = $AuditOnly.IsPresent; stopWhenProcessExit = $StopWhenProcessExit }
   try {
     Save-Json (Join-Path $runDir 'run.json') $state
     New-Item -ItemType File -Path (Join-Path $runDir 'events.jsonl'),(Join-Path $runDir 'interactions.log') -Force | Out-Null
@@ -332,6 +333,8 @@ function Invoke-Start {
     [System.IO.File]::WriteAllText((Join-Path $runDir 'capture-error.txt'), $_.Exception.ToString())
     throw
   }
+  $observedStopProcess = $false
+  $stopProcessGoneAt = $null
   try {
     while (-not (Test-Path (Join-Path $runDir 'stop.request'))) {
       if ($mode -eq 'cluely' -and (Test-TargetAlive $TargetPid $rootCreated)) {
@@ -347,7 +350,24 @@ function Invoke-Start {
         Process-Event $item.event $item.channel $targets $seen $runDir
       }
       Save-Json (Join-Path $runDir 'targets.json') @($targets.Values)
-      if ($DurationSeconds -gt 0 -and ((Get-Date).ToUniversalTime() - $start).TotalSeconds -ge $DurationSeconds) { break }
+      if ($StopWhenProcessExit) {
+        $present = [bool](Get-Process -Name $StopWhenProcessExit -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($present) { $observedStopProcess = $true; $stopProcessGoneAt = $null }
+        elseif ($observedStopProcess) {
+          if (-not $stopProcessGoneAt) { $stopProcessGoneAt = (Get-Date).ToUniversalTime() }
+          elseif (((Get-Date).ToUniversalTime() - $stopProcessGoneAt).TotalSeconds -ge 8) {
+            Set-Content -LiteralPath (Join-Path $runDir 'stop-reason.txt') -Value ($StopWhenProcessExit + ' exited')
+            break
+          }
+        } elseif (((Get-Date).ToUniversalTime() - $start).TotalSeconds -ge 120) {
+          Set-Content -LiteralPath (Join-Path $runDir 'stop-reason.txt') -Value ($StopWhenProcessExit + ' never appeared within 120 seconds')
+          break
+        }
+      }
+      if ($DurationSeconds -gt 0 -and ((Get-Date).ToUniversalTime() - $start).TotalSeconds -ge $DurationSeconds) {
+        Set-Content -LiteralPath (Join-Path $runDir 'stop-reason.txt') -Value ('duration limit ' + $DurationSeconds + ' seconds')
+        break
+      }
       Start-Sleep -Milliseconds 900
     }
   } catch {
@@ -409,6 +429,7 @@ function Invoke-Report([string]$RunDir) {
   $lines.Add('')
   $lines.Add(('Capture: `{0}`; target: {1} PID {2}; start UTC: {3}.' -f $RunDir, $meta.mode, $meta.rootPid, $meta.startedUtc))
   $lines.Add(('Sysmon available at start: **{0}**. Security process requests without a target PID: **{1}**.' -f $meta.sysmon, $unknown.Count))
+  if (Test-Path (Join-Path $RunDir 'stop-reason.txt')) { $lines.Add(('Stop reason: {0}.' -f ((Get-Content -LiteralPath (Join-Path $RunDir 'stop-reason.txt') -Raw).Trim()))) }
   $lines.Add(('Root target Sysmon GUID pinned: **{0}**.' -f $rootGuidStatus))
   if ($rootGuidStatus -eq 'False' -and $meta.sysmon) { $lines.Add('**IDENTITY GAP:** no Sysmon GUID was tied to the live root PID. Events seen only after its exit may be omitted to avoid PID-reuse misattribution.') }
   if ($captureError) { $lines.Add('**INCOMPLETE CAPTURE:** watcher failed. See `capture-error.txt`; do not use this run for conclusions.') }

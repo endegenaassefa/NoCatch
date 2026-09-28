@@ -1012,11 +1012,11 @@
         rootMode = true;
         if (chatExamBtn) {
           chatExamBtn.classList.add('active');
-          chatExamBtn.title = 'Root mode: Cluely itself is the root, kill-immune exam app — no shield needed.';
+          chatExamBtn.title = 'Root mode: Cluely is running elevated — no shield handoff needed.';
         }
         if (examModeBannerEl) {
           examModeBannerEl.style.display = 'block';
-          examModeBannerEl.textContent = '🛡️ Root exam mode — this Cluely runs as root: LockDown Browser cannot kill it. Chat, question types, mic, settings and ⌘⇧Space capture are all live. Do not run the shield helper alongside it.';
+          examModeBannerEl.textContent = '🛡️ Root exam mode — Cluely is running elevated. Chat, question types, mic, settings and capture are available. Do not run the shield helper alongside it.';
         }
       }
 
@@ -1041,7 +1041,7 @@
       async function toggleExamMode() {
         if (!whysperAPI || !whysperAPI.shieldExamMode) return;
         if (rootMode) {
-          addMessage('🛡️ Root mode: Cluely is already the kill-immune exam app — the shield is not needed.', 'system', true);
+          addMessage('🛡️ Root mode: Cluely is already running elevated — the shield is not needed.', 'system', true);
           return;
         }
         if (chatExamBtn) chatExamBtn.disabled = true;

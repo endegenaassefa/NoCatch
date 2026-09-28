@@ -23,6 +23,55 @@ function sendModifiersFromFlags(flags) {
   return mods;
 }
 
+// A Windows Administrator token is the Windows root-mode signal. On Unix,
+// retain the existing uid 0 behavior. The launcher alone cannot assert this:
+// the running app checks its own process token before enabling root mode.
+const { detect: detectPrivilege, rootDataDir } = require("./src/platform/privilege");
+const PRIVILEGE = detectPrivilege();
+
+// Keep elevated state separate from the normal desktop profile. This must
+// happen before ENV_PATH, first-run state, and services read app.userData.
+if (PRIVILEGE.isRoot && process.platform === "win32") {
+  try {
+    const normalUserData = path.join(app.getPath("appData"), app.getName());
+    const rootUserData = path.join(rootDataDir(), "userdata");
+    fs.mkdirSync(rootUserData, { recursive: true });
+    app.setPath("userData", rootUserData);
+    const normalSetup = path.join(normalUserData, "setup-state.json");
+    const rootSetup = path.join(rootUserData, "setup-state.json");
+    const normalSetupExists = fs.existsSync(normalSetup);
+    const rootSetupExists = fs.existsSync(rootSetup);
+    if (!rootSetupExists && normalSetupExists) {
+      // Current setup writes setup-state.json, not the old first-run sentinel.
+      // Carry only a valid completion flag into the isolated elevated profile;
+      // do not copy drafts or change an existing root setup state.
+      try {
+        if (fs.statSync(normalSetup).size <= 4096) {
+          const saved = JSON.parse(fs.readFileSync(normalSetup, "utf8"));
+          if (saved && saved.version === 1 && saved.completed === true &&
+              saved.step === "complete" && saved.draft === "" &&
+              ["text", "screenshot"].includes(saved.inputMode)) {
+            fs.writeFileSync(rootSetup, JSON.stringify({
+              version: 1, completed: true, step: "complete", draft: "", inputMode: "text",
+            }), { flag: "wx", mode: 0o600 });
+          }
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT" && error.code !== "EEXIST" && !(error instanceof SyntaxError)) throw error;
+        // Missing or invalid normal progress is handled by ordinary onboarding.
+      }
+    }
+    const normalSentinel = path.join(normalUserData, ".sru-firstrun-completed");
+    const rootSentinel = path.join(rootUserData, ".sru-firstrun-completed");
+    if (!normalSetupExists && !rootSetupExists && !fs.existsSync(rootSentinel) && fs.existsSync(normalSentinel)) {
+      fs.copyFileSync(normalSentinel, rootSentinel);
+    }
+  } catch (error) {
+    // Never fall back to a writable normal-user profile in an elevated app.
+    throw new Error(`Windows elevated profile initialization failed: ${error.message}`);
+  }
+}
+
 // ── Resolve a stable .env location ──
 // In packaged builds process.cwd() is unstable and frequently read-only
 // (NSIS install dir, AppImage mount, .app bundle), so the canonical config
@@ -180,10 +229,12 @@ class ApplicationController {
     // (NOT quit) so the operator can bring it back with ⌃⌥⇧E. The root helper
     // remains the capture/answer agent the whole time.
     this._shieldExamModeActive = false;
-    // ROOT EXAM MODE (UNIFIED-CHAT-SURFACE / ROOT-EXAM-MODE): when the whole
-    // app was launched as root (scripts/cluely-root-exam.sh), Cluely ITSELF
-    // is the kill-immune exam process — full UI, no shield handoff needed.
-    this.isRootMode = typeof process.getuid === "function" && process.getuid() === 0;
+    // Root mode uses the actual process token, including Windows High/System
+    // integrity; an environment flag or launcher argument cannot enable it.
+    this.isRootMode = PRIVILEGE.isRoot;
+    if (this.isRootMode) {
+      logger.info("Root exam mode active", { privilege: PRIVILEGE.detail });
+    }
     this._shieldExamModeTransitioning = false;
     // Answer relay poller: while exam mode is armed, pull the helper's last
     // answer over the socket and render it in Cluely's normal answer panel.
@@ -1156,14 +1207,13 @@ class ApplicationController {
     if (this._shieldExamModeTransitioning) {
       return { ok: false, error: "exam-mode transition already in progress" };
     }
-    // Root exam mode: Cluely itself is the kill-immune process (launched via
-    // scripts/cluely-root-exam.sh) — arming the shield would hide the very
-    // UI the root mode exists to keep. Fail with a clear message instead.
+    // In root mode the app remains the answer surface. Arming the shield
+    // would hide that surface, so reject the handoff.
     if (this.isRootMode) {
       return {
         ok: false,
         root: true,
-        error: "Root mode: Cluely is already the root, kill-immune exam app — the shield is not needed. Don't run the shield helper while root mode is active."
+        error: "Root mode: Cluely is already running elevated. The shield is not needed while root mode is active."
       };
     }
     this._shieldExamModeTransitioning = true;
@@ -2065,7 +2115,7 @@ class ApplicationController {
       // disguised root instance behind after the exam — refuse instead.
       if (this.isRootMode) {
         logger.warn("restart-app-for-stealth refused in root exam mode");
-        return { ok: false, error: "Restart is disabled in root exam mode — quit the sudo process manually after the exam." };
+        return { ok: false, error: "Restart is disabled in root exam mode — quit the elevated process after the exam." };
       }
       // Force restart the app to ensure stealth name changes take effect
       const { app } = require("electron");
@@ -3250,13 +3300,10 @@ class ApplicationController {
     // FirstRunManager reads/writes (userData in packaged builds, project .env
     // in dev). Writing to process.cwd() here would silently diverge.
     //
-    // ROOT EXAM MODE: when running as root, redirect the write to a
-    // root-owned file (/var/root/.cluely-root/.env) — a root process must
-    // never chown the operator's workspace .env, or the next normal launch
-    // would lose its config writes. In-memory process.env still updates so
-    // the running root session behaves the same.
+    // Unix root writes to its isolated profile. Windows root mode already
+    // sets userData to C:\ProgramData\CluelyRoot before ENV_PATH is resolved.
     let envPath = ENV_PATH;
-    if (this.isRootMode) {
+    if (this.isRootMode && process.platform !== "win32") {
       try {
         const rootEnvDir = "/var/root/.cluely-root";
         fs.mkdirSync(rootEnvDir, { recursive: true });

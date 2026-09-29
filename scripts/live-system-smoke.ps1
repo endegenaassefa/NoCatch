@@ -70,8 +70,11 @@ public static class Smoke {
 
 if (-not $Repo) { $Repo = Split-Path -Parent $PSScriptRoot }
 $Repo = (Resolve-Path $Repo).Path
-$electron = Join-Path $Repo 'node_modules\electron\dist\electron.exe'
-if (-not (Test-Path $electron)) { throw ('electron.exe not found under ' + $Repo) }
+# Prefer the packaged app (what `cluely system` launches) so the smoke test
+# exercises the production boundary; fall back to the source electron.exe.
+$packaged = Join-Path $Repo 'dist\win-unpacked\screen-reader-util.exe'
+$electron = if (Test-Path $packaged) { $packaged } else { Join-Path $Repo 'node_modules\electron\dist\electron.exe' }
+if (-not (Test-Path $electron)) { throw ('No packaged build and no electron.exe under ' + $Repo) }
 $mainJs = Join-Path $Repo 'main.js'
 if (-not (Test-Path $mainJs)) { throw ('main.js not found under ' + $Repo) }
 

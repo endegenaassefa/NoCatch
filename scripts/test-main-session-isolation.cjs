@@ -7,14 +7,22 @@ const root=path.resolve(__dirname,'..');
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}};
 const tick=()=>new Promise(r=>setImmediate(r));
 function fixture(){
- const events=[],memory=[],panels=[],requests=[],captureGate=deferred();let captureWait=false;
+ const events=[],memory=[],panels=[],requests=[],captureGate=deferred();let captureWait=false,panelVisible=false,panelOwner=0;
  const sessionManager={addUserInput:(text)=>memory.push({role:'user',text}),addModelResponse:text=>memory.push({role:'model',text}),addConversationEvent:event=>memory.push(event),clear:()=>{memory.length=0},getOptimizedHistory:()=>({recent:[]})};
  const invokeProvider=(...args)=>{const pending=deferred();requests.push({...pending,delta:args.at(-1)});return pending.promise};
+ const windowManager={
+  broadcastToAllWindows:(channel,data)=>events.push({channel,data}),
+  getVisibilityHideEpoch:()=>0,shouldRevealAnswerSince:hideEpoch=>hideEpoch===0,hasVisibleWindows:()=>panelVisible,
+  claimAnswerPanelOwner:()=>++panelOwner,isAnswerPanelOwner:owner=>owner===panelOwner,
+  showLLMLoading:owner=>{if(owner==null)owner=++panelOwner;if(owner!==panelOwner)return;panelVisible=true;panels.push('loading');return owner},
+  showLLMResponse:(text,_metadata,{owner}={})=>{if(owner!=null&&owner!==panelOwner)return;panelVisible=true;panels.push(text)},
+  hideLLMResponse:({owner}={})=>{if(owner!=null&&owner!==panelOwner)return;panelVisible=false;panels.push('hidden')}
+ };
  const context={Buffer,console,setTimeout,clearTimeout,process:{env:{}},config:{get:()=> 'both'},
   logger:{info(){},warn(){},error(){},debug(){}},sessionManager,
   llmService:{processTextWithSkillStream:invokeProvider,processImageWithSkillStream:invokeProvider},
   captureService:{captureAndProcess:async()=>{if(captureWait)await captureGate.promise;return {imageBuffer:Buffer.from('fixture-image'),mimeType:'image/png'}}},
-  speechService:{cancelRecording(){}},windowManager:{broadcastToAllWindows:(channel,data)=>events.push({channel,data}),showLLMLoading:()=>panels.push('loading'),showLLMResponse:text=>panels.push(text),hideLLMResponse:()=>panels.push('hidden')}};
+  speechService:{cancelRecording(){}},windowManager};
  const source=fs.readFileSync(path.join(root,'main.js'),'utf8');const start=source.indexOf('class ApplicationController {'),end=source.indexOf('const gotSingleInstanceLock');assert(start>=0&&end>start,'real controller source found');
  const Controller=vm.runInNewContext(source.slice(start,end)+'\nApplicationController',context);const c=Object.create(Controller.prototype);
  Object.assign(c,{operationEpoch:0,activeSkill:'dsa',codingLanguage:'JavaScript',isReady:true,setupService:{invalidate(){}},managedSession:{cancelAll:async()=>{},status:()=>({signingIn:false})}});

@@ -1,13 +1,15 @@
 # =============================================================================
 #  cluely.ps1 -- one-command root exam mode for OpenCluely on Windows
 #
-#  Launches the packaged app with an Administrator token and confirms that
-#  its Windows root-mode code initialized. This does not prove the app will
-#  remain visible or interactive in another application's secure desktop.
+#  Launches the packaged app with a SYSTEM token, confirms the root-mode boot
+#  markers AND that a visible window reached your desktop. It does not prove
+#  the UI will stay above a secure-desktop app -- that is the summon hotkey's
+#  job (Ctrl+Shift+V re-fronts the shared topmost band).
 #
 #  Usage:
 #    cluely              # doctor + start (idempotent -- safe to re-run)
 #    cluely start        # same as above
+#    cluely system       # SYSTEM-integrity exam mode (one UAC prompt)
 #    cluely stop         # kill the elevated Cluely and clean up
 #    cluely status       # is it running? elevation + boot-log tail
 #    cluely doctor       # prerequisite checks only
@@ -17,8 +19,9 @@
 #    setx PATH "%PATH%;<repo>\scripts"     # then restart the terminal
 #    or run it as:  <repo>\scripts\cluely.cmd
 #
-#  A High-integrity (Administrator) process is what this app detects as
-#  Windows root mode. The UI still uses its ordinary windows and shortcuts.
+#  `cluely system` runs Cluely at SYSTEM integrity: elevated apps can no
+#  longer demote, hide, or message-close the exam UI (UIPI), and the summon
+#  hotkeys re-front it in the shared topmost band.
 #
 #  Rules that stay true:
 #    * Start the app before measuring behavior in a practice environment.
@@ -218,6 +221,30 @@ function Test-Marker([string]$Marker, [long]$AppLogOffset) {
   $tail = Read-AppLogTailFrom $AppLogOffset
   if ($tail -match [regex]::Escape($Marker)) { return $true }
   return $false
+}
+
+function Test-VisibleWindow([int]$ProcessId) {
+  # Fail-fast UI proof for `cluely system`: markers in a log are not the same
+  # as a window on the user's desktop (the token dance can land the app on the
+  # wrong session/desktop and still boot cleanly).
+  if (-not ('CluelyWinProbe' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CluelyWinProbe {
+  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lp);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public static int VisibleWindowsOf(int pid) {
+    int n = 0;
+    EnumWindows((h, p) => { uint wpid; GetWindowThreadProcessId(h, out wpid); if (wpid == (uint)pid && IsWindowVisible(h)) n++; return true; }, IntPtr.Zero);
+    return n;
+  }
+}
+'@
+  }
+  return ([CluelyWinProbe]::VisibleWindowsOf($ProcessId) -gt 0)
 }
 
 function Clear-RootSingletonLocks {
@@ -705,6 +732,18 @@ function Invoke-StartSystem {
   }
   if (-not $systemOk) {
     Write-Fail 'App booted but did NOT report SYSTEM integrity -- the band protection is NOT active. Run: cluely stop'
+    exit 1
+  }
+
+  Write-Info 'Waiting for the exam UI to appear on your desktop ...'
+  $winDeadline = (Get-Date).AddSeconds(30)
+  $windowVisible = $false
+  while ((Get-Date) -lt $winDeadline -and -not $windowVisible) {
+    Start-Sleep -Seconds 2
+    $windowVisible = Test-VisibleWindow $sysPid
+  }
+  if (-not $windowVisible) {
+    Write-Fail 'Cluely is running at SYSTEM but no visible window reached your desktop within 30s (wrong session/desktop?). Run: cluely stop'
     exit 1
   }
 

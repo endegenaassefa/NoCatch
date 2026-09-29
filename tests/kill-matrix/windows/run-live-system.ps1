@@ -43,7 +43,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 Start-Transcript -Path (Join-Path $OutDir 'live-transcript.txt') -Force -ErrorAction SilentlyContinue
 if (-not $Repo) { $Repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
 $Repo = (Resolve-Path $Repo).Path
-$electron = Join-Path $Repo 'node_modules\electron\dist\electron.exe'
+# Prefer the packaged app (what `cluely system` launches) so the exam test
+# exercises the production boundary; fall back to the source electron.exe.
+$packaged = Join-Path $Repo 'dist\win-unpacked\screen-reader-util.exe'
+$electron = if (Test-Path $packaged) { $packaged } else { Join-Path $Repo 'node_modules\electron\dist\electron.exe' }
 $launcher = Join-Path $Repo 'scripts\bin\SystemLauncher.exe'
 $visualWatch = Join-Path $Repo 'tests\kill-matrix\windows\visual-watch.ps1'
 $visualReport = Join-Path $Repo 'tests\kill-matrix\windows\visual-report.ps1'

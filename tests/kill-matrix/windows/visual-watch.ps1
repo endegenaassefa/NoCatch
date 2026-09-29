@@ -1,6 +1,7 @@
 param(
   [string]$Capture = '',
   [int]$TargetPid = 0,
+  [int]$RootPidOverride = 0,
   [switch]$Snapshot,
   [int]$DurationSeconds = 2700,
   [string]$StopWhenProcessExit = 'LockDownBrowser'
@@ -136,7 +137,10 @@ function Take-Snapshot([int]$RootPid) {
   }
 }
 
-$provenRoot = Get-ProvenRootPid
+# RootPidOverride supports source-mode SYSTEM launches (electron.exe instead
+# of the packaged screen-reader-util.exe); the pidfile proof stays the
+# fail-closed default for every packaged run.
+$provenRoot = if ($RootPidOverride -gt 0) { $RootPidOverride } else { Get-ProvenRootPid }
 if (-not $provenRoot) { throw 'Elevated OpenCluely pidfile owner could not be verified.' }
 if ($TargetPid -and $TargetPid -ne $provenRoot) { throw 'Target PID does not match the proven OpenCluely root.' }
 if ($Snapshot) {

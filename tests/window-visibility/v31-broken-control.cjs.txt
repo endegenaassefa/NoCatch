@@ -1,0 +1,48 @@
+'use strict';
+// Disposable in-memory calibration only. Restores the two exact pre-review
+// behaviors when main.js is read by the QA VM, without writing production.
+const fs = require('node:fs');
+const path = require('node:path');
+const originalRead = fs.readFileSync;
+const target = path.resolve(__dirname, '../../main.js');
+const oldWindowSample = `  rootVisibilityWindowState(type) {
+    const unavailable = {
+      destroyed: true, visible: null, alwaysOnTop: null, minimized: null,
+      webContentsDestroyed: null, bounds: null, hwnd: null
+    };
+    const window = windowManager.getWindow(type);
+    if (!window) return unavailable;
+    try {
+      if (window.isDestroyed()) return unavailable;
+      const handle = window.getNativeWindowHandle();
+      const hwnd = handle?.length === 8 ? handle.readBigUInt64LE(0).toString(16)
+        : handle?.length === 4 ? handle.readUInt32LE(0).toString(16) : null;
+      const bounds = window.getBounds();
+      return {
+        destroyed: false,
+        visible: window.isVisible(),
+        alwaysOnTop: window.isAlwaysOnTop(),
+        minimized: window.isMinimized(),
+        webContentsDestroyed: !window.webContents || window.webContents.isDestroyed(),
+        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+        hwnd
+      };
+    } catch (error) {
+      logger.warn("Root visibility window sample failed", { type, error: error.message });
+      return unavailable;
+    }
+  }
+
+`;
+fs.readFileSync = function (filename, ...args) {
+  const value = originalRead.call(this, filename, ...args);
+  if (typeof filename !== 'string' || path.resolve(filename) !== target) return value;
+  let source = Buffer.isBuffer(value) ? value.toString('utf8') : value;
+  const start = source.indexOf('  rootVisibilityWindowState(type) {');
+  const end = source.indexOf('  recordRootVisibilitySnapshot(', start);
+  const suppression = '    if (reason === "shortcut" && !changed) return;';
+  if (start < 0 || end <= start || !source.includes(suppression)) throw new Error('Calibration source anchors changed');
+  source = source.slice(0, start) + oldWindowSample + source.slice(end);
+  source = source.replace(suppression, '');
+  return Buffer.isBuffer(value) ? Buffer.from(source, 'utf8') : source;
+};

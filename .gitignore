@@ -28,3 +28,8 @@ shield/*.old*
 
 .depthengine/
 managed-config.json
+
+# Runtime/forensic artifacts (untracked)
+docs/depthengine/instance/state.sqlite3
+exam-scan/baseline/
+__pycache__/

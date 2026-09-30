@@ -3,6 +3,14 @@ const path = require('path');
 const logger = require('../core/logger').createServiceLogger('WINDOW');
 const config = require('../core/config');
 
+// Root exam mode (win32): recover from external topmost demotion on native
+// window messages. This is still reactive: a competing topmost window can
+// briefly take hit tests before recovery, so this is not a no-flicker promise.
+const WM_WINDOWPOSCHANGING = 0x0046;
+const WM_WINDOWPOSCHANGED = 0x0047;
+const WM_STYLECHANGED = 0x007D;
+const TOPMOST_GUARD_BLOCK_LOG_INTERVAL_MS = 30000;
+
 class WindowManager {
   constructor() {
     this.windows = new Map();
@@ -10,6 +18,9 @@ class WindowManager {
     this.isInteractive = true; // default to interactive so windows are clickable/drag-able
 
     this.isVisible = false;
+    // User intent survives async window creation and native window loss.
+    this.desiredWindowVisibility = new Map();
+    this.chatHideVersion = 0;
     this.currentDisplay = null;
     this.screenWatcher = null;
     this.desktopWatcher = null;
@@ -32,6 +43,12 @@ class WindowManager {
     this.lastEnforceTime = 0;
     this.enforceDebounceMs = 1000; // Only enforce once per second
     this.focusLocked = false; // Prevent focus loops
+
+    // Event-driven Windows repair shortens topmost losses. Native hit testing
+    // still catches brief cover by a competing window, so this is not a
+    // guarantee of uninterrupted visibility or clicks.
+    this._rootTopmostGuardsEnabled = false;
+    this._topmostGuardStates = new Map();
     
     // Window binding properties
     this.bindWindows = true; // Enable window binding by default
@@ -146,6 +163,7 @@ class WindowManager {
   async showMainWindow() {
     const mainWindow = this.windows.get('main');
     if (!mainWindow) return;
+    this.desiredWindowVisibility.set('main', true);
     
     // Immediate always-on-top enforcement for main window
     if (process.platform === 'darwin') {
@@ -160,20 +178,20 @@ class WindowManager {
     
     // Wait for app to fully initialize and detect current desktop
     await new Promise((resolve) => setTimeout(resolve, 100));
+    if (!this.isWindowDesiredVisible('main') || this.isScreenBeingShared || mainWindow.isDestroyed()) return;
     this.showOnCurrentDesktop(mainWindow);
     
     // Additional enforcement after showing
     await new Promise((resolve) => setTimeout(resolve, 200));
-    if (!mainWindow.isDestroyed()) {
-      if (process.platform === 'darwin') {
-        try {
-          mainWindow.setAlwaysOnTop(true, 'floating', 2);
-        } catch (error) {
-          this.setWindowAlwaysOnTop(mainWindow);
-        }
-      } else {
+    if (!this.isWindowDesiredVisible('main') || this.isScreenBeingShared || mainWindow.isDestroyed()) return;
+    if (process.platform === 'darwin') {
+      try {
+        mainWindow.setAlwaysOnTop(true, 'floating', 2);
+      } catch (error) {
         this.setWindowAlwaysOnTop(mainWindow);
       }
+    } else {
+      this.setWindowAlwaysOnTop(mainWindow);
     }
     
     this.isVisible = true;
@@ -184,6 +202,7 @@ class WindowManager {
 
   async createMainWindow(options = {}) {
     const { autoShow = true } = options;
+    if (autoShow) this.desiredWindowVisibility.set('main', true);
     if (this.windows.has('main')) {
       return this.windows.get('main');
     }
@@ -208,10 +227,11 @@ class WindowManager {
     if (autoShow) {
       // Wait for app to fully initialize and detect current desktop
       setTimeout(() => {
+        if (!this.isWindowDesiredVisible('main') || this.isScreenBeingShared) return;
         this.showOnCurrentDesktop(window);
         // Additional enforcement after showing
         setTimeout(() => {
-          if (!window.isDestroyed()) {
+          if (!window.isDestroyed() && this.isWindowDesiredVisible('main') && !this.isScreenBeingShared) {
             if (process.platform === 'darwin') {
               try {
                 window.setAlwaysOnTop(true, 'floating', 2);
@@ -369,7 +389,7 @@ class WindowManager {
         hasShadow: false,
         useContentSize: windowConfig.useContentSize || false,
         thickFrame: false,
-        focusable: false, // Never take keyboard focus: prevents focus theft from the proctored page
+        focusable: process.platform === 'win32', // Original Windows toolbar accepts focus from an explicit user show
         ...(process.platform === 'darwin' && {
           type: 'panel', // Non-activating panel: clicks never activate the app
           titleBarStyle: 'hiddenInset',
@@ -469,6 +489,12 @@ class WindowManager {
     browserWindowOptions.simpleFullscreen = false;
 
   const window = new BrowserWindow(browserWindowOptions);
+
+    // Windows created after root-mode guards are enabled (settings, llmResponse,
+    // onboarding) get the same demotion protection as main/chat.
+    if (this._rootTopmostGuardsEnabled) {
+      this.installTopmostGuard(type, window);
+    }
 
     // External links (GitHub, the website, Google AI Studio, etc.) must open in
     // the user's real browser, never inside the frameless overlay windows.
@@ -994,20 +1020,36 @@ class WindowManager {
       }, 50);
     } else {
       // Linux/Windows
-      win.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true,
-        skipTransformProcessType: true,
-      });
-      this.setWindowAlwaysOnTop(win);
+      try {
+        win.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true,
+        });
+      } catch (error) {
+        logger.warn('Could not move window to current desktop', { error: error.message });
+      }
+      try {
+        this.setWindowAlwaysOnTop(win);
+      } catch (error) {
+        logger.warn('Could not keep window on top', { error: error.message });
+      }
       win.showInactive(); // Non-activating show: never steal focus
       setTimeout(() => {
         if (win.isDestroyed()) return;
         if (!isLLM) {
-          win.setVisibleOnAllWorkspaces(false, {
-            skipTransformProcessType: true,
-          });
+          try {
+            win.setVisibleOnAllWorkspaces(false, {
+              skipTransformProcessType: true,
+            });
+          } catch (error) {
+            logger.warn('Could not finish desktop switch', { error: error.message });
+          }
         }
-        this.setWindowAlwaysOnTop(win);
+        try {
+          this.setWindowAlwaysOnTop(win);
+        } catch (error) {
+          logger.warn('Could not keep window on top after show', { error: error.message });
+        }
       }, 500);
     }
 
@@ -1215,11 +1257,6 @@ class WindowManager {
   }
 
   switchToWindow(windowType) {
-    if (this.windows.has('chat') && this.windows.get('chat').isVisible()) {
-      this.hideChatWindow();
-      return;
-    }
-
     if (!this.windowConfigs[windowType]) {
       logger.warn('Attempted to switch to unknown window type', { windowType });
       return;
@@ -1230,8 +1267,29 @@ class WindowManager {
     }
 
     const targetWindow = this.windows.get(windowType);
-    if (targetWindow) {
+    // OpenCluely's chat shortcut is a toggle independent of the main toolbar.
+    if (windowType === 'chat' && targetWindow && !targetWindow.isDestroyed() && targetWindow.isVisible()) {
+      this.hideChatWindow();
+      return;
+    }
+    if (windowType === 'main' || windowType === 'chat') {
+      this.desiredWindowVisibility.set(windowType, true);
+    }
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      // A stale destroyed entry must not make an explicit open a no-op.
+      this.ensureWindow(windowType);
+      this.activeWindow = windowType;
+      return;
+    }
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      const chatWindow = this.windows.get('chat');
+      if (windowType !== 'chat' && chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
+        this.hideChatWindow();
+      }
       this.showOnCurrentDesktop(targetWindow);
+      if (process.platform === 'win32' && this.isInteractive && targetWindow.isVisible()) {
+        targetWindow.focus();
+      }
 
       this.activeWindow = windowType;
       
@@ -1247,6 +1305,11 @@ class WindowManager {
       return;
     }
 
+    for (const type of ['main', 'chat']) {
+      this.desiredWindowVisibility.set(type, true);
+      const window = this.windows.get(type);
+      if (!window || window.isDestroyed()) this.ensureWindow(type);
+    }
     this.windows.forEach((window, type) => {
       if (window.isDestroyed()) return;
       if (type !== 'llmResponse') { // Don't show LLM response unless it has content
@@ -1275,6 +1338,10 @@ class WindowManager {
   // with keepTypes=["chat"] so the Cluely chat UI stays visible as the single
   // answer surface while the overlay/settings/answer panel are hidden.
   hideAllWindowsExcept(keepTypes = []) {
+    if (!keepTypes.includes('chat')) this.chatHideVersion += 1;
+    for (const type of ['main', 'chat']) {
+      this.desiredWindowVisibility.set(type, keepTypes.includes(type));
+    }
     this.windows.forEach((window, type) => {
       if (window.isDestroyed()) return;
       if (!keepTypes.includes(type)) {
@@ -1286,18 +1353,60 @@ class WindowManager {
     logger.info('All windows hidden except', { keepTypes });
   }
 
+  isWindowDesiredVisible(type) {
+    return this.desiredWindowVisibility.get(type) === true;
+  }
+
   toggleVisibility() {
     if (this.isScreenBeingShared) {
       return this.isVisible;
     }
 
     if (this.isVisible) {
-      this.hideAllWindowsExcept([]);
+      this.hideAllWindows();
     } else {
       this.showAllWindows();
+      if (process.platform === 'win32' && this.isInteractive) {
+        const active = this.windows.get(this.activeWindow);
+        if (active && !active.isDestroyed() && active.isVisible()) active.focus();
+      }
     }
     
     return this.isVisible;
+  }
+
+  // Recreate a missing core window. Creation is async, so the user's latest
+  // visibility choice must be checked after it finishes.
+  ensureWindow(type) {
+    const existing = this.windows.get(type);
+    if (existing && !existing.isDestroyed()) return existing;
+    if (this._windowCreationPromises && this._windowCreationPromises.has(type)) return null;
+    this.windows.delete(type);
+    const map = this._windowCreationPromises || (this._windowCreationPromises = new Map());
+    logger.warn('Root visibility recreating externally destroyed window', { type });
+    const promise = (type === 'main'
+      ? this.createMainWindow({ autoShow: false })
+      : this.createChatWindow()
+    ).then((window) => {
+      if (window && !window.isDestroyed()) {
+        window.on('closed', () => {
+          if (this.windows.get(type) === window) this.windows.delete(type);
+        });
+        if (!this.isInteractive) window.setIgnoreMouseEvents(true, { forward: true });
+        if (this.isWindowDesiredVisible(type) && !this.isScreenBeingShared) {
+          this.showOnCurrentDesktop(window);
+        }
+        logger.info('Root visibility window recreated', { type });
+      }
+      return window;
+    }).catch((error) => {
+      logger.warn('Root visibility window recreation failed', { type, error: error.message });
+      return null;
+    }).finally(() => {
+      map.delete(type);
+    });
+    map.set(type, promise);
+    return null;
   }
 
   setInteractive(interactive) {
@@ -1337,6 +1446,74 @@ class WindowManager {
     // The explicit popup level preserves native topmost state on Windows.
     if (process.platform === 'win32') window.setAlwaysOnTop(true, 'pop-up-menu');
     else window.setAlwaysOnTop(true);
+  }
+
+  // Root exam mode (win32): install event-driven topmost guards on the live
+  // windows. The exam app strips WS_EX_TOPMOST ~1 Hz; the 500 ms snapshot +
+  // 2 s repair loop can only re-fight after the window already dropped below
+  // the exam. These hooks shorten recovery after native demotion messages;
+  // they cannot prevent a competing window from briefly taking focus/clicks.
+  enableRootTopmostGuards() {
+    if (process.platform !== 'win32' || this._rootTopmostGuardsEnabled) return;
+    this._rootTopmostGuardsEnabled = true;
+    for (const type of ['main', 'chat']) {
+      const window = this.windows.get(type);
+      if (window && !window.isDestroyed()) this.installTopmostGuard(type, window);
+    }
+  }
+
+  installTopmostGuard(type, window) {
+    if (process.platform !== 'win32' || !window || window.isDestroyed()) return;
+    if (typeof window.hookWindowMessage !== 'function') {
+      logger.warn('Root visibility topmost guard unavailable', { type });
+      return;
+    }
+    let state = this._topmostGuardStates.get(type);
+    if (!state) {
+      state = { lastAt: 0, blocks: 0, lastBlockLogAt: 0, reasserting: false };
+      this._topmostGuardStates.set(type, state);
+    }
+
+    const noteBlocked = (method) => {
+      state.blocks += 1;
+      const now = Date.now();
+      if (state.blocks === 1 || now - state.lastBlockLogAt >= TOPMOST_GUARD_BLOCK_LOG_INTERVAL_MS) {
+        state.lastBlockLogAt = now;
+        logger.info('Root visibility topmost guard blocked demotion', { type, method, totalBlocks: state.blocks });
+      }
+    };
+
+    // Repair only when Windows actually removed our topmost status.
+    const reassert = () => {
+      if (window.isDestroyed() || !window.isVisible()) return;
+      if (state.reasserting) return;
+      state.reasserting = true;
+      try {
+        this.setWindowAlwaysOnTop(window);
+      } catch (error) {
+        logger.debug('Root visibility topmost guard re-assert failed', { type, error: error.message });
+      } finally {
+        state.reasserting = false;
+      }
+      noteBlocked('repair');
+    };
+
+    // Electron's hook passes lParam as a pointer value, not the pointed-to
+    // STYLESTRUCT/WINDOWPOS. Never mutate or parse it as an inline struct.
+    const repairIfDemoted = () => {
+      try {
+        if (!window.isAlwaysOnTop()) reassert();
+      } catch (_) { /* ignore */ }
+    };
+
+    try {
+      window.hookWindowMessage(WM_STYLECHANGED, repairIfDemoted);
+      window.hookWindowMessage(WM_WINDOWPOSCHANGING, repairIfDemoted);
+      window.hookWindowMessage(WM_WINDOWPOSCHANGED, repairIfDemoted);
+      logger.info('Root visibility topmost guard installed', { type });
+    } catch (error) {
+      logger.warn('Root visibility topmost guard install failed', { type, error: error.message });
+    }
   }
 
   // New method to enforce always-on-top for all windows
@@ -1748,6 +1925,11 @@ class WindowManager {
       this.desktopWatcher = null;
     }
 
+    if (this._displayChangeTimer) {
+      clearTimeout(this._displayChangeTimer);
+      this._displayChangeTimer = null;
+    }
+
     if (this.screenCaptureAvailabilityWatcher) {
       clearInterval(this.screenCaptureAvailabilityWatcher);
       this.screenCaptureAvailabilityWatcher = null;
@@ -1760,6 +1942,7 @@ class WindowManager {
     // Initialize with current cursor position to get the active display
     const cursorPoint = screen.getCursorScreenPoint();
     this.currentDisplay = screen.getDisplayNearestPoint(cursorPoint);
+    this._activeDisplaySignature = this.displaySignature(this.currentDisplay);
     
     screen.on('display-added', () => {
       logger.debug('Display added');
@@ -1791,9 +1974,25 @@ class WindowManager {
   }
 
   handleDisplayChange() {
-    setTimeout(() => {
+    if (this._displayChangeTimer) clearTimeout(this._displayChangeTimer);
+    this._displayChangeTimer = setTimeout(() => {
+      this._displayChangeTimer = null;
+      if (this.isScreenBeingShared) return;
+      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      const signature = this.displaySignature(display);
+      if (signature === this._activeDisplaySignature) return;
+      this.currentDisplay = display;
+      this._activeDisplaySignature = signature;
       this.moveWindowsToActiveScreen();
     }, 500);
+  }
+
+  displaySignature(display) {
+    if (!display) return '';
+    const b = display.bounds || {};
+    const w = display.workArea || {};
+    return [display.id, display.scaleFactor, b.x, b.y, b.width, b.height,
+      w.x, w.y, w.width, w.height].join(':');
   }
 
   trackActiveScreen() {
@@ -1802,8 +2001,10 @@ class WindowManager {
     const cursorPoint = screen.getCursorScreenPoint();
     const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
     
-    if (!this.currentDisplay || activeDisplay.id !== this.currentDisplay.id) {
+    const signature = this.displaySignature(activeDisplay);
+    if (!this.currentDisplay || signature !== this._activeDisplaySignature) {
       this.currentDisplay = activeDisplay;
+      this._activeDisplaySignature = signature;
       this.moveWindowsToActiveScreen();
       
       logger.debug('Active screen changed', {
@@ -1987,8 +2188,15 @@ class WindowManager {
   }
 
   showChatWindow() {
+    if (this.isScreenBeingShared) return;
+    this.desiredWindowVisibility.set('chat', true);
     const chatWindow = this.windows.get('chat');
+    if (!chatWindow || chatWindow.isDestroyed()) {
+      this.ensureWindow('chat');
+      return;
+    }
     if (chatWindow && !chatWindow.isDestroyed()) {
+      if (chatWindow.isVisible()) return;
       this.showOnCurrentDesktop(chatWindow);
       logger.debug('Chat window shown');
     }
@@ -1997,7 +2205,15 @@ class WindowManager {
   showWindow(windowType) {
     // Unconditional show (no toggle) — used by keystroke-capture mode so the
     // user can always see where their keystrokes are landing.
+    if (this.isScreenBeingShared) return;
+    if (windowType === 'main' || windowType === 'chat') {
+      this.desiredWindowVisibility.set(windowType, true);
+    }
     const targetWindow = this.windows.get(windowType);
+    if ((!targetWindow || targetWindow.isDestroyed()) && (windowType === 'main' || windowType === 'chat')) {
+      this.ensureWindow(windowType);
+      return;
+    }
     if (targetWindow && !targetWindow.isDestroyed()) {
       // E9-S-001 fold: if the target is already visible, showing again would
       // run the hide→showInactive dance (a visible flash mid-share). No-op.
@@ -2010,6 +2226,8 @@ class WindowManager {
   }
 
   hideChatWindow() {
+    this.chatHideVersion += 1;
+    this.desiredWindowVisibility.set('chat', false);
     const chatWindow = this.windows.get('chat');
     if (chatWindow && !chatWindow.isDestroyed()) {
       chatWindow.hide();

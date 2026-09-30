@@ -37,7 +37,7 @@
     "winston-daily-rotate-file": "^4.7.1"
   },
   "devDependencies": {
-    "electron": "44.4.4",
+    "electron": "^44.4.4",
     "electron-builder": "26.15.3",
     "js-yaml": "4.3.2"
   },
@@ -119,7 +119,23 @@
       }
     },
     "win": {
-      "extraResources": [{"from": ".depthengine/speech-runtime/windows-x64", "to": "speech-runtime/windows-x64", "filter": ["**/*"]}],
+      "extraResources": [
+        {
+          "from": ".depthengine/speech-runtime/windows-x64",
+          "to": "speech-runtime/windows-x64",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "scripts/cluely-admin.ps1",
+          "to": "launcher/cluely-admin.ps1"
+        },
+        {
+          "from": "scripts/cluely-admin.cmd",
+          "to": "launcher/cluely-admin.cmd"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -175,11 +191,12 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "perMachine": false,
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
       "artifactName": "OpenCluely-Setup-${version}-${arch}.${ext}"

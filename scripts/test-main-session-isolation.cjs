@@ -14,7 +14,7 @@ function fixture(){
   logger:{info(){},warn(){},error(){},debug(){}},sessionManager,
   llmService:{processTextWithSkillStream:invokeProvider,processImageWithSkillStream:invokeProvider},
   captureService:{captureAndProcess:async()=>{if(captureWait)await captureGate.promise;return {imageBuffer:Buffer.from('fixture-image'),mimeType:'image/png'}}},
-  speechService:{cancelRecording(){}},windowManager:{broadcastToAllWindows:(channel,data)=>events.push({channel,data}),showLLMLoading:()=>panels.push('loading'),showLLMResponse:text=>panels.push(text),hideLLMResponse:()=>panels.push('hidden')}};
+  speechService:{cancelRecording(){}},windowManager:{broadcastToAllWindows:(channel,data)=>events.push({channel,data}),showWindow:()=>{},showLLMLoading:()=>panels.push('loading'),showLLMResponse:text=>panels.push(text),hideLLMResponse:()=>panels.push('hidden')}};
  const source=fs.readFileSync(path.join(root,'main.js'),'utf8');const start=source.indexOf('class ApplicationController {'),end=source.indexOf('const gotSingleInstanceLock');assert(start>=0&&end>start,'real controller source found');
  const Controller=vm.runInNewContext(source.slice(start,end)+'\nApplicationController',context);const c=Object.create(Controller.prototype);
  Object.assign(c,{operationEpoch:0,activeSkill:'dsa',codingLanguage:'JavaScript',isReady:true,setupService:{invalidate(){}},managedSession:{cancelAll:async()=>{},status:()=>({signingIn:false})}});

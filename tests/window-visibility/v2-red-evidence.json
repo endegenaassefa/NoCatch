@@ -1,0 +1,42 @@
+﻿{
+    "timestamp":  "2026-09-26T14:24:07.8961685-04:00",
+    "command":  "node --test tests/window-visibility/root-persistent-v2.test.cjs",
+    "runtime":  "v22.23.3",
+    "exitCode":  1,
+    "filesBeforeRun":  [
+                           {
+                               "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\main.js",
+                               "Hash":  "2F8F9F56BB4134AFF3BAB216C925B032146F01DA954244D64B79EF735F810E43"
+                           },
+                           {
+                               "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\src\\managers\\window.manager.js",
+                               "Hash":  "8F367C31AC98DFB49112FE31A8E8A32AA7A7DB3D78C9176734E32EFC1FB12346"
+                           },
+                           {
+                               "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\chat.html",
+                               "Hash":  "3CF455BB0752DCD95E29F3A208F413CB4CB761570A0604E9B221B43469CFDB30"
+                           },
+                           {
+                               "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\root-persistent-v2.test.cjs",
+                               "Hash":  "14843C2DFF437BE3D808261B2039B4C9FD5E77C800BFCBF36719E9A14CA6EC0D"
+                           }
+                       ],
+    "filesAfterRun":  [
+                          {
+                              "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\main.js",
+                              "Hash":  "2F8F9F56BB4134AFF3BAB216C925B032146F01DA954244D64B79EF735F810E43"
+                          },
+                          {
+                              "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\src\\managers\\window.manager.js",
+                              "Hash":  "8F367C31AC98DFB49112FE31A8E8A32AA7A7DB3D78C9176734E32EFC1FB12346"
+                          },
+                          {
+                              "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\chat.html",
+                              "Hash":  "3CF455BB0752DCD95E29F3A208F413CB4CB761570A0604E9B221B43469CFDB30"
+                          },
+                          {
+                              "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\root-persistent-v2.test.cjs",
+                              "Hash":  "14843C2DFF437BE3D808261B2039B4C9FD5E77C800BFCBF36719E9A14CA6EC0D"
+                          }
+                      ]
+}

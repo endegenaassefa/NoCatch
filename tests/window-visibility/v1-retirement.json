@@ -1,0 +1,8 @@
+﻿{
+    "timestamp":  "2026-09-26T14:26:04.0008718-04:00",
+    "originalPath":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\visibility.test.cjs",
+    "preservedPath":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\historical-visibility-v1.cjs.txt",
+    "originalSHA256":  "4181CFF437AA0C55B946ACBF525C18203C7BF32201F97F639CA8852D93125A95",
+    "preservedSHA256":  "4181CFF437AA0C55B946ACBF525C18203C7BF32201F97F639CA8852D93125A95",
+    "reason":  "V1 root shortcut hide assertion superseded by reveal-only V2; txt extension excludes historical source from Node test discovery."
+}

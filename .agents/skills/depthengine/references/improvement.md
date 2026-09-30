@@ -15,9 +15,10 @@ This installation includes independent executable checks for its new integration
 ```text
 py <skill>/evals/test_dispatch.py
 py <skill>/evals/test_browser_read.py
+py <skill>/evals/test_walls.py
 ```
 
-They exercise the real Python CLIs using isolated fixtures; the browser suite also checks the installed OpenCLI doctor when available. Results go to temporary evidence directories and report their location. Read each suite's reported limits: command/packet correctness does not establish the quality of a model's work or the success of a live app journey. The [behavioral scenarios](../evals/scenarios.md) and [paired-evaluation protocol](../evals/protocol.md) support broader task trials when an authorized change warrants them. Keep authoring/grading ownership independent from production repairs.
+They exercise the real Python CLIs using isolated fixtures; the browser suite also checks the installed OpenCLI doctor when available. The wall suite checks the three-tier report and negative controls; a separate `scripts/walls.py doctor` run reports actual local tier readiness. Results go to temporary evidence directories and report their location. Read each suite's reported limits: command/packet correctness does not establish the quality of a model's work or the success of a live app journey. The [behavioral scenarios](../evals/scenarios.md) and [paired-evaluation protocol](../evals/protocol.md) support broader task trials when an authorized change warrants them. Keep authoring/grading ownership independent from production repairs.
 
 1. Preserve the current skill and record hashes/version for its entrypoint, relevant references and scripts. Pin the host/model when exposed, available tools, fixture/source version and trial limits. Use [adoption](adoption.md) for existing work. Never replace a running task's frozen contract.
 2. Independent QA authors representative requests and outcome rubrics before candidate execution. Include the motivating failure, a simple task that should stay cheap, a relevant boundary/failure case and an adjacent task that should not regress. Withhold some cases from tuning where practical. Grade actions and artifacts, not whether the answer repeats the desired words.

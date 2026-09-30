@@ -1,0 +1,204 @@
+'use strict';
+
+// Real controller entry points + real WindowManager, with Electron/OS outputs
+// replaced at the process boundary. No installed application or browser starts.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
+const { createRequire } = require('node:module');
+const root = path.resolve(__dirname, '../..');
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function fixture(t, { rootMode = true, completed = true } = {}) {
+  const timers = new Set();
+  const intervals = new Set();
+  const shortcuts = new Map();
+  const handlers = new Map();
+  const errors = [];
+  const windows = [];
+  const logger = { info() {}, debug() {}, warn() {}, error: (...args) => errors.push(args) };
+  const timed = (fn, ms, ...args) => {
+    const timer = setTimeout(() => { timers.delete(timer); fn(...args); }, ms);
+    timers.add(timer);
+    return timer;
+  };
+  const repeating = (fn, ms) => { const timer = setInterval(fn, ms); intervals.add(timer); return timer; };
+  class BrowserWindow extends EventEmitter {
+    constructor(options) {
+      super();
+      this.id = windows.length + 1;
+      this.visible = Boolean(options.show);
+      this.destroyed = false;
+      this.bounds = { x: 0, y: 0, width: options.width, height: options.height };
+      this.transitions = [];
+      this.webContents = new EventEmitter();
+      Object.assign(this.webContents, { send() {}, setWindowOpenHandler() {}, getURL: () => `file:///${this.file}` });
+      windows.push(this);
+    }
+    static getAllWindows() { return windows.filter(win => !win.destroyed); }
+    async loadFile(file) { this.file = file; }
+    isVisible() { return this.visible; }
+    isDestroyed() { return this.destroyed; }
+    isFocused() { return false; }
+    isAlwaysOnTop() { return this.topmost; }
+    show() { this.showInactive(); }
+    showInactive() { if (!this.visible) this.transitions.push('show'); this.visible = true; this.emit('show'); }
+    hide() { if (this.visible) this.transitions.push('hide'); this.visible = false; this.emit('hide'); }
+    destroy() { this.destroyed = true; this.visible = false; this.emit('closed'); }
+    getBounds() { return { ...this.bounds }; }
+    getPosition() { return [this.bounds.x, this.bounds.y]; }
+    getSize() { return [this.bounds.width, this.bounds.height]; }
+    getContentSize() { return this.getSize(); }
+    setPosition(x, y) { Object.assign(this.bounds, { x, y }); }
+    setSize(width, height) { Object.assign(this.bounds, { width, height }); }
+    setContentSize(width, height) { this.setSize(width, height); }
+    setAlwaysOnTop(value) { this.topmost = value; }
+    setVisibleOnAllWorkspaces() {}
+    setIgnoreMouseEvents() {}
+    setSkipTaskbar() {}
+    setContentProtection() {}
+    setMinimumSize() {}
+    setTitle() {}
+  }
+  const display = { id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
+  const screen = Object.assign(new EventEmitter(), {
+    getPrimaryDisplay: () => display, getDisplayNearestPoint: () => display,
+    getCursorScreenPoint: () => ({ x: 800, y: 500 })
+  });
+  const app = { setName() {}, getPath: () => __dirname, getAppPath: () => root,
+    quit() { errors.push('unexpected app.quit'); } };
+  const electron = { BrowserWindow, screen, app, powerMonitor: new EventEmitter(),
+    ipcMain: Object.assign(new EventEmitter(), { handle: (name, fn) => handlers.set(name, fn) }),
+    globalShortcut: { register: (name, fn) => { shortcuts.set(name, fn); return true; },
+      isRegistered: name => shortcuts.has(name), unregister: name => shortcuts.delete(name) } };
+  const config = { get: key => key === 'window.webPreferences' ? {} : undefined };
+  const base = { console, Buffer, setTimeout: timed, clearTimeout, setInterval: repeating, clearInterval,
+    process: { platform: 'win32', env: {}, title: '' }, Date, performance, path, logger, config };
+  const managerFile = path.join(root, 'src/managers/window.manager.js');
+  const nativeRequire = createRequire(managerFile);
+  const managerContext = { ...base, module: { exports: {} }, __dirname: path.dirname(managerFile),
+    require: name => name === 'electron' ? electron : name === '../core/logger' ? { createServiceLogger: () => logger }
+      : name === '../core/config' ? config : nativeRequire(name) };
+  vm.runInNewContext(fs.readFileSync(managerFile, 'utf8'), managerContext, { filename: managerFile });
+  const manager = managerContext.module.exports;
+  class FirstRunManager { ensureEnv() {} getStatus() { return { sentinelExists: completed }; } }
+  class SetupService {
+    getStatus() { return { completed, aiMode: 'direct' }; }
+    complete() { completed = true; }
+  }
+  const source = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  const start = source.indexOf('class ApplicationController {');
+  const end = source.indexOf('const gotSingleInstanceLock');
+  assert(start >= 0 && end > start, 'controller load boundary is available');
+  const context = { ...base, ...electron, windowManager: manager, FirstRunManager, SetupService,
+    PRIVILEGE: { isRoot: rootMode, detail: 'QA fixture' }, ENV_PATH: path.join(__dirname, '.unused-env'),
+    captureService: { platformAdapter: {} }, speechService: { initializeClient() {}, isAvailable: () => false },
+    llmService: {}, sessionManager: { addEvent() {} },
+    createManagedManager: () => ({ restore: async () => {}, status: () => ({ authenticated: false }) }),
+    createDirectSetupAnswer: () => () => {}, attachManagedSession() {}, assertTrustedRenderer() {},
+    require: name => name === 'electron' ? electron : createRequire(path.join(root, 'main.js'))(name) };
+  const Controller = vm.runInNewContext(source.slice(start, end) + '\nApplicationController', context, { filename: 'main.js' });
+  // Irrelevant boot services are disconnected. Startup visibility, shortcuts,
+  // onboarding status/completion, IPC registration and every manager method run unchanged.
+  for (const name of ['setupStealth', 'setupEventHandlers', 'setupWhisperModelPreparation',
+    'setupPermissions', 'setupNetworkConfiguration', 'updateAppIcon']) Controller.prototype[name] = function () {};
+  const controller = new Controller();
+  controller.setupIPCHandlers();
+  t.after(() => {
+    manager.destroyAllWindows();
+    for (const timer of timers) clearTimeout(timer);
+    for (const timer of intervals) clearInterval(timer);
+  });
+  return { manager, controller, errors,
+    async boot() {
+      await controller.onAppReady();
+      assert.deepEqual(errors, [], 'startup reaches application readiness without fixture errors');
+      assert.equal(controller.isReady, true);
+    },
+    async key(name) {
+      assert.equal(typeof shortcuts.get(name), 'function', `${name} registered with Electron`);
+      await shortcuts.get(name)();
+    },
+    async invoke(name, type = 'chat') {
+      assert.equal(typeof handlers.get(name), 'function', `${name} IPC registered`);
+      return handlers.get(name)({ sender: manager.getWindow(type)?.webContents,
+        senderFrame: { url: `file:///${type}.html` } });
+    }
+  };
+}
+
+test('Windows root startup automatically shows toolbar and chat after completed onboarding', async t => {
+  const f = fixture(t);
+  await f.boot();
+  assert.equal(f.manager.getWindow('main').isVisible(), true, 'toolbar is visible automatically');
+  assert.equal(f.manager.getWindow('chat').isVisible(), true, 'chat is visible automatically');
+});
+
+test('Windows root onboarding defers chat, then completion shows toolbar and chat', async t => {
+  const f = fixture(t, { completed: false });
+  await f.boot();
+  assert.equal(f.manager.getWindow('main').isVisible(), false);
+  assert.equal(f.manager.getWindow('chat').isVisible(), false);
+  const result = await f.invoke('complete-first-run');
+  assert.equal(result.success, true);
+  assert.equal(f.manager.getWindow('main').isVisible(), true);
+  assert.equal(f.manager.getWindow('chat').isVisible(), true, 'completed onboarding opens chat');
+});
+
+test('registered chat shortcut stays visible through repeated callbacks', async t => {
+  const f = fixture(t);
+  await f.boot();
+  const chat = f.manager.getWindow('chat');
+  chat.hide();
+  await f.key('CommandOrControl+Shift+C');
+  assert.equal(chat.isVisible(), true, 'first callback opens chat');
+  chat.transitions.length = 0;
+  for (let n = 0; n < 40; n++) {
+    await pause(30);
+    await f.key('CommandOrControl+Shift+C');
+  }
+  assert.deepEqual(chat.transitions, [], 'held chat shortcut must not hide/show the window');
+  assert.equal(chat.isVisible(), true);
+});
+
+test('registered visibility shortcut ignores a sustained repeat burst and accepts a later deliberate press', async t => {
+  const f = fixture(t);
+  await f.boot();
+  f.manager.hideAllWindowsExcept([]);
+  const toolbar = f.manager.getWindow('main');
+  toolbar.transitions.length = 0;
+  await f.key('CommandOrControl+Shift+V');
+  assert.equal(toolbar.isVisible(), true, 'first callback opens toolbar');
+  for (let n = 0; n < 41; n++) {
+    await pause(30);
+    await f.key('CommandOrControl+Shift+V');
+  }
+  assert.deepEqual(toolbar.transitions, ['show'], 'held visibility shortcut must produce one show and no hides');
+  assert.equal(toolbar.isVisible(), true, 'repeat burst must not end hidden');
+  await pause(1200);
+  await f.key('CommandOrControl+Shift+V');
+  assert.equal(toolbar.isVisible(), false, 'a later deliberate visibility press still hides');
+});
+
+test('deliberate close-window IPC keeps chat closed until explicitly reopened', async t => {
+  const f = fixture(t);
+  await f.boot();
+  f.manager.showWindow('chat');
+  const result = await f.invoke('close-window');
+  assert.equal(result.success, true);
+  assert.equal(f.manager.getWindow('chat').isVisible(), false);
+  await pause(1200);
+  assert.equal(f.manager.getWindow('chat').isVisible(), false, 'deliberate close survives delayed startup work');
+  await f.key('CommandOrControl+Shift+C');
+  assert.equal(f.manager.getWindow('chat').isVisible(), true, 'explicit chat shortcut can reopen');
+});
+
+test('ordinary Windows startup preserves toolbar-only behavior', async t => {
+  const f = fixture(t, { rootMode: false });
+  await f.boot();
+  assert.equal(f.manager.getWindow('main').isVisible(), true);
+  assert.equal(f.manager.getWindow('chat').isVisible(), false);
+});

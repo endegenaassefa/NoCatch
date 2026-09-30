@@ -1,0 +1,42 @@
+﻿{
+    "timestamp":  "2026-09-26T15:11:40.2687265-04:00",
+    "runtime":  "v22.23.3",
+    "checks":  [
+                   {
+                       "output":  "v31-green-result.txt",
+                       "exitCode":  0,
+                       "command":  "node --test tests/window-visibility/diagnostic-v31.test.cjs",
+                       "failed":  0,
+                       "passed":  3
+                   },
+                   {
+                       "output":  "v31-broken-result.txt",
+                       "exitCode":  1,
+                       "command":  "node --require ./tests/window-visibility/v31-broken-control.cjs.txt --test tests/window-visibility/diagnostic-v31.test.cjs",
+                       "failed":  3,
+                       "passed":  0
+                   }
+               ],
+    "files":  [
+                  {
+                      "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\main.js",
+                      "Hash":  "7A27EF9F2A4D366545127DD543166E44576371FAD9529D299B9DD08016D7C749"
+                  },
+                  {
+                      "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\src\\managers\\window.manager.js",
+                      "Hash":  "8F367C31AC98DFB49112FE31A8E8A32AA7A7DB3D78C9176734E32EFC1FB12346"
+                  },
+                  {
+                      "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\diagnostic-v3.test.cjs",
+                      "Hash":  "BA4E34A147D9BBD7298C1D3A3E850D19218DCE60AB9E4F694339B288CA053D73"
+                  },
+                  {
+                      "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\diagnostic-v31.test.cjs",
+                      "Hash":  "EE2F6079504840C8CCE878FBA1D6F7515EF6CE998C920FF1EBB3EA8F62F7A26F"
+                  },
+                  {
+                      "Path":  "C:\\Users\\endeg\\Desktop\\NoCatch\\tests\\window-visibility\\v31-broken-control.cjs.txt",
+                      "Hash":  "B7E8D3D5585E0A547D644DDFFE14C90DC8EBF3F747DFC8C5556687E7519472C5"
+                  }
+              ]
+}

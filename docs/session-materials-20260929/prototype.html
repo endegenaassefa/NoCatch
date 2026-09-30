@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoCatch session materials prototype</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <div class="reviewbar"><strong>Interactive product prototype</strong><span>Sample data. No document contents are read, saved, or sent.</span><a href="engineering-review.html">Read the engineering review</a></div>
+  <div class="workspace">
+    <main class="app" aria-label="Proposed NoCatch materials screen">
+      <header class="topbar"><span class="brand">Open<span>Cluely</span></span><button id="materialsNav" class="quiet" hidden>Materials</button><span id="step">Prepare your session</span></header>
+      <section id="prepare">
+        <h1>Add material for this session</h1>
+        <p class="intro">Give the AI your slides and notes so it can answer with your context. This step is optional.</p>
+        <div class="dropzone" id="dropzone"><div class="filemark" aria-hidden="true">▤</div><h2>Bring your slide decks</h2><p>PowerPoint (.pptx) or PDF. Up to 10 files.</p><div class="actions"><button id="choose" class="primary">Choose files</button><button id="google">Google Slides copy</button></div><p class="small">50 MiB per file · 250 MiB total · 1,000 slides or pages total</p><p class="small">Real file selection previews names and sizes only in this prototype.</p><input id="files" type="file" accept=".pptx,.pdf" multiple hidden></div>
+        <div class="listhead"><h2>Your materials</h2><span id="capacity">0 of 10 files</span></div>
+        <div id="empty" class="empty">Nothing added yet. You can start without materials.</div>
+        <ul id="deckList" class="decklist" aria-label="Selected materials"></ul>
+        <p id="status" role="status" aria-live="polite"></p>
+        <div class="sessionnote"><strong>Your 90 minutes begin when you start.</strong><p>Materials added later use the same deadline. In the proposed app, an unfinished preparation expires after 30 minutes.</p><p class="small">The proposed app deletes its material copies and related session history when the session ends. Your original files stay where they are. AI providers have their own retention policies.</p></div>
+        <label class="consent"><input id="consent" type="checkbox"><span>Allow relevant excerpts from ready materials to be sent with my questions to the selected AI provider.</span></label>
+        <div class="actions footer"><button id="start" class="primary">Start 90 minute session</button><button id="skip" class="quiet">Continue without materials</button></div>
+      </section>
+      <section id="active" hidden>
+        <div class="sessionhead"><div><h1>Your session</h1><p id="activeSummary"></p></div><div class="clock"><strong id="clock">90:00</strong><span>remaining</span></div></div>
+        <div class="statebar"><span id="activeState">Materials ready</span><button id="manage" class="quiet">Manage materials</button><button id="end" class="quiet danger">End and clear session</button></div>
+        <div class="conversation"><div class="question">What happens if two transactions update the same record?</div><div class="answer"><p id="sampleAnswer"></p><button id="source" class="citation">View sample source</button><p class="small">Illustrative answer. This prototype does not call an AI.</p></div></div>
+        <label class="questionlabel" for="draft">Your next question</label><textarea id="draft" placeholder="Ask about your material…" rows="3"></textarea><button id="ask" class="primary">Preview source behavior</button>
+      </section>
+      <section id="expired" hidden><h1>Session ended</h1><p id="expiryReason">The 90 minute window has ended.</p><div class="sessionnote"><strong>Sample materials and conversation cleared.</strong><p>In the proposed app, cleanup also covers extracted text, indexes, app copies, thumbnails, and related answer records. No file contents were stored by this prototype.</p></div><button id="newSession" class="primary">Prepare a new session</button></section>
+    </main>
+    <aside class="controls" aria-label="Prototype scenario controls">
+      <h2>Try the user journeys</h2><p>These controls simulate situations the finished app must handle.</p>
+      <button data-scenario="five">Load 5 sample decks</button><button data-scenario="ten">Load 10 sample decks</button><button data-scenario="partial">Show an image-heavy deck</button><button data-scenario="failed">Show a failed import</button><button data-scenario="duplicate">Try a duplicate upload</button><button data-scenario="overlimit">Try an eleventh deck</button><button data-scenario="resume">Reopen with 23 minutes left</button><button data-scenario="expire">Reach the deadline</button><button data-scenario="reset">Reset prototype</button>
+      <label for="policy">Answer policy</label><select id="policy"><option value="mixed">Materials plus general knowledge</option><option value="strict">Uploaded material only</option></select>
+      <p class="small">Proposed defaults: explicit Start session, recovery until the original deadline, and general knowledge clearly distinguished from material citations.</p>
+      <details><summary>Why these states matter</summary><p>A ready file and a partially read file are different. A failed import must never count as ready. Reopening must not reset the timer. Expiration must clear the conversation too, because answers can quote the decks.</p></details>
+      <a href="engineering-review.html">Capacity, storage, and failure scenarios</a>
+    </aside>
+  </div>
+  <dialog id="detail"><div id="detailContent"></div><form method="dialog"><button>Close</button></form></dialog>
+  <script src="prototype.js"></script>
+</body>
+</html>

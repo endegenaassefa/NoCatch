@@ -7,6 +7,8 @@ python3 <skill>/scripts/tooling.py doctor --smoke
 python3 <skill>/scripts/tooling.py setup-browser
 ```
 
+For research blocked by JavaScript, login, or bot defenses, read [walls](walls.md) and run `python3 <skill>/scripts/walls.py doctor` (use `py` on native Windows). The doctor reports headless browser, connected signed-in browser, and API computer-use tiers separately. A configured API key is not a ready computer-use adapter. Escalate only after a relevant lower tier has failed on the actual source, and inspect retrieved content before citing it.
+
 ## OpenCLI browser retrieval
 
 When OpenCLI is requested or normal source retrieval is insufficient, use the installed official `@jackwener/opencli` package through the bundled adapter. This adapter was exercised with version 1.8.8 and refuses an unvalidated version rather than assuming its flags still work. It resolves the installed Node entrypoint on Windows/Linux without a shell shim. It does not install a browser extension or alter the user's browser configuration.

@@ -1008,15 +1008,26 @@
       let examModeActive = false;
       let rootMode = false;
 
-      function setRootModeUi() {
+      function setRootModeUi(state) {
         rootMode = true;
+        const s = state || {};
+        const shortcut = s.captureShortcut || '⌘⇧Space';
+        // Platform-true copy: on macOS the kill-immunity claim was measured
+        // (EPERM against a real LockDown Browser kill sweep); on Windows the
+        // elevated instance is new and survival is UNMEASURED — report only
+        // verified behavior (independent review finding 3, 2026-09-25).
+        const bannerText = s.platform === 'win32'
+          ? `🛡️ Root exam mode — this Cluely runs elevated as Administrator. Chat, question types, mic, settings and ${shortcut} capture are all live. Do not run the shield helper alongside it.`
+          : `🛡️ Root exam mode — this Cluely runs as root: LockDown Browser cannot kill it. Chat, question types, mic, settings and ${shortcut} capture are all live. Do not run the shield helper alongside it.`;
         if (chatExamBtn) {
           chatExamBtn.classList.add('active');
-          chatExamBtn.title = 'Root mode: Cluely itself is the root, kill-immune exam app — no shield needed.';
+          chatExamBtn.title = s.platform === 'win32'
+            ? 'Root mode: Cluely runs elevated as Administrator — no shield needed.'
+            : 'Root mode: Cluely itself is the root, kill-immune exam app — no shield needed.';
         }
         if (examModeBannerEl) {
           examModeBannerEl.style.display = 'block';
-          examModeBannerEl.textContent = '🛡️ Root exam mode — this Cluely runs as root: LockDown Browser cannot kill it. Chat, question types, mic, settings and ⌘⇧Space capture are all live. Do not run the shield helper alongside it.';
+          examModeBannerEl.textContent = bannerText;
         }
       }
 
@@ -1071,7 +1082,7 @@
           whysperAPI.getExamModeState()
             .then(s => {
               if (s && s.root) {
-                setRootModeUi();
+                setRootModeUi(s);
               } else {
                 setExamModeUi(!!(s && s.active));
               }

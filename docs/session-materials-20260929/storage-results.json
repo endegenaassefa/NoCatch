@@ -1,0 +1,118 @@
+{
+  "experiment": "Encrypted SQLite payloads and RAM-only FTS5 on synthetic slide text",
+  "recordedAt": "2026-09-30T02:28:44.144Z",
+  "runtime": "v24.20.0",
+  "platform": "linux/x64",
+  "ttlMinutes": 90,
+  "checks": [
+    {
+      "name": "5 decks/300 slides: encrypted disk has no content or filenames",
+      "passed": true
+    },
+    {
+      "name": "5 decks/300 slides: reopen restores citations without extending deadline",
+      "passed": true
+    },
+    {
+      "name": "5 decks/300 slides: exact deadline rejects reads and writes",
+      "passed": true
+    },
+    {
+      "name": "5 decks/300 slides: expired startup deletes database before decryption",
+      "passed": true
+    },
+    {
+      "name": "10 decks/600 slides: encrypted disk has no content or filenames",
+      "passed": true
+    },
+    {
+      "name": "10 decks/600 slides: reopen restores citations without extending deadline",
+      "passed": true
+    },
+    {
+      "name": "10 decks/600 slides: exact deadline rejects reads and writes",
+      "passed": true
+    },
+    {
+      "name": "10 decks/600 slides: expired startup deletes database before decryption",
+      "passed": true
+    },
+    {
+      "name": "10 decks/1000 slides: encrypted disk has no content or filenames",
+      "passed": true
+    },
+    {
+      "name": "10 decks/1000 slides: reopen restores citations without extending deadline",
+      "passed": true
+    },
+    {
+      "name": "10 decks/1000 slides: exact deadline rejects reads and writes",
+      "passed": true
+    },
+    {
+      "name": "10 decks/1000 slides: expired startup deletes database before decryption",
+      "passed": true
+    },
+    {
+      "name": "authenticated encryption rejects changed content and a different session binding",
+      "passed": true
+    }
+  ],
+  "runs": [
+    {
+      "decks": 5,
+      "slides": 60,
+      "words": 180,
+      "totalSlides": 300,
+      "totalWords": 54600,
+      "extractedTextMiB": 0.52,
+      "encryptedDatabaseMiB": 0.6,
+      "buildMs": 2126.68,
+      "restoreMs": 29.17,
+      "lookupMedianMs": 0.12,
+      "lookupP95Ms": 0.22,
+      "rssBeforeMiB": 46.85,
+      "rssAfterMiB": 58.01
+    },
+    {
+      "decks": 10,
+      "slides": 60,
+      "words": 180,
+      "totalSlides": 600,
+      "totalWords": 109200,
+      "extractedTextMiB": 1.04,
+      "encryptedDatabaseMiB": 1.19,
+      "buildMs": 4013.4,
+      "restoreMs": 52.58,
+      "lookupMedianMs": 0.12,
+      "lookupP95Ms": 0.17,
+      "rssBeforeMiB": 58.01,
+      "rssAfterMiB": 63.14
+    },
+    {
+      "decks": 10,
+      "slides": 100,
+      "words": 1200,
+      "totalSlides": 1000,
+      "totalWords": 1202000,
+      "extractedTextMiB": 11.4,
+      "encryptedDatabaseMiB": 11.74,
+      "buildMs": 7078.61,
+      "restoreMs": 144.18,
+      "lookupMedianMs": 0.17,
+      "lookupP95Ms": 0.28,
+      "rssBeforeMiB": 63.14,
+      "rssAfterMiB": 101.38
+    }
+  ],
+  "limitations": [
+    "Not connected to NoCatch and not a production implementation.",
+    "Generated text; no PPTX/PDF parsing, OCR, images, Google OAuth, or live AI answers.",
+    "Key supplied by the harness; Windows DPAPI/macOS Keychain were not tested.",
+    "Unique-anchor lookups test mechanical retrieval and source mapping, not semantic answer quality.",
+    "RSS is process-wide and cumulative across runs; these are not isolated peak-memory measurements.",
+    "AES protects content at rest; logical file deletion does not prove physical erasure or backup deletion.",
+    "No process can delete local files while the computer is off; startup cleanup demonstrates the next-launch policy.",
+    "Production still needs atomic disk/index commits, process isolation, owner checks, and full cancellation/cleanup coverage."
+  ]
+}

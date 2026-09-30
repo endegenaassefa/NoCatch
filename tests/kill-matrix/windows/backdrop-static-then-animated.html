@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>backdrop</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0a0a0a; }
+  .stage {
+    width: 100%; height: 100%;
+    background:
+      repeating-linear-gradient(90deg, #e63946 0px, #e63946 40px, #f1faee 40px, #f1faee 80px, #1d3557 80px, #1d3557 120px);
+    background-size: 240px 100%;
+    animation: slide 0.25s linear infinite;
+    animation-delay: 8s;   /* static for the first 8 s, then animated */
+    animation-play-state: paused;
+  }
+  /* two-step so the page is visibly static first, then starts moving */
+  .stage.go { animation-play-state: running; }
+  @keyframes slide { from { background-position: 0 0; } to { background-position: 240px 0; } }
+</style>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<script>
+  setTimeout(function () { document.getElementById('stage').className = 'stage go'; }, 8000);
+</script>
+</body>
+</html>

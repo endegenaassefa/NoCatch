@@ -16,7 +16,7 @@ Choose the smallest useful workflow from the outcome, uncertainty, and consequen
 | Work | Read when relevant | Completion evidence |
 | --- | --- | --- |
 | Feature, bug, performance, refactor | [Engineering](references/engineering.md), then discovery as needed | Actual behavior or measured before/after result |
-| Market, competitor, technical research | [Research](references/research.md) | Traceable claims, alternatives, uncertainty, and decision implications |
+| Market, competitor, technical research | [Research](references/research.md) | Traceable claims, alternatives, uncertainty, adversarial gap check, and decision implications |
 | CI, deployment, infrastructure, incident | [Operations](references/operations.md) | Named environment, checks, rollout/recovery evidence within authorization |
 | Product or frontend | [Product/design](references/product-design.md) | Journey, rendered states, functional and visual findings |
 | Skill/harness improvement | [Improvement](references/improvement.md) | Versioned candidate, independent evaluation, regression results and limits |

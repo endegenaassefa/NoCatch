@@ -1,0 +1,120 @@
+{
+  "recordedAt": "2026-09-30T02:45:21.636274+00:00",
+  "runtime": "Playwright Chromium, Linux/WSL",
+  "checks": [
+    {
+      "name": "Empty state permits starting without materials",
+      "passed": true
+    },
+    {
+      "name": "Five deck scenario has five entries",
+      "passed": true
+    },
+    {
+      "name": "Ready materials require explicit sharing consent",
+      "passed": true
+    },
+    {
+      "name": "Explicit start opens active session and 90 minute clock",
+      "passed": true
+    },
+    {
+      "name": "Source preview opens cited slide",
+      "passed": true
+    },
+    {
+      "name": "Removed sample source is not cited",
+      "passed": true
+    },
+    {
+      "name": "Material removal does not reset timer",
+      "passed": true
+    },
+    {
+      "name": "End session removes material entries and conversation",
+      "passed": true
+    },
+    {
+      "name": "Real selection is honestly labeled preview only",
+      "passed": true
+    },
+    {
+      "name": "Legacy PPT is rejected with conversion guidance",
+      "passed": true
+    },
+    {
+      "name": "Partial extraction reports specific unread slides",
+      "passed": true
+    },
+    {
+      "name": "Failed file has a correction path and is not ready",
+      "passed": true
+    },
+    {
+      "name": "Accepted subset can start while failed deck is excluded",
+      "passed": true
+    },
+    {
+      "name": "Eleventh deck rejection preserves ten accepted sample entries",
+      "passed": true
+    },
+    {
+      "name": "Duplicate scenario does not add another record",
+      "passed": true
+    },
+    {
+      "name": "Recovery shows remaining time rather than a new 90 minutes",
+      "passed": true
+    },
+    {
+      "name": "Expiration clears materials, answer, and draft",
+      "passed": true
+    },
+    {
+      "name": "Strict alternative gives a missing-material answer",
+      "passed": true
+    },
+    {
+      "name": "Chosen mixed policy labels general knowledge",
+      "passed": true
+    },
+    {
+      "name": "Google flow matches downloaded-copy first release",
+      "passed": true
+    },
+    {
+      "name": "Mobile prototype has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "Mobile engineering review has no page overflow",
+      "passed": true
+    },
+    {
+      "name": "Capacity calculator flags excess slides",
+      "passed": true
+    },
+    {
+      "name": "Browser scripts raised no errors",
+      "passed": true
+    },
+    {
+      "name": "Controlled clock: return after material removal retains 80 minutes rather than resetting to 90",
+      "passed": true
+    },
+    {
+      "name": "Controlled clock: real timer expires and clears content after 90 minutes",
+      "passed": true
+    },
+    {
+      "name": "Controlled clock: expiry closes and clears an open source preview",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "limitations": [
+    "Standalone UI prototype; no native Electron integration.",
+    "Deck status and answers are sample scenarios; file selection reads metadata only.",
+    "Recovery is a simulated state, not actual persistent storage."
+  ]
+}

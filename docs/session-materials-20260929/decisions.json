@@ -1,0 +1,52 @@
+{
+  "reviewDate": "2026-09-29",
+  "project": "NoCatch / OpenCluely",
+  "packageStatus": "Researched design, interactive UI prototype, and synthetic storage experiment; no production integration",
+  "confirmedByUser": {
+    "answerPolicy": "Use general knowledge too, and clearly distinguish it from cited material",
+    "googleSlidesFirstRelease": "Uploading a downloaded PowerPoint or PDF copy is enough initially",
+    "projectLocation": "NoCatch on the Desktop; no cache was an initial transcription misreading"
+  },
+  "proposedDefaultsAwaitingUserSelection": {
+    "clockStart": "Explicit Start session action after materials are ready",
+    "recovery": "Restore encrypted materials until the original 90 minute deadline",
+    "draftLifetimeMinutes": 30,
+    "thisPass": "Research, engineering design, and working UI prototype first"
+  },
+  "proposedLimits": {
+    "acceptedFiles": 10,
+    "fileMiB": 50,
+    "sessionFileMiB": 250,
+    "slidesOrPagesPerFile": 250,
+    "slidesOrPagesPerSession": 1000,
+    "textMiBPerFile": 4,
+    "textMiBPerSession": 16,
+    "chunksPerSession": 12000,
+    "concurrentImports": 1,
+    "materialTokensPerQuestion": 6000,
+    "materialCharactersPerQuestion": 24000
+  },
+  "artifacts": {
+    "review": "engineering-review.html",
+    "prototype": "prototype.html",
+    "storageExperiment": "storage-experiment.cjs",
+    "storageEvidence": "storage-results.json",
+    "uiEvidence": "ui-results.json"
+  },
+  "materialRisks": [
+    "The current managed backend stores answer text and stream events with default 24 hour retention; material-derived answers need the shorter lifecycle too.",
+    "Current setup drafts can persist independently of material sessions and need retention integration.",
+    "NoCatch currently has no 90 minute material-session or paid-session contract.",
+    "Local physical deletion while the app or computer is off cannot be guaranteed; expired copies must be removed before decryption on the next launch.",
+    "Provider retention is outside app-controlled deletion.",
+    "Real PPTX/PDF extraction, OCR/visual gaps, native encryption, account isolation, backend integration, and packaged Windows behavior remain to be implemented and verified."
+  ],
+  "resumeImplementation": [
+    "Read engineering-review.html and the user-confirmed decisions before selecting defaults.",
+    "Record and preserve existing uncommitted user changes; this design package is isolated under docs/session-materials-20260929.",
+    "Implement one materials module with bounded import, encrypted recovery, generation-scoped retrieval and cleanup.",
+    "Wire onboarding, text, voice, screenshot, direct setup, and managed answer paths using the same reference contract.",
+    "Implement backend session validation and material-derived output retention before promising 90 minute cleanup.",
+    "Verify using real representative decks and the native Windows packaged app; do not treat synthetic experiment results as production proof."
+  ]
+}

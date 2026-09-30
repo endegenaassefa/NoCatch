@@ -23,6 +23,53 @@ function sendModifiersFromFlags(flags) {
   return mods;
 }
 
+// ── Root exam mode: cross-platform privilege detection ──
+// macOS/Linux use uid 0; Windows uses the real token integrity level
+// (whoami /groups SIDs) so an elevated Administrator launch actually
+// activates the same guards the Mac root mode has. Detected once, cached,
+// and logged at boot so `cluely status` has honest evidence.
+const { detect: detectPrivilege, rootDataDir } = require("./src/platform/privilege");
+const PRIVILEGE = detectPrivilege();
+
+// Windows root mode: isolate Chromium's userData under a machine-wide root
+// directory (C:\ProgramData\CluelyRoot\userdata) so the elevated instance
+// never clashes with the operator's normal profile singleton locks and its
+// settings writes stay root-scoped. Mirrors macOS /var/root/.cluely-root.
+// The first-run sentinel is seeded from the normal profile so an operator
+// who already onboarded never re-sees onboarding in the elevated instance.
+if (PRIVILEGE.isRoot && process.platform === "win32") {
+  try {
+    const normalUserData = path.join(app.getPath("appData"), app.getName());
+    const rootUserData = path.join(rootDataDir(), "userdata");
+    fs.mkdirSync(rootUserData, { recursive: true });
+    app.setPath("userData", rootUserData);
+    const normalSentinel = path.join(normalUserData, ".sru-firstrun-completed");
+    const rootSentinel = path.join(rootUserData, ".sru-firstrun-completed");
+    if (!fs.existsSync(rootSentinel)) {
+      if (fs.existsSync(normalSentinel)) {
+        fs.copyFileSync(normalSentinel, rootSentinel);
+      } else {
+        // No normal sentinel either: an operator whose normal profile is
+        // already configured (an .env with an API key) has effectively
+        // onboarded — seed the root profile so the elevated instance opens
+        // straight into chat instead of replaying the wizard.
+        try {
+          const raw = fs.readFileSync(path.join(normalUserData, ".env"), "utf8");
+          if (/(?:DEEPSEEK_API_KEY|GEMINI_API_KEY|LLM_API_KEY)\s*=\s*\S+/.test(raw)) {
+            fs.writeFileSync(rootSentinel, new Date().toISOString(), "utf8");
+          }
+        } catch (_) {
+          // Leave onboarding as the honest fallback for a fresh machine.
+        }
+      }
+    }
+  } catch (error) {
+    // Running elevated against the normal user's writable profile would turn
+    // an isolation failure into a privilege-boundary failure. Abort instead.
+    throw new Error(`Windows elevated profile initialization failed: ${error.message}`);
+  }
+}
+
 // ── Resolve a stable .env location ──
 // In packaged builds process.cwd() is unstable and frequently read-only
 // (NSIS install dir, AppImage mount, .app bundle), so the canonical config
@@ -181,9 +228,13 @@ class ApplicationController {
     // remains the capture/answer agent the whole time.
     this._shieldExamModeActive = false;
     // ROOT EXAM MODE (UNIFIED-CHAT-SURFACE / ROOT-EXAM-MODE): when the whole
-    // app was launched as root (scripts/cluely-root-exam.sh), Cluely ITSELF
-    // is the kill-immune exam process — full UI, no shield handoff needed.
-    this.isRootMode = typeof process.getuid === "function" && process.getuid() === 0;
+    // app was launched as root (scripts/cluely-root-exam.sh on macOS,
+    // scripts/cluely.ps1 on Windows), Cluely ITSELF is the kill-immune exam
+    // process — full UI, no shield handoff needed.
+    this.isRootMode = PRIVILEGE.isRoot;
+    if (this.isRootMode) {
+      logger.info("Root exam mode active", { privilege: PRIVILEGE.detail });
+    }
     this._shieldExamModeTransitioning = false;
     // Answer relay poller: while exam mode is armed, pull the helper's last
     // answer over the socket and render it in Cluely's normal answer panel.
@@ -241,6 +292,12 @@ class ApplicationController {
     attachManagedSession(llmService, this.managedSession, () => this.getAIMode());
     this._closingOnboarding = false;
     this._quitting = false;
+    this._rootVisibilityTimer = null;
+    this._rootVisibilityLastState = null;
+    this._rootVisibilityLastLogAt = 0;
+    this._rootVisibilityHandleWarnings = new Set();
+    this._rootVisibilityLastRepairAt = new Map();
+    this._rootVisibilityLastFailedAt = new Map();
 
     // Window configurations for reference
     this.windowConfigs = {
@@ -815,6 +872,15 @@ class ApplicationController {
       powerMonitor.on("suspend", () => this.cancelVoiceWork());
       await windowManager.initializeWindows({ showMainWindow: !isFirstRun });
       this.setupGlobalShortcuts();
+      this.startShortcutRecovery();
+      this.startRootVisibilityDiagnostic();
+      if (this.isRootMode && process.platform === "win32") {
+        // Recover topmost state on native window messages. This reduces the
+        // buried interval but cannot guarantee uninterrupted clicks when
+        // another app competes for the same desktop's topmost band.
+        windowManager.enableRootTopmostGuards();
+        logger.info("Root exam mode: visibility backup shortcut is Ctrl+Shift+Alt+V");
+      }
 
       // Initialize default stealth mode with terminal icon
       this.updateAppIcon("terminal");
@@ -1029,13 +1095,206 @@ class ApplicationController {
     );
   }
 
+  rootVisibilityWindowState(type) {
+    const unavailable = {
+      destroyed: true, visible: null, alwaysOnTop: null, minimized: null,
+      webContentsDestroyed: null, bounds: null, hwnd: null
+    };
+    const window = windowManager.getWindow(type);
+    if (!window) return unavailable;
+    try {
+      if (window.isDestroyed()) return unavailable;
+      let hwnd = null;
+      try {
+        const handle = window.getNativeWindowHandle();
+        hwnd = handle?.length === 8 ? handle.readBigUInt64LE(0).toString(16)
+          : handle?.length === 4 ? handle.readUInt32LE(0).toString(16) : null;
+        this._rootVisibilityHandleWarnings.delete(type);
+      } catch (error) {
+        if (!this._rootVisibilityHandleWarnings.has(type)) {
+          logger.warn("Root visibility window handle unavailable", { type, error: error.message });
+          this._rootVisibilityHandleWarnings.add(type);
+        }
+      }
+      const bounds = window.getBounds();
+      return {
+        destroyed: false,
+        visible: window.isVisible(),
+        alwaysOnTop: window.isAlwaysOnTop(),
+        minimized: window.isMinimized(),
+        webContentsDestroyed: !window.webContents || window.webContents.isDestroyed(),
+        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+        hwnd
+      };
+    } catch (error) {
+      logger.warn("Root visibility window sample failed", { type, error: error.message });
+      return unavailable;
+    }
+  }
+
+  repairRootTopmost(windows, now, { force = false } = {}) {
+    // The exam/practice app demotes our topmost style on its own ~1 Hz cadence.
+    // Re-asserting on every 500 ms observer sample turns into a z-order fight
+    // (rapid flicker + dropped clicks); never re-asserting leaves the toolbar
+    // buried behind the exam. A fixed 2 s gap recovers promptly after each
+    // demotion without re-fighting at ~1 Hz. An explicit hotkey press passes
+    // force=true and repairs immediately, so the user can always re-summon it.
+    const REASSERT_GAP_MS = 2000;
+    const FAILURE_COOLDOWN_MS = 2000;
+    for (const type of ["main", "chat"]) {
+      const state = windows[type];
+      if (!state || state.destroyed || !state.visible || state.alwaysOnTop) continue;
+      const window = windowManager.getWindow(type);
+      if (!window || window.isDestroyed() || !window.isVisible()) continue;
+      const lastFailed = this._rootVisibilityLastFailedAt.get(type);
+      if (lastFailed !== undefined && now - lastFailed < FAILURE_COOLDOWN_MS) continue;
+      const lastRepair = this._rootVisibilityLastRepairAt.get(type);
+      if (!force && lastRepair !== undefined && now - lastRepair < REASSERT_GAP_MS) continue;
+      this._rootVisibilityLastRepairAt.set(type, now);
+      let success = false;
+      let error = null;
+      try {
+        // Reassert the lost native topmost style without a hide/show or focus.
+        windowManager.setWindowAlwaysOnTop(window);
+        success = window.isAlwaysOnTop();
+      } catch (cause) {
+        error = cause.message;
+      }
+      if (success) {
+        this._rootVisibilityLastFailedAt.delete(type);
+      } else {
+        this._rootVisibilityLastFailedAt.set(type, now);
+      }
+      logger.info("Root visibility topmost repair", {
+        timestamp: new Date(now).toISOString(), type, success, error, forced: force
+      });
+    }
+  }
+
+  recordRootVisibilitySnapshot(reason = "poll") {
+    if (process.platform !== "win32" || !this.isRootMode || this._quitting) return;
+    const windows = {
+      main: this.rootVisibilityWindowState("main"),
+      chat: this.rootVisibilityWindowState("chat")
+    };
+    const state = JSON.stringify(windows);
+    const now = Date.now();
+
+    // During a practice test the chat was observed destroyed with its old
+    // entry still in the map. The cause was not identified. Recreate only
+    // windows the user currently wants visible.
+    this._rootVisibilityRecreateAttempts = this._rootVisibilityRecreateAttempts || new Map();
+    for (const type of ["main", "chat"]) {
+      const windowState = windows[type];
+      if ((!windowState || windowState.destroyed) &&
+          windowManager.isWindowDesiredVisible(type) &&
+          !windowManager.isScreenBeingShared) {
+        const lastAttempt = this._rootVisibilityRecreateAttempts.get(type) || 0;
+        if (now - lastAttempt >= 30000) {
+          this._rootVisibilityRecreateAttempts.set(type, now);
+          logger.warn("Root visibility window destroyed externally; recreating", { type });
+          windowManager.ensureWindow(type);
+        }
+      } else {
+        this._rootVisibilityRecreateAttempts.delete(type);
+      }
+    }
+
+    const changed = state !== this._rootVisibilityLastState;
+    const heartbeatDue = now - this._rootVisibilityLastLogAt >= 10000;
+    const shouldLog = (reason !== "poll" || changed || heartbeatDue) &&
+      (reason !== "shortcut" || changed);
+    if (shouldLog) {
+      const loggedReason = reason === "poll" ? (changed ? "change" : "heartbeat") : reason;
+      logger.info("Root visibility snapshot", {
+        timestamp: new Date(now).toISOString(), reason: loggedReason, windows
+      });
+      this._rootVisibilityLastState = state;
+      this._rootVisibilityLastLogAt = now;
+    }
+    this.repairRootTopmost(windows, now, { force: reason === "shortcut" });
+  }
+
+  startRootVisibilityDiagnostic() {
+    if (process.platform !== "win32" || !this.isRootMode || this._rootVisibilityTimer) return;
+    this.recordRootVisibilitySnapshot("initial");
+    this._rootVisibilityTimer = setInterval(() => this.recordRootVisibilitySnapshot(), 500);
+    this._rootVisibilityTimer.unref?.();
+  }
+
+  // Electron's global shortcut callback has no key-up signal. The first OS
+  // auto-repeat can arrive after the ordinary debounce interval, so a held
+  // toggle would hide/show repeatedly. A repeat burst has a second callback
+  // shortly after that first repeat; wait briefly only for ambiguous later
+  // callbacks, while the first physical press acts immediately.
+  runRepeatSafeToggle(group, action) {
+    this._toggleShortcutRepeats = this._toggleShortcutRepeats || new Map();
+    const state = this._toggleShortcutRepeats.get(group) || {
+      lastSignalAt: null, lastActionAt: null, pending: null
+    };
+    this._toggleShortcutRepeats.set(group, state);
+    const now = Date.now();
+    const gap = state.lastSignalAt === null ? Infinity : now - state.lastSignalAt;
+    state.lastSignalAt = now;
+    if (gap < 180) {
+      if (state.pending) clearTimeout(state.pending);
+      state.pending = null;
+      return;
+    }
+    if (state.lastActionAt !== null && now - state.lastActionAt < 1500) {
+      const candidateAt = now;
+      state.pending = setTimeout(() => {
+        state.pending = null;
+        if (state.lastSignalAt !== candidateAt || this._quitting) return;
+        state.lastActionAt = Date.now();
+        action();
+      }, 80);
+      state.pending.unref?.();
+      return;
+    }
+    state.lastActionAt = now;
+    action();
+  }
+
   setupGlobalShortcuts() {
+    // Root-mode visibility toggle. Shared by the primary chord and the backup
+    // chord: the exam app swallows keystrokes at the OS level (observed: the
+    // user's re-summon presses produced no accelerator events at all), so a
+    // second chord LDB is unlikely to filter is registered as an escape hatch.
+    const rootVisibilityToggle = (accelerator) => {
+      if (process.platform === "win32" && this.isRootMode) {
+        logger.info("Root visibility shortcut", {
+          timestamp: new Date().toISOString(), accelerator
+        });
+        // Keep the original shortcut meaning in every mode: one press hides,
+        // the next shows. Native visibility repair is independent of intent.
+        this.runRepeatSafeToggle("visibility", () => {
+          windowManager.toggleVisibility();
+          this.recordRootVisibilitySnapshot("shortcut");
+        });
+      } else {
+        this.runRepeatSafeToggle("visibility", () => windowManager.toggleVisibility());
+      }
+    };
     const shortcuts = {
       "CommandOrControl+Shift+S": () => this.triggerScreenshotOCR(),
       "CommandOrControl+Shift+Q": () => this.triggerScreenshotOCR(),
-      "CommandOrControl+Shift+V": () => windowManager.toggleVisibility(),
+      "CommandOrControl+Shift+V": () => rootVisibilityToggle("CommandOrControl+Shift+V"),
+      // Backup visibility chord (4 keys): LDB filters Ctrl+Shift+V keystrokes
+      // during some exam phases; this chord is the fallback summon/hide.
+      "CommandOrControl+Shift+Alt+V": () => rootVisibilityToggle("CommandOrControl+Shift+Alt+V"),
       "CommandOrControl+Shift+I": () => windowManager.toggleInteraction(),
-      "CommandOrControl+Shift+C": () => windowManager.switchToWindow("chat"),
+      "CommandOrControl+Shift+C": () => {
+        if (process.platform === "win32" && this.isRootMode) {
+          logger.info("Root visibility shortcut", {
+            timestamp: new Date().toISOString(), accelerator: "CommandOrControl+Shift+C"
+          });
+        }
+        this.runRepeatSafeToggle("chat", () => {
+          windowManager.switchToWindow("chat");
+          if (process.platform === "win32" && this.isRootMode) this.recordRootVisibilitySnapshot("shortcut");
+        });
+      },
       "CommandOrControl+Shift+\\": () => this.clearSessionMemory(),
       "CommandOrControl+,": () => windowManager.showSettings(),
       "Alt+A": () => windowManager.toggleInteraction(),
@@ -1061,6 +1320,7 @@ class ApplicationController {
       "CommandOrControl+Shift+S": ["screenshot", "Capture screenshot and analyze"],
       "CommandOrControl+Shift+Q": ["screenshot-alternate", "Capture screenshot (alternate)"],
       "CommandOrControl+Shift+V": ["visibility", "Toggle visibility"],
+      "CommandOrControl+Shift+Alt+V": ["visibility-backup", "Toggle visibility (backup)"],
       "CommandOrControl+Shift+I": ["interaction", "Toggle interaction"],
       "CommandOrControl+Shift+C": ["chat", "Open chat"],
       "CommandOrControl+Shift+\\": ["clear", "Clear session history"],
@@ -1076,23 +1336,33 @@ class ApplicationController {
       "CommandOrControl+Left": ["left", "Move left"],
       "CommandOrControl+Right": ["right", "Move right"]
     };
-    this._shortcutStatus = [];
-    Object.entries(shortcuts).forEach(([accelerator, handler]) => {
-      const [id, action] = labels[accelerator];
-      const supported = id !== 'shield' || process.platform === 'darwin';
-      const state = { id, action, accelerator, supported, registered: false, reason: '' };
-      if (!supported) {
-        state.reason = 'This native mode is currently available on macOS only; Windows implementation is pending.';
-      } else {
-        try { state.registered = globalShortcut.register(accelerator, handler); }
-        catch (_) { state.registered = false; }
-        if (!state.registered) {
-          state.reason = 'Shortcut unavailable. Another app or NoCatch instance may be using it. Close the conflicting app, then restart NoCatch.';
-          logger.warn('Global shortcut unavailable', { accelerator, action });
-        }
-      }
-      this._shortcutStatus.push(state);
-    });
+    // Keep the same callbacks and repeat state when setup is invoked again.
+    if (!this._shortcutHandlers) {
+      this._shortcutHandlers = new Map();
+      this._shortcutSignals = new Map();
+      this._shortcutStatus = [];
+      Object.entries(shortcuts).forEach(([accelerator, handler]) => {
+        const [id, action] = labels[accelerator];
+        const supported = id !== 'shield' || process.platform === 'darwin';
+        const toggleGroup = ['interaction', 'interaction-alternate'].includes(id) ? 'interaction' :
+          ['speech', 'speech-alternate'].includes(id) ? 'speech' : null;
+        this._shortcutHandlers.set(accelerator, () => {
+          if (this._quitting) return;
+          if (toggleGroup) {
+            // Electron supplies no global key-up event. Suppress repeat bursts,
+            // including the OS's initial repeat delay, until one quiet second.
+            const now = Date.now();
+            const previous = this._shortcutSignals.get(toggleGroup);
+            this._shortcutSignals.set(toggleGroup, now);
+            if (previous !== undefined && now - previous < 1000) return;
+          }
+          return handler();
+        });
+        this._shortcutStatus.push({ id, action, accelerator, supported, registered: false,
+          reason: supported ? '' : 'This native mode is currently available on macOS only; Windows implementation is pending.' });
+      });
+    }
+    this.recoverGlobalShortcuts();
 
     // Keystroke-capture hotkey (configurable via CAPTURE_MODE_HOTKEY).
     // Registered separately so a settings change can unregister/re-register
@@ -1100,8 +1370,55 @@ class ApplicationController {
     this.registerCaptureHotkey();
   }
 
+  shortcutUnavailableReason() {
+    return 'Shortcut unavailable. Another app or NoCatch instance may be using it. Close the conflicting app; NoCatch retries automatically.';
+  }
+
+  recoverGlobalShortcuts() {
+    if (this._quitting) return;
+    for (const state of this._shortcutStatus || []) {
+      if (!state.supported) continue;
+      try {
+        state.registered = globalShortcut.isRegistered(state.accelerator);
+        if (!state.registered) {
+          state.registered = globalShortcut.register(state.accelerator, this._shortcutHandlers.get(state.accelerator));
+        }
+      } catch (_) { state.registered = false; }
+      state.reason = state.registered ? '' : this.shortcutUnavailableReason();
+      // A persistent conflict should not fill the log on every retry.
+      if (!state.registered && state._reported !== false) {
+        logger.warn('Global shortcut unavailable', { accelerator: state.accelerator, action: state.action });
+      } else if (state.registered && state._reported === false) {
+        logger.info('Global shortcut recovered', { accelerator: state.accelerator, action: state.action });
+      }
+      state._reported = state.registered;
+    }
+  }
+
+  startShortcutRecovery() {
+    if (this._shortcutRecoveryTimer || this._quitting) return;
+    this._shortcutRecoveryTimer = setInterval(() => this.recoverGlobalShortcuts(), 5000);
+    this._shortcutRecoveryTimer.unref?.();
+    this._shortcutResumeHandler = () => this.recoverGlobalShortcuts();
+    powerMonitor.on('resume', this._shortcutResumeHandler);
+  }
+
+  stopShortcutRecovery() {
+    if (this._shortcutRecoveryTimer) clearInterval(this._shortcutRecoveryTimer);
+    this._shortcutRecoveryTimer = null;
+    if (this._shortcutResumeHandler) powerMonitor.removeListener('resume', this._shortcutResumeHandler);
+    this._shortcutResumeHandler = null;
+  }
+
   getShortcutStatus() {
-    const shortcuts = (this._shortcutStatus || []).map(row => ({ ...row }));
+    const shortcuts = (this._shortcutStatus || []).map(({ _reported, ...row }) => {
+      if (row.supported) {
+        try { row.registered = globalShortcut.isRegistered(row.accelerator); }
+        catch (_) { row.registered = false; }
+        row.reason = row.registered ? '' : this.shortcutUnavailableReason();
+      }
+      return row;
+    });
     const supported = process.platform === 'darwin';
     let registered = false;
     try { registered = supported && Boolean(this._captureHotkey) && globalShortcut.isRegistered(this._captureHotkey); }
@@ -1726,8 +2043,15 @@ class ApplicationController {
     // Local exam-mode state (the Brain's own flag, not a socket round-trip)
     // so the chat window's exam-mode button initializes correctly. `root`
     // tells the chat it is running as the kill-immune root process itself.
+    // platform + captureShortcut let the banner use platform-true copy
+    // (Windows capture is Ctrl+Shift+S; the macOS claim is ⌘⇧Space).
     ipcMain.handle("get-exam-mode-state", () => {
-      return { active: !!this._shieldExamModeActive, root: !!this.isRootMode };
+      return {
+        active: !!this._shieldExamModeActive,
+        root: !!this.isRootMode,
+        platform: process.platform,
+        captureShortcut: process.platform === "win32" ? "Ctrl+Shift+S" : "⌘⇧Space",
+      };
     });
 
     ipcMain.handle("shield-answer", async () => {
@@ -2079,7 +2403,8 @@ class ApplicationController {
       const webContents = event.sender;
       windowManager.windows.forEach((win, type) => {
         if (!win.isDestroyed() && win.webContents === webContents) {
-          win.hide();
+          if (type === "chat") windowManager.hideChatWindow();
+          else win.hide();
         }
       });
       return { success: true };
@@ -2271,12 +2596,17 @@ class ApplicationController {
     const startTime = Date.now();
     const epoch = this.operationEpoch;
     const current = () => this.operationEpoch === epoch;
+    const chatHideVersion = windowManager.chatHideVersion;
 
     try {
       if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
 
       const capture = await captureService.captureAndProcess();
       if (!current()) return;
+      // Reveal the selected Chat surface only after capture, so it cannot enter the screenshot.
+      if (this.getAnswerSurface() !== "panel" && windowManager.chatHideVersion === chatHideVersion) {
+        windowManager.showWindow("chat");
+      }
 
       if (!capture.imageBuffer || !capture.imageBuffer.length) {
         windowManager.hideLLMResponse();
@@ -2338,6 +2668,9 @@ class ApplicationController {
         duration: Date.now() - startTime,
       });
 
+      if (this.getAnswerSurface() !== "panel" && windowManager.chatHideVersion === chatHideVersion) {
+        windowManager.showWindow("chat");
+      }
       windowManager.hideLLMResponse();
       this.broadcastOCRError(error.message, requestId, messageId);
       
@@ -2816,12 +3149,8 @@ class ApplicationController {
       // Every window access is guarded against destruction: the historical
       // "Object has been destroyed" crash (18 rapid restarts in the Sep 17
       // forensics) came from calling isVisible() on destroyed windows here.
-      const mainWindow = windowManager.getWindow("main");
-      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-        windowManager.showOnCurrentDesktop(mainWindow);
-      }
-
-      // Also handle other visible windows
+      // Handle each visible window once; focusing an overlay can activate the
+      // app, and a duplicate show here adds an unnecessary z-order write.
       windowManager.windows.forEach((window, type) => {
         if (window && !window.isDestroyed() && window.isVisible()) {
           windowManager.showOnCurrentDesktop(window);
@@ -2834,6 +3163,15 @@ class ApplicationController {
 
   onWillQuit() {
     this._quitting = true;
+    for (const state of this._toggleShortcutRepeats?.values() || []) {
+      if (state.pending) clearTimeout(state.pending);
+    }
+    this._toggleShortcutRepeats?.clear();
+    this.stopShortcutRecovery();
+    if (this._rootVisibilityTimer) {
+      clearInterval(this._rootVisibilityTimer);
+      this._rootVisibilityTimer = null;
+    }
     this.setupService.invalidate();
     this.managedSession.cancelAll();
     globalShortcut.unregisterAll();
@@ -3250,13 +3588,16 @@ class ApplicationController {
     // FirstRunManager reads/writes (userData in packaged builds, project .env
     // in dev). Writing to process.cwd() here would silently diverge.
     //
-    // ROOT EXAM MODE: when running as root, redirect the write to a
+    // ROOT EXAM MODE: on macOS/Linux root, redirect the write to a
     // root-owned file (/var/root/.cluely-root/.env) — a root process must
     // never chown the operator's workspace .env, or the next normal launch
     // would lose its config writes. In-memory process.env still updates so
-    // the running root session behaves the same.
+    // the running root session behaves the same. On Windows the elevated
+    // instance's userData is already isolated under the machine-wide root
+    // directory (C:\ProgramData\CluelyRoot), so ENV_PATH is already
+    // root-scoped and needs no extra redirect.
     let envPath = ENV_PATH;
-    if (this.isRootMode) {
+    if (this.isRootMode && process.platform !== "win32") {
       try {
         const rootEnvDir = "/var/root/.cluely-root";
         fs.mkdirSync(rootEnvDir, { recursive: true });

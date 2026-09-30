@@ -163,8 +163,10 @@ def terminate_owned(pid: int, expected_identity: str | None, grace: float = 2,
     Normally refuse the caller's session. A session-leading watchdog may pass
     keep_leader=True to terminate its descendants while remaining alive to report
     failure. This exception requires its own PID and exact current identity.
-    True means no attributable live members (excluding the retained watchdog).
     """
+    if not sys.platform.startswith("linux"):
+        # /proc scanning and pidfd signaling are Linux-only in this release.
+        raise ValueError("process lifecycle control is Linux-only in this release")
     if not expected_identity or pid <= 1:
         return False
     if keep_leader:

@@ -10,7 +10,9 @@ Evidence and current completion status: `C:/Users/your-user/Documents/DepthEngin
 
 The previous audit remains at `C:/Users/your-user/Documents/DepthEngine/evidence/nocatch-parity-audit-20260924`. Its27/29 results and credential finding are historical baseline evidence. Its screenshot checks covered capture/preview, and native shortcut delivery did not establish every shortcut's effect. Use the repair report for the expanded checks and exact tested package.
 
-Candidate under verification: `.depthengine/repairs-20260924/package-v7/win-unpacked`. Desktop shortcut promotion is pending the final replay; consult the repair report before assuming the shortcut selects this candidate.
+Accepted local candidate: `.depthengine/repairs-20260924/package-v10/win-unpacked`. The **NoCatch Windows Test** desktop launcher selects this package. The frozen [six-stage acceptance run](../../../Documents/DepthEngine/evidence/nocatch-repairs-20260924/qa/acceptance-v3/run-20260924-224700/report.json) passed on this Windows host: native screenshot visibility 4/4, exact movement 9/9, shortcuts 18/18, two primary replays 53/53 each, and small speech 11/11. The package remains unsigned.
+
+The complete native run is automated from WSL with the evidence directory's `qa/acceptance-v3/run.py --candidate <win-unpacked>` command. Each primary replay pauses at its `STRESS_STAGE_READY` gate until rapid checks have been announced and the marker is written. The runner requires an interactive Windows desktop and exclusive control of the app. See the [repair report](../../../Documents/DepthEngine/evidence/nocatch-repairs-20260924/REPORT.md) for exact hashes, commands, failed trials and scope.
 
 Normal walkthroughs require visible, stable controls for at least two seconds, a controlled screenshot fixture visible before capture, and the completed DeepSeek answer followed by at least three seconds of reading time. Separate announced stress scenarios deliberately exercise fast cancellation and failures. Checks must observe the native window and final response, not merely successful key delivery or intermediate streaming text.
 
@@ -33,10 +35,9 @@ The dependency-only check below opens no app and reads no credentials. A passing
 
 Mac/Windows parity precedes payments:
 
-1. Complete current defect repairs and expanded native replay; promote the passing local build.
-2. **Windows privileged-mode feasibility/status/lifecycle (P18/P19)** is the next Stage1 platform milestone. See [Windows privileged-mode work](WINDOWS-PRIVILEGED-MODE.md) and the original [cross-platform plan](CROSS-PLATFORM-DESIGN.md). Windows Administrator status alone does not activate or qualify the existing Mac root-mode behavior. Implement missing capability and permission recovery after the feasibility decision.
-3. Qualify ordinary feature journeys and clean installation on Windows and Mac: permission denial/regrant, model preparation, default/custom paths, restart and uninstall.
-4. Deploy and qualify managed sign-in/AI and signed distribution.
-5. Resolve paid-session duration, then implement server-enforced paid sessions/account restrictions and notes ingestion.
+1. **Windows privileged-mode feasibility/status/lifecycle (P18/P19)** is the next Stage1 platform milestone. See [Windows privileged-mode work](WINDOWS-PRIVILEGED-MODE.md) and the original [cross-platform plan](CROSS-PLATFORM-DESIGN.md). Windows Administrator status alone does not activate or qualify the existing Mac root-mode behavior. Implement missing capability and permission recovery after the feasibility decision.
+2. Qualify ordinary feature journeys and clean installation on Windows and Mac: permission denial/regrant, model preparation, default/custom paths, restart and uninstall.
+3. Deploy and qualify managed sign-in/AI and signed distribution.
+4. Resolve paid-session duration, then implement server-enforced paid sessions/account restrictions and notes ingestion.
 
 Physical microphone acquisition/release, generated-speech transcription, and human spoken-sentence accuracy are distinct evidence. Mac execution, native permission changes, clean-machine installation and actual Windows privileged-mode behavior remain unqualified in this repair task. This is an unsigned development build.

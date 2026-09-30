@@ -10,9 +10,18 @@ const { EncryptedStore } = require('./store');
 const clone = value => JSON.parse(JSON.stringify(value));
 const accepted = document => document.state === 'ready' || document.state === 'partial';
 function nameOf(file) { return path.basename(String(file)).replace(/[\x00-\x1f]/g, '').slice(0, 255) || 'Unnamed material'; }
+function waitWithSignal(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason || new Error('Material search cancelled'));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
 
 class MaterialsManager {
-  constructor({ userDataPath, safeStorage, owner, now = Date.now, onStatus, onInvalidate, extractor } = {}) {
+  constructor({ userDataPath, safeStorage, owner, now = Date.now, onStatus, onInvalidate, extractor, searchFactory, modelCachePath } = {}) {
     this.owner = owner || '';
     this.now = now;
     this.onStatus = onStatus;
@@ -27,11 +36,19 @@ class MaterialsManager {
     this.queue = Promise.resolve();
     this.timer = null;
     this.error = null;
+    this.searchFactory = searchFactory || (() => new (require('./local-search').LocalSearch)({ cacheDir: modelCachePath || path.join(userDataPath, 'retrieval-models') }));
+    this.searchIndex = null;
+    this.searchBuild = null;
+    this.searchState = { state: 'idle', completed: 0, total: 0, error: null };
     this.store.onCleanupChange = () => this._notify();
   }
 
   _notify() { try { this.onStatus?.(this.status()); } catch {} }
   _invalidate(reason) {
+    this.searchIndex?.close();
+    this.searchIndex = null;
+    this.searchBuild = null;
+    this.searchState = { state: 'idle', completed: 0, total: 0, error: null };
     this.session.generation++;
     try { this.onInvalidate?.(reason); } catch {}
   }
@@ -81,9 +98,11 @@ class MaterialsManager {
 
   status() {
     this._expire();
+    if (this.searchIndex?.closed && this.searchState.state === 'ready') this.searchState = { ...this.searchState,
+      state: 'error', error: 'Local search stopped. Prepare the index again.' };
     return { state: this.session.state, id: this.session.id, expiresAt: this.session.expiresAt, generation: this.session.generation,
       persistence: this.store.mode, documents: this.session.documents.map(({ content, hash, textBytes, ...document }) => clone(document)),
-      limits: LIMITS, busy: this.jobs.size > 0, cleanupPending: this.store.cleanupPending, cleanupPersistent: this.store.cleanupPersistent, error: this.error };
+      limits: LIMITS, busy: this.jobs.size > 0, search: { ...this.searchState }, cleanupPending: this.store.cleanupPending, cleanupPersistent: this.store.cleanupPersistent, error: this.error };
   }
 
   retryCleanup() { const cleared = this.store.retryCleanup(); this._notify(); return cleared; }
@@ -177,7 +196,7 @@ class MaterialsManager {
   }
 
   _normalize(result, kind) {
-    if (!result || !Array.isArray(result.pages) || !result.pages.length || result.pages.length > LIMITS.maxPagesPerFile) throw new Error('File exceeds 250 pages or has no readable pages');
+    if (!result || !Array.isArray(result.pages) || !result.pages.length || result.pages.length > LIMITS.maxPagesPerFile) throw new Error('File exceeds 1000 pages or has no readable pages');
     let textBytes = 0;
     const pages = result.pages.map((source, i) => {
       if (!source || typeof source.text !== 'string' || (source.notes !== undefined && typeof source.notes !== 'string')) throw new Error('Invalid extraction output');
@@ -210,7 +229,7 @@ class MaterialsManager {
       const hash = crypto.createHash('sha256').update(bytes).digest('hex');
       const existing = this.session.documents.filter(accepted);
       if (existing.some(d => d.hash === hash)) { this.session.documents = this.session.documents.filter(d => d !== document); return; }
-      if (existing.length >= LIMITS.maxFiles || existing.reduce((n, d) => n + d.bytes, 0) + bytes.length > LIMITS.maxTotalBytes) throw new Error('Session limit: 10 files and 250 MiB total');
+      if (existing.length >= LIMITS.maxFiles || existing.reduce((n, d) => n + d.bytes, 0) + bytes.length > LIMITS.maxTotalBytes) throw new Error('Session limit: 11 files and 250 MiB total');
       const result = await this._extract(file, bytes, kind, job.controller.signal);
       if (!this._validJob(job)) return;
       const normalized = this._normalize(result, kind);
@@ -242,6 +261,102 @@ class MaterialsManager {
     return this.status();
   }
 
+  async prepareSearch() {
+    if (this.closed || this._expire() || this.session.state !== 'active') throw new Error('Start a material session before searching');
+    if (this.searchBuild && !this.searchIndex?.closed) return this.searchBuild;
+    const snapshot = this.snapshot();
+    const index = this.searchFactory();
+    this.searchIndex = index;
+    this.searchState = { state: 'loading', completed: 0, total: 0, error: null };
+    this._notify();
+    const build = Promise.resolve().then(() => index.build(this.session.documents.filter(accepted), {
+      onProgress: progress => {
+        if (this.searchIndex !== index || !this.isCurrent(snapshot)) return;
+        this.searchState = { ...this.searchState, ...progress }; this._notify();
+      }
+    })).then(result => {
+      if (this.searchIndex !== index || !this.isCurrent(snapshot)) throw new Error('Material session changed while preparing search');
+      this.searchState = { ...this.searchState, state: 'ready', error: null }; this._notify();
+      return result;
+    }).catch(error => {
+      index.close();
+      if (this.searchIndex === index) {
+        this.searchIndex = null; this.searchBuild = null;
+        this.searchState = { ...this.searchState, state: 'error', error: 'Local search could not be prepared. Check the model download and retry.' }; this._notify();
+      }
+      throw error;
+    });
+    this.searchBuild = build;
+    return build;
+  }
+
+  _searchFailed(index) {
+    index?.close();
+    if (this.searchIndex !== index) return;
+    this.searchIndex = null; this.searchBuild = null;
+    this.searchState = { ...this.searchState, state: 'error', error: 'Local search failed or was cancelled. Prepare the index again.' };
+    this._notify();
+  }
+
+  _searchSource(source) {
+    if (!source || typeof source !== 'object') return null;
+    const document = this.session.documents.find(d => d.id === source.documentId && accepted(d));
+    const page = document?.content.find(p => p.page === source.page && p.kind === source.kind);
+    const original = page && [page.text, page.notes ? `Speaker notes:\n${page.notes}` : ''].filter(Boolean).join('\n');
+    if (!page || source.name !== document.name || source.id !== `${document.id}:${page.kind}:${page.page}` ||
+        typeof source.text !== 'string' || !original.includes(source.text)) return null;
+    const { id, documentId, name, page: number, kind, text } = source;
+    return { id, documentId, name, page: number, kind, text };
+  }
+
+  _searchDiagnostics(value) {
+    const candidates = [];
+    for (const raw of (Array.isArray(value?.candidates) ? value.candidates : []).slice(0, 24)) {
+      const source = this._searchSource(raw);
+      if (!source) continue;
+      candidates.push(source);
+      if (Buffer.byteLength(JSON.stringify(candidates)) > 64 * 1024) { candidates.pop(); break; }
+    }
+    const result = { candidates };
+    for (const [key, max] of [['chunks', 16000], ['queryCount', 4]]) {
+      if (Number.isSafeInteger(value?.[key]) && value[key] >= 0 && value[key] <= max) result[key] = value[key];
+    }
+    for (const key of ['embedding', 'reranker']) {
+      const metadata = value?.[key];
+      if (metadata && ['model', 'revision'].every(k => typeof metadata[k] === 'string' && /^[\w/.:\-]{1,150}$/.test(metadata[k]))) {
+        result[key] = { model: metadata.model, revision: metadata.revision };
+      }
+    }
+    return result;
+  }
+
+  async search(question, { history = [], maxChars = LIMITS.maxContextChars, signal, includeDiagnostics = false } = {}) {
+    if (this.closed || this._expire() || this.session.state !== 'active') return null;
+    if (typeof question !== 'string' || question.length > 16000 || !Number.isInteger(maxChars) || maxChars < 0) throw new Error('Invalid material search input');
+    signal?.throwIfAborted();
+    const snapshot = this.snapshot();
+    if (this.searchIndex?.closed) { this._searchFailed(this.searchIndex); throw new Error('Local search stopped. Prepare the index again.'); }
+    await waitWithSignal(this.prepareSearch(), signal);
+    signal?.throwIfAborted();
+    if (!this.isCurrent(snapshot)) throw new Error('Material session changed while preparing search');
+    const index = this.searchIndex;
+    const recent = (Array.isArray(history) ? history : []).filter(t => t?.role === 'user' && typeof t.content === 'string').slice(-2).map(t => ({ role: 'user', content: t.content.slice(-2000) }));
+    let result;
+    try { result = await waitWithSignal(index.search(question, { history: recent, maxChars: Math.min(maxChars, LIMITS.maxContextChars), signal }), signal); }
+    catch (error) { this._searchFailed(index); throw error; }
+    signal?.throwIfAborted();
+    if (!this.isCurrent(snapshot) || this.searchIndex !== index) throw new Error('Material session changed during search');
+    if (!Array.isArray(result?.sources) || result.sources.length > LIMITS.maxSources) throw new Error('Invalid search result');
+    const sources = result.sources.map(source => this._searchSource(source));
+    if (sources.some(source => !source)) throw new Error('Search returned an invalid source');
+    const context = { sessionId: snapshot.sessionId, generation: snapshot.generation, expiresAt: snapshot.expiresAt, sources, abstained: result.abstained === true };
+    require('./context').formatMaterialContext(context, { now: this.now, maxChars });
+    if (includeDiagnostics === true) context.diagnostics = this._searchDiagnostics(result.diagnostics);
+    return context;
+  }
+
+  // Historical lexical path retained for controlled comparisons. The semantic
+  // candidate is exercised through search(), pending its quality acceptance.
   retrieve(question, { maxChars = LIMITS.maxContextChars } = {}) {
     if (this.closed || this._expire() || this.session.state !== 'active') return null;
     if (!Number.isInteger(maxChars) || maxChars < 0) throw new Error('Invalid material text budget');

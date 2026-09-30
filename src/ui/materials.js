@@ -9,7 +9,7 @@
   if(!next)return;const changed=state&&(next.id!==state.id||next.generation!==state.generation);state=next;if(changed){revision++;$('preview').close();$('preview-text').textContent='';selected=null;}
   const active=state.state==='active',busy=state.busy||acting;document.querySelector('main').setAttribute('aria-busy',String(busy));
   $('state').textContent=active?'Session active':state.state==='draft'?'Preparing materials':state.state==='expired'?'Session expired':state.state==='ended'?'Session ended':'No session started';
-  $('capacity').textContent=`${ready().length} / 10 files · ${(ready().reduce((n,d)=>n+d.bytes,0)/1048576).toFixed(1)} / 250 MiB`;
+  $('capacity').textContent=`${ready().length} / ${state.limits?.maxFiles||11} files · ${(ready().reduce((n,d)=>n+d.bytes,0)/1048576).toFixed(1)} / 250 MiB`;
   $('add').disabled=busy;$('cancel').hidden=!state.busy;$('start').disabled=busy||!ready().length||!$('consent').checked;
   $('start-panel').hidden=active;$('end').hidden=!['active','draft'].includes(state.state);$('end').disabled=busy;$('skip').hidden=active;
   $('persistence').textContent=state.persistence==='encrypted'?'Stored encrypted in the app’s data folder. Reopening keeps the original deadline.':'Memory only: secure local storage is unavailable. Closing the app loses these materials.';

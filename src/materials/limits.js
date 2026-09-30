@@ -2,10 +2,10 @@
 
 // These limits apply to actual bytes and decoded output, not ZIP declarations.
 const LIMITS = Object.freeze({
-  maxFiles: 10,
+  maxFiles: 11,
   maxFileBytes: 50 * 1024 * 1024,
   maxTotalBytes: 250 * 1024 * 1024,
-  maxPagesPerFile: 250,
+  maxPagesPerFile: 1000,
   maxTotalPages: 1000,
   maxTextBytesPerFile: 4 * 1024 * 1024,
   maxTotalTextBytes: 16 * 1024 * 1024,

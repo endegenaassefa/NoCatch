@@ -144,7 +144,7 @@ async function pdf() {
   let document;
   try {
     document = await task.promise;
-    if (!document.numPages || document.numPages > limits.maxPagesPerFile) throw new Error('PDF exceeds 250 pages');
+    if (!document.numPages || document.numPages > limits.maxPagesPerFile) throw new Error('PDF exceeds the page limit');
     const pages = [];
     for (let page = 1; page <= document.numPages; page++) {
       const view = await document.getPage(page);

@@ -5,7 +5,11 @@ const { readJson } = require('../managed/network');
 // A setup attempt is one explicit request. Existing chat retry/fallback policies
 // are intentionally not used here: an ambiguous failure needs a user decision.
 function createDirectSetupAnswer({ llmService, fetchImpl = globalThis.fetch }) {
-  return async ({ text, image, provider }, { signal } = {}) => {
+  return async ({ text, image, provider, materialContext }, { signal } = {}) => {
+    if(materialContext){
+      const {createMaterialsDirectAnswer}=require('../services/materials-direct-answer');
+      return createMaterialsDirectAnswer({llmService})({text,image,provider,materialContext,history:[],skill:'general'},{signal});
+    }
     if (!llmService.isInitialized || llmService.provider !== provider) {
       throw new Error('Select and configure this provider in Advanced Settings first.');
     }

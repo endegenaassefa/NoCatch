@@ -1,0 +1,35 @@
+'use strict';
+(()=>{
+ const api=window.electronAPI,$=id=>document.getElementById(id);let state=null,selected=null,revision=0,closed=false,acting=false;
+ const checked=r=>{if(!r||r.success===false)throw new Error(r?.error?.message||'Could not complete this action.');return r;};
+ const notice=(text,error=false)=>{$('status').textContent=text;$('status').dataset.error=String(error);};
+ const ready=()=>state?.documents?.filter(d=>['ready','partial'].includes(d.state))||[];
+ function timer(){if(!state)return;const remain=Math.max(0,state.expiresAt-Date.now());$('timer').textContent=['active','draft'].includes(state.state)?`${Math.ceil(remain/60000)} min remaining${state.state==='draft'?' to prepare':''}`:'90 minutes when you start';if(state.state==='active'&&remain===0){$('preview').close();$('preview-text').textContent='';refresh();}}
+ function render(next){
+  if(!next)return;const changed=state&&(next.id!==state.id||next.generation!==state.generation);state=next;if(changed){revision++;$('preview').close();$('preview-text').textContent='';selected=null;}
+  const active=state.state==='active',busy=state.busy||acting;document.querySelector('main').setAttribute('aria-busy',String(busy));
+  $('state').textContent=active?'Session active':state.state==='draft'?'Preparing materials':state.state==='expired'?'Session expired':state.state==='ended'?'Session ended':'No session started';
+  $('capacity').textContent=`${ready().length} / 10 files · ${(ready().reduce((n,d)=>n+d.bytes,0)/1048576).toFixed(1)} / 250 MiB`;
+  $('add').disabled=busy;$('cancel').hidden=!state.busy;$('start').disabled=busy||!ready().length||!$('consent').checked;
+  $('start-panel').hidden=active;$('end').hidden=!['active','draft'].includes(state.state);$('end').disabled=busy;$('skip').hidden=active;
+  $('persistence').textContent=state.persistence==='encrypted'?'Stored encrypted in the app’s data folder. Reopening keeps the original deadline.':'Memory only: secure local storage is unavailable. Closing the app loses these materials.';
+  if(state.cleanupPending)$('persistence').textContent+=' Local encrypted cleanup is pending because the file could not be deleted. Retrying while the app is open. '+(state.cleanupPersistent===false?'The recovery block could not be saved. Keep the app open until cleanup succeeds; closing may allow old encrypted data to recover before its original expiry.':'Recovery is blocked until cleanup succeeds.');
+  if(state.remoteCleanupPending)$('persistence').textContent+=` Server cleanup pending for ${state.remoteCleanupPending} session(s). Retrying when the original account is connected; the original expiry still applies.${state.remoteCleanupPersistent===false?' Retry information is memory only and will be lost when the app closes.':''}`;
+  $('documents').replaceChildren();for(const doc of state.documents||[]){
+   const li=document.createElement('li'),file=document.createElement('div'),name=document.createElement('strong'),info=document.createElement('p'),actions=document.createElement('div');file.className='file';actions.className='file-actions';name.textContent=doc.name;
+   info.textContent=['ready','partial'].includes(doc.state)?`${doc.pages} ${/pptx$/i.test(doc.name)?'slides':'pages'} · ${doc.coverage?.textPages??doc.pages} with text${doc.coverage?.visualPages?' · visual content may be missing':''}${doc.coverage?.warnings?.length?' · '+doc.coverage.warnings.join(' '):''}`:doc.state==='failed'?(typeof doc.error==='string'?doc.error:doc.error?.message)||'Import failed':doc.state==='duplicate'?'Already added':`Import: ${doc.state}`;
+   if(doc.state==='failed')info.className='error';file.append(name,info);li.append(file,actions);
+   if(['ready','partial'].includes(doc.state)){const b=document.createElement('button');b.textContent='Preview';b.setAttribute('aria-label',`Preview ${doc.name}`);b.onclick=()=>preview(doc,1);actions.append(b);}
+   const remove=document.createElement('button');remove.textContent='Remove';remove.setAttribute('aria-label',`Remove ${doc.name}`);remove.disabled=busy;remove.onclick=()=>action(()=>api.removeMaterial(doc.id));actions.append(remove);$('documents').append(li);
+  }
+  $('empty').hidden=(state.documents||[]).length>0;timer();
+ }
+ async function action(fn){if(acting)return;acting=true;render(state);try{const r=checked(await fn());if(r.status)render(r.status);notice('');}catch(e){notice(e.message,true);}finally{acting=false;render(state);}}
+ async function refresh(){try{render(checked(await api.getMaterialsStatus()).status);}catch(e){notice(e.message,true);}}
+ async function preview(doc,page){const epoch=++revision;try{const result=checked(await api.previewMaterial(doc.id,page));if(closed||epoch!==revision)return;selected=doc;$('page').max=doc.pages;$('page').value=page;$('preview-title').textContent=`${doc.name} · ${result.preview.kind} ${page}`;$('preview-text').textContent=[result.preview.text,result.preview.notes].filter(Boolean).join('\n\nSpeaker notes\n');$('preview-coverage').textContent='Extracted text preview. Images and visual charts are not interpreted.';if(!$('preview').open)$('preview').showModal();}catch(e){notice(e.message,true);}}
+ $('add').onclick=()=>action(()=>api.importMaterials());$('start').onclick=()=>action(()=>api.startMaterials({consent:$('consent').checked}));$('end').onclick=()=>action(()=>api.endMaterials());$('cancel').onclick=async()=>{try{const r=checked(await api.cancelMaterialImport());render(r.status);notice('Import cancelled.');}catch(e){notice(e.message,true);}};$('consent').onchange=()=>render(state);
+ $('preview').addEventListener('close',()=>{revision++;$('preview-text').textContent='';});
+ $('preview-close').onclick=()=>{$('preview').close();$('preview-text').textContent='';};$('open-page').onclick=()=>selected&&preview(selected,Number($('page').value));
+ const close=()=>{closed=true;api.closeWindow();};$('close').onclick=close;$('skip').onclick=()=>action(async()=>{if(state?.state==='draft')checked(await api.endMaterials());close();return {success:true};});
+ api.onMaterialsStatus(render);api.onMaterialsInvalidated?.(()=>{revision++;$('preview').close();$('preview-text').textContent='';});refresh();const interval=setInterval(timer,1000);window.addEventListener('unload',()=>clearInterval(interval));
+})();

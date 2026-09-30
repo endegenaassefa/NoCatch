@@ -1,0 +1,10 @@
+Review regressions v6: independent production-provider and actual renderer boundaries.
+6 Node cases: real localhost SSE sends valid final frame then delays EOF until after material deadline;
+shared provider and direct answer must reject final success. DeepSeek image must reject before HTTP
+with/without material and before active wrapper dispatch in direct/managed modes.
+5 native renderer cases: close suppresses delayed page reply; newer page beats older reply; newer
+citation beats older reply; removed-generation source event cannot restore citations; source timer
+self-clears at deadline without further status IPC. Real materials/chat HTML + preload, controlled IPC.
+Commands: node run.cjs test; node run.cjs native --electron <standalone Electron> --project <repo>.
+External folder also requires MATERIALS_PROJECT or --project. Portable copy infers repository root.
+All older frozen assets remain unchanged. No account/provider spend; local HTTP only.

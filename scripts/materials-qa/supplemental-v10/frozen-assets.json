@@ -1,0 +1,18 @@
+{
+  "version": 10,
+  "calibrates": "v9 capturePage UnknownVizError on two native runs; not a product assertion failure",
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "cdd675270b69403c083816edb2d109a668df8a736d088db78d88bdfa7ce811e8",
+      "bytes": 377
+    },
+    "native-cleanup.cjs": {
+      "sha256": "e0c9d515dcc8b0822456b34b7d295a68629a34277f19c86bc24b7640cd893910",
+      "bytes": 2955
+    },
+    "run.cjs": {
+      "sha256": "06d340f5a578db6458ea4f6c0b77ec708c148fe539a75170da410f04fa2377f0",
+      "bytes": 1039
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "createdUtc": "2026-09-30T03:20:30.658088+00:00",
+  "scope": "QA tests, fixtures, commands and inventory; production is read-only",
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "e5685771621d82421470c3ef164a8e18994a275a9789d7e66ba528088d30c227",
+      "bytes": 4105
+    },
+    "fixtures/251-pages.pdf": {
+      "sha256": "fa6593e24afdb52cc958e7e572e1e9ec5d5f3cebf351a6991871263bf45d2bca",
+      "bytes": 117376
+    },
+    "fixtures/corrupt.pdf": {
+      "sha256": "ef71af3d1dd250cb27ca537b241428ef129b2a34bc323547ecbf1b8ac9d9bd84",
+      "bytes": 29
+    },
+    "fixtures/corrupt.pptx": {
+      "sha256": "d47a0e1d7474c8ae47fa79384d93fad6b0e66fc5b119ee66389b376db9382edd",
+      "bytes": 18
+    },
+    "fixtures/inflated-text.pptx": {
+      "sha256": "76b28cdb6b6bc12f03c4053cac6f675cc282c8563008af49cc61c905d1909940",
+      "bytes": 50929
+    },
+    "fixtures/legacy.ppt": {
+      "sha256": "9096e8ff553354adff49a791b2665b93b7dc21360b838bbad4a10bafd79fc978",
+      "bytes": 36
+    },
+    "fixtures/manifest.json": {
+      "sha256": "10f0dc24dd11dd28c8593ad2d0f5643c3ee42bcc0356045a38225daf4c541d20",
+      "bytes": 2828
+    },
+    "fixtures/relationship-order-notes-visual.pptx": {
+      "sha256": "91061d995c75bbfdf21aa45e7494c2a4816c482fba3226e266ef074cf8da35c0",
+      "bytes": 45582
+    },
+    "fixtures/three-pages.pdf": {
+      "sha256": "0a8633dec6ae9f9d48b885155e8370bbeb62d015c21941c18f6db0c1fd47c201",
+      "bytes": 13688
+    },
+    "fixtures/unique-1.pdf": {
+      "sha256": "52976bdb28d0279ed78c201bb4bea3ee9131c1a03847732ce8e8acf513417d35",
+      "bytes": 1378
+    },
+    "fixtures/unique-10.pdf": {
+      "sha256": "0a7b8c6076964f7b19f3595a7f249461517b76d3a36ccb23006e9b0d1aadad20",
+      "bytes": 1381
+    },
+    "fixtures/unique-11.pdf": {
+      "sha256": "7ee850e61eded77afe2a152c686cdd8a5d6d643af24c0450f3eded5e8196fc58",
+      "bytes": 1381
+    },
+    "fixtures/unique-2.pdf": {
+      "sha256": "191d67233de151b6588c3451b664d98072eb341334e6e5e9976e30efa039ed34",
+      "bytes": 1378
+    },
+    "fixtures/unique-3.pdf": {
+      "sha256": "3c70dfff4344bd899f05f9a1d8c39be7f96d14955d9b95688337387190dbda11",
+      "bytes": 1378
+    },
+    "fixtures/unique-4.pdf": {
+      "sha256": "f67e2331dc1f74aa54ede5b8c6a478040317cb212f874ca91827aa76dcb6f6ef",
+      "bytes": 1378
+    },
+    "fixtures/unique-5.pdf": {
+      "sha256": "c0271b1f141c02fa125585a1e2d5fe2e57faf8921e83d15b98468bada3b41efd",
+      "bytes": 1378
+    },
+    "fixtures/unique-6.pdf": {
+      "sha256": "fef3c7740afe43c241ae978be6e6782e53259efd70730694526b8d5b0c6aeb7d",
+      "bytes": 1378
+    },
+    "fixtures/unique-7.pdf": {
+      "sha256": "b093ce62dbf25fa26b25fe81b5f31b0e3510986e4361957d1e24392fc663164f",
+      "bytes": 1378
+    },
+    "fixtures/unique-8.pdf": {
+      "sha256": "8e9fc72a8f350b1062a7241ecc8ddca0bfcfe6423072f6c0e4ccedf16adaa440",
+      "bytes": 1378
+    },
+    "fixtures/unique-9.pdf": {
+      "sha256": "85399949430314869be870a5402749aa485052bba0aa2e401745767cabf49d6c",
+      "bytes": 1378
+    },
+    "generate-fixtures.py": {
+      "sha256": "9a367f3fdcb73e6f0ffd9ec415ccc02c0da0a094c0e9a011739c5177c102943b",
+      "bytes": 3724
+    },
+    "materials-context.test.cjs": {
+      "sha256": "3d9b9666a45d2f5424a43b3210b2e96647a2f46c77a75d6b03d4015bcf789e72",
+      "bytes": 2071
+    },
+    "materials-managed.test.cjs": {
+      "sha256": "f6106ffc3c8d43fffac2fb7227a721026b872ba78a958d585233dc1991e7ddd8",
+      "bytes": 6790
+    },
+    "materials-public.test.cjs": {
+      "sha256": "06709d654cb825c27f0e7bc9b9e8bb5169e0dcc36f63843bcca9228f66749d70",
+      "bytes": 12453
+    },
+    "run-acceptance.py": {
+      "sha256": "10ed5cf5db764aad6579c34a575ea307c166030140b02a5d2093ccb82a79dcf2",
+      "bytes": 870
+    },
+    "run-baseline.py": {
+      "sha256": "007bd810310d8c76b7cad1b3f576a3c942baef75a49359bba8f7fd6195b7940b",
+      "bytes": 1062
+    }
+  }
+}

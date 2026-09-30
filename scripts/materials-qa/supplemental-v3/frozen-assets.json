@@ -1,0 +1,17 @@
+{
+  "version": 3,
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "6ef627fdcbe9e86ebe5049014446e195eaf101ec4ffd1c8fea73442c884a73d6",
+      "bytes": 542
+    },
+    "full-main.cjs": {
+      "sha256": "e6e15f73ecbfea994eb849946852e6ae1a01a0455cbf57b16b12721d8ff90f2e",
+      "bytes": 9643
+    },
+    "run-full-main.ps1": {
+      "sha256": "915f9c1b635d43c8b7db0433a15c8dddee01337de9e2180b8f4617a0222b96de",
+      "bytes": 406
+    }
+  }
+}

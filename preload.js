@@ -3,6 +3,16 @@ const { contextBridge, ipcRenderer } = require('electron')
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  getMaterialsStatus: () => ipcRenderer.invoke('materials-status'),
+  importMaterials: () => ipcRenderer.invoke('materials-import'),
+  startMaterials: options => ipcRenderer.invoke('materials-start',options),
+  previewMaterial: (id,page) => ipcRenderer.invoke('materials-preview',id,page),
+  removeMaterial: id => ipcRenderer.invoke('materials-remove',id),
+  endMaterials: () => ipcRenderer.invoke('materials-end'),
+  cancelMaterialImport: () => ipcRenderer.invoke('materials-cancel-import'),
+  showMaterials: () => ipcRenderer.invoke('materials-show'),
+  onMaterialsStatus: callback => {const listener=(_event,status)=>callback(status);ipcRenderer.on('materials-status-changed',listener);return ()=>ipcRenderer.removeListener('materials-status-changed',listener);},
+  onMaterialsInvalidated: callback => {const listener=(_event,data)=>callback(data);ipcRenderer.on('materials-session-invalidated',listener);return ()=>ipcRenderer.removeListener('materials-session-invalidated',listener);},
   getManagedStatus: () => ipcRenderer.invoke('managed-status'),
   signIn: () => ipcRenderer.invoke('managed-sign-in'),
   signOut: () => ipcRenderer.invoke('managed-sign-out'),

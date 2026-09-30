@@ -99,7 +99,7 @@
     </div>
   </section>
   <section id="questionPanel" hidden aria-label="First question">
-    <p id="identity" class="small identity"></p>
+    <p id="identity" class="small identity"></p><div class="card"><h2>Have reference material?</h2><p class="small">Optionally add PowerPoint decks or PDFs before your first question.</p><button id="materials-button" class="button" type="button">Add materials (optional)</button></div>
     <div class="mode-row"><label for="inputMode">Ask with</label><select id="inputMode"><option value="text">Text</option><option value="screenshot">Screenshot</option></select></div>
     <div id="capturePanel" class="card" hidden>
       <h2>Capture your screen</h2>
@@ -130,5 +130,6 @@
   <footer class="footer"><button id="quit" class="text-button" type="button">Quit OpenCluely</button></footer>
 </main>
 <script src="./onboarding.js"></script>
+<script src="src/ui/materials-links.js"></script>
 </body>
 </html>

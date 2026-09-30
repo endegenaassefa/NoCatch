@@ -1,7 +1,8 @@
-﻿'use strict';
+'use strict';
 const http = require('node:http');
 const { randomUUID, createHash } = require('node:crypto');
 const { Store } = require('./store');
+const { validateMaterialContext, formatMaterialContext } = require('../src/materials/context');
 const { PromptLoader } = require('../prompt-loader');
 const promptLoader = new PromptLoader();
 const error = (status, code, message) => Object.assign(new Error(message), { status, code });
@@ -24,6 +25,14 @@ function validateInput(value, limits) {
   if (!Array.isArray(history) || history.length > limits.historyTurns || history.some(turn =>
     !turn || !['user', 'assistant'].includes(turn.role) || typeof turn.content !== 'string')) throw error(400, 'invalid_history', 'Invalid conversation history.');
   if (text.length + history.reduce((n, turn) => n + turn.content.length, 0) > limits.inputChars) throw error(413, 'input_limit', 'Text and history are too long.');
+  let materialContext;
+  if (value.materialContext !== undefined) {
+    try { materialContext = validateMaterialContext(value.materialContext); } catch { throw error(400, 'invalid_material_context', 'Invalid or expired material reference.'); }
+    let formatted;
+    try { formatted = formatMaterialContext(materialContext); } catch { throw error(413, 'input_limit', 'Material references exceed the input limit.'); }
+    if (text.length + history.reduce((n,t)=>n+t.content.length,0) + formatted.text.length > limits.inputChars) throw error(413,'input_limit','Question, history and references are too long.');
+    materialContext = structuredClone(materialContext);
+  }
   let image;
   if (value.image !== undefined) {
     const img = value.image;
@@ -39,7 +48,7 @@ function validateInput(value, limits) {
     image = { mimeType: img.mimeType, data: img.data };
   }
   if (!text.trim() && !image) throw error(400, 'empty_input', 'Enter a question or attach an image.');
-  return { text, skill, language, provider: value.provider, history: history.map(({ role, content }) => ({ role, content })), ...(image ? { image } : {}) };
+  return { text, skill, language, provider: value.provider, history: history.map(({ role, content }) => ({ role, content })), ...(image ? { image } : {}), ...(materialContext ? { materialContext } : {}) };
 }
 async function readBody(req, limit) {
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) throw error(415, 'content_type', 'Use application/json.');
@@ -61,7 +70,7 @@ function send(res, status, data) {
 function createManagedServer({ config, authenticate, provider, store = new Store(config.database), extraRoute, readiness }) {
   if (typeof authenticate !== 'function' || typeof provider !== 'function') throw new Error('Authentication and real provider required');
   const limits = config.limits;
-  const jobs = new Map(), subscribers = new Map();
+  const jobs = new Map(), subscribers = new Map(), materialTimers = new Map();
   let subscriberCount = 0, closing = false, storageHealthy = true;
   const publish = (id, event) => {
     if (!event) return;
@@ -72,11 +81,30 @@ function createManagedServer({ config, authenticate, provider, store = new Store
     publish(id, event);
     return event;
   };
+  const endMaterial = id => {
+    const requestIds=store.endMaterial(id);
+    clearTimeout(materialTimers.get(id));materialTimers.delete(id);
+    for(const requestId of requestIds) { jobs.get(requestId)?.abort();for(const client of subscribers.get(requestId)||[]) client.end(); }
+  };
+  const scheduleMaterial = session => {
+    if(materialTimers.has(session.id))return;
+    const timer=setTimeout(()=>{try{endMaterial(session.id);}catch{storageHealthy=false;}},Math.max(1,session.deadline-Date.now()));
+    timer.unref();materialTimers.set(session.id,timer);
+  };
+  const validMaterial = (context,owner) => {
+    let session=store.material(context.sessionId);
+    if(!session||session.owner!==owner||session.ended||session.deadline<=Date.now()||session.deadline!==context.expiresAt)
+      throw error(409,'material_expired','This material session is unavailable. Start a new local session.');
+    if(session.generation===null){store.bindGeneration(session.id,context.generation);session=store.material(session.id);}
+    if(session.generation!==context.generation)throw error(409,'material_expired','These material references have changed. Please ask again.');
+    scheduleMaterial(session);return session;
+  };
   const execute = (id, input) => {
     const abort = new AbortController();
+    const current = () => !abort.signal.aborted && store.materialAlive(store.get(id));
     let pending = '', outputLength = 0, eventCount = 0;
     const flush = () => {
-      if (!pending || store.get(id)?.status !== 'accepted') { pending = ''; return; }
+      if (!pending || !current() || store.get(id)?.status !== 'accepted') { pending = ''; return; }
       if (++eventCount >= limits.eventsPerRequest - 2) throw error(502, 'output_limit', 'The answer exceeded the event limit.');
       const delta = pending; pending = '';
       publish(id, store.append(id, delta));
@@ -85,17 +113,18 @@ function createManagedServer({ config, authenticate, provider, store = new Store
       try { flush(); finish(id, 'failed', { code: 'timeout', message: 'The request exceeded the time limit.' }); }
       catch { storageHealthy = false; }
       abort.abort();
-    }, limits.timeoutMs);
+    }, Math.max(1,Math.min(limits.timeoutMs,input.materialContext ? input.materialContext.expiresAt-Date.now() : limits.timeoutMs)));
     jobs.set(id, abort);
-    Promise.resolve().then(() => provider(input, { signal: abort.signal, onDelta(text) {
-      if (abort.signal.aborted || store.get(id)?.status !== 'accepted') return;
+    Promise.resolve().then(() => { if(!current())return;return provider(input, { signal: abort.signal, onDelta(text) {
+      if (!current() || store.get(id)?.status !== 'accepted') return;
       if (typeof text !== 'string') throw error(502, 'provider_error', 'Invalid AI response.');
       outputLength += text.length;
       if (outputLength > limits.outputChars) throw error(502, 'output_limit', 'The answer exceeded the output limit.');
       pending += text;
       // Persist reasonably sized deltas to bound event rows and disk writes.
       if (pending.length >= 128) flush();
-    } })).then(() => {
+    } }); }).then(() => {
+      if(!current())return;
       flush();
       if (!outputLength) throw error(502, 'empty_response', 'The AI provider returned no answer.');
       finish(id, 'completed');
@@ -104,7 +133,7 @@ function createManagedServer({ config, authenticate, provider, store = new Store
       try {
         flush();
         const safe = new Set(['provider_busy', 'provider_error', 'provider_refused', 'provider_interrupted', 'provider_response_limit', 'output_limit', 'empty_response']);
-        finish(id, 'failed', safe.has(cause.code) ? { code: cause.code, message: cause.message } : { code: 'provider_error', message: 'The AI provider could not complete this request.' });
+        finish(id, 'failed', safe.has(cause.code) ? { code: cause.code, message: input.materialContext ? 'The provider could not complete this temporary answer.' : cause.message } : { code: 'provider_error', message: 'The AI provider could not complete this request.' });
       } catch { storageHealthy = false; }
     }).finally(() => { clearTimeout(timeout); jobs.delete(id); });
   };
@@ -123,20 +152,47 @@ function createManagedServer({ config, authenticate, provider, store = new Store
         subject: auth.subject, providers: ['gemini', 'deepseek'], limits,
         usage: { requestsToday: store.usage(auth.account), dailyLimit: limits.dailyAccount }
       });
+      if(req.method==='POST' && url.pathname==='/v1/material-sessions') {
+        const value=await readBody(req,4096);
+        if(typeof value?.sessionId!=='string'||! /^[A-Za-z0-9_.:-]{1,200}$/.test(value.sessionId)||!Number.isSafeInteger(value.expiresAt)||value.expiresAt<=Date.now())
+          throw error(400,'invalid_material_session','Supply a valid future material deadline.');
+        if(value.generation!==undefined&&(!Number.isSafeInteger(value.generation)||value.generation<0))throw error(400,'invalid_material_session','Invalid material revision.');
+        let session=store.material(value.sessionId);
+        if(session&&(session.owner!==auth.owner||session.ended||session.deadline<=Date.now()))throw error(409,'material_expired','This material session is unavailable.');
+        if(!session){
+          if(store.db.prepare('SELECT COUNT(*) AS n FROM material_sessions').get().n>=limits.maxRecords)throw error(503,'storage_limit','Too many material sessions.');
+          session=store.registerMaterial(value.sessionId,auth.owner,Math.min(value.expiresAt,Date.now()+90*60000),value.generation??null);
+        }
+        if(value.generation!==undefined&&session.generation!==null&&value.generation<session.generation)throw error(409,'material_expired','This material revision is unavailable.');
+        if(value.generation!==undefined&&value.generation!==session.generation){
+          const ids=store.revokeMaterialAnswers(session.id);
+          for(const id of ids){jobs.get(id)?.abort();for(const client of subscribers.get(id)||[])client.end();}
+          store.bindGeneration(session.id,value.generation);session=store.material(session.id);
+        }
+        scheduleMaterial(session);return send(res,200,{sessionId:session.id,expiresAt:session.deadline});
+      }
+      const materialRoute=/^\/v1\/material-sessions\/([A-Za-z0-9_.:-]{1,200})$/.exec(url.pathname);
+      if(req.method==='DELETE'&&materialRoute){
+        const session=store.material(materialRoute[1]);
+        if(!session||session.owner!==auth.owner)throw error(404,'not_found','Not found.');
+        endMaterial(session.id);return send(res,200,{sessionId:session.id,ended:true});
+      }
       if (req.method === 'POST' && url.pathname === '/v1/answers') {
         const idem = req.headers['idempotency-key'];
         if (typeof idem !== 'string' || !/^[A-Za-z0-9_.:-]{8,128}$/.test(idem)) throw error(400, 'idempotency_key_required', 'Supply an Idempotency-Key of 8–128 safe characters.');
         const input = validateInput(await readBody(req, limits.bodyBytes), limits);
+        if(input.materialContext)validMaterial(input.materialContext,auth.owner);
         const fingerprint = createHash('sha256').update(JSON.stringify(input)).digest('hex');
         store.prune(limits.retentionMs);
         const existing = store.find(auth.owner, idem);
         if (existing && existing.fingerprint !== fingerprint) throw error(409, 'idempotency_conflict', 'This request key was already used for different input.');
+        if(existing?.material_session && !store.transient.has(existing.id))throw error(410,'material_expired','This temporary answer is no longer available.');
         if (existing) return send(res, 200, publicRequest(existing));
         if (store.usage(auth.account) >= limits.dailyAccount || store.usage('*') >= limits.dailyGlobal) throw error(429, 'daily_limit', 'The daily request allowance has been reached.');
         if (store.active(auth.account) >= limits.activeAccount || store.active() >= limits.activeGlobal) throw error(429, 'concurrency_limit', 'Too many requests are running.');
         if (store.count() >= limits.maxRecords) throw error(503, 'storage_limit', 'The service has reached its request capacity. Try again later.');
         const id = randomUUID();
-        store.accept({ id, owner: auth.owner, subject: auth.account, idem, fingerprint, provider: input.provider });
+        store.accept({ id, owner: auth.owner, subject: auth.account, idem, fingerprint, provider: input.provider, materialContext: input.materialContext });
         execute(id, input);
         return send(res, 202, { ...publicRequest(store.get(id)), eventsUrl: `/v1/requests/${id}/events`, requestUrl: `/v1/requests/${id}` });
       }
@@ -145,6 +201,7 @@ function createManagedServer({ config, authenticate, provider, store = new Store
       const [, id, operation] = route;
       const row = store.get(id);
       if (!row || row.owner !== auth.owner) throw error(404, 'not_found', 'Not found.');
+      if(row.material_session && (!store.materialAlive(row)||!store.transient.has(row.id)))throw error(410,'material_expired','This temporary answer has expired.');
       if (req.method === 'GET' && !operation) return send(res, 200, publicRequest(row));
       if (req.method === 'POST' && operation === 'cancel') {
         finish(id, 'cancelled');
@@ -160,8 +217,9 @@ function createManagedServer({ config, authenticate, provider, store = new Store
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.flushHeaders();
       let closed = false;
-      const client = { send(event) {
+      const client = { end(){res.end();}, send(event) {
         if (closed || res.destroyed) return;
+        if(!store.materialAlive(store.get(id))){res.end();return;}
         if (res.writableLength > 512 * 1024) { res.destroy(); return; }
         res.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
         if (terminal(event.type)) res.end();
@@ -192,6 +250,7 @@ function createManagedServer({ config, authenticate, provider, store = new Store
   pruning.unref();
   async function close() {
     closing = true; clearInterval(pruning);
+    for(const timer of materialTimers.values())clearTimeout(timer);materialTimers.clear();
     for (const [id, abort] of jobs) { finish(id, 'failed', { code: 'interrupted', message: 'The service stopped. This request was not retried.' }); abort.abort(); }
     await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     // All real providers observe AbortSignal. Wait before closing their store.

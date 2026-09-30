@@ -197,6 +197,9 @@ const llmService = require("./src/services/llm.service");
 const windowManager = require("./src/managers/window.manager");
 const sessionManager = require("./src/managers/session.manager");
 const { createManagedManager } = require('./src/managed');
+const { MaterialsManager } = require('./src/materials');
+const { attachMaterialsSession } = require('./src/services/materials-routing');
+const { createMaterialsDirectAnswer } = require('./src/services/materials-direct-answer');
 const { attachManagedSession } = require('./src/services/managed-routing');
 const { assertTrustedRenderer } = require('./src/core/trusted-renderer');
 const { SetupService } = require('./src/core/setup-service');
@@ -278,12 +281,14 @@ class ApplicationController {
         const accountChanged = this._managedAccountSubject != null && this._managedAccountSubject !== subject;
         // Record the new identity before cleanup can emit another status.
         this._managedAccountSubject = subject;
+        if(this.materialsManager)this.materialsManager.setOwner(this.getMaterialsOwner()).catch(()=>{});
         // Explicit sign-in already cleared the session and owns its auth transition.
         if (accountChanged && this._managedSignInEpoch !== this.operationEpoch) {
           this.invalidateManagedWork().catch(error => logger.warn('Managed account cleanup failed', { error: error.message }));
         } else if (this._voiceAccountAuthenticated !== undefined && this._voiceAccountAuthenticated !== status.authenticated) this.cancelVoiceWork();
         this._voiceAccountAuthenticated = status.authenticated;
         windowManager.broadcastToAllWindows('managed-status', status);
+        if (this.materialsManager) windowManager.broadcastToAllWindows('materials-status-changed', this.materialsStatus());
       } });
     this.setupService = new SetupService({ userDataPath: app.getPath('userData'),
       platformAdapter: this.platformAdapter, captureService, managedSession: this.managedSession,
@@ -850,6 +855,7 @@ class ApplicationController {
       this.setupPermissions();
       this.setupNetworkConfiguration();
       await this.managedSession.restore();
+      await this.initializeMaterials();
 
       // Small delay to ensure desktop/space detection is accurate
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -924,6 +930,7 @@ class ApplicationController {
       }, 1500);
 
       // Launch the onboarding wizard if this is the first run.
+      if (!this.isFirstRun) setTimeout(()=>this.showMaterials().catch(()=>{}),800);
       if (this.isFirstRun) {
         // Defer slightly so all windows finish loading before we pop
         // the wizard on top of them.
@@ -1644,6 +1651,7 @@ class ApplicationController {
   // chat window (the Cluely UI); the legacy dark answer panel is opt-in via
   // ui.answerSurface = 'panel' | 'both'.
   _routeShieldAnswer(text) {
+    if(this.materialSessionMarker())return;
     const surface = this.getAnswerSurface();
     if (surface !== "panel") {
       const chatWindow = windowManager.getWindow("chat");
@@ -1719,12 +1727,89 @@ class ApplicationController {
     });
   }
 
+  getMaterialsOwner() {
+    return this.getAIMode()==='direct' ? 'direct:local' : `managed:${this.managedSession.status().account?.subject || 'signed-out'}`;
+  }
+
+  async initializeMaterials() {
+    if(this.materialsManager)return;
+    this.materialsManager=new MaterialsManager({userDataPath:app.getPath('userData'),safeStorage:require('electron').safeStorage,owner:this.getMaterialsOwner(),
+      onStatus:status=>{
+        if(status.state==='active') {
+          this._materialSessionId=status.id;
+          this._materialSessionCleanup={expiresAt:status.expiresAt,generation:status.generation,owner:this.managedSession.status().account?.subject};
+        }
+        windowManager.broadcastToAllWindows('materials-status-changed',this.materialsStatus(status));
+      },
+      onInvalidate:reason=>this.invalidateMaterialWork(reason)});
+    this.setupService.materialsManager=this.materialsManager;
+    attachMaterialsSession(llmService,{materials:this.materialsManager,managedSession:this.managedSession,getAIMode:()=>this.getAIMode(),answerDirect:createMaterialsDirectAnswer({llmService})});
+    await this.materialsManager.restore();
+  }
+
+  invalidateMaterialWork(reason) {
+    if(!this._invalidatingManaged && !(reason==='owner-changed' && this._managedSignInEpoch===this.operationEpoch))this.operationEpoch++;
+    this.setupService?.invalidate();this.managedSession.cancelAll();
+    clearTimeout(this._utteranceTimer);this._utteranceBuffer='';this.cancelVoiceWork();sessionManager.clear();
+    windowManager.broadcastToAllWindows('materials-session-invalidated',{reason});
+    windowManager.broadcastToAllWindows('session-cleared');windowManager.hideLLMResponse();
+    const status=this.materialsManager?.status();
+    if(status?.state==='active'&&this.getAIMode()==='managed'&&reason!=='closed'){
+      this.managedSession.syncMaterialSession?.({sessionId:status.id,expiresAt:status.expiresAt,generation:status.generation}).catch(()=>{});
+    }
+    if(this._materialSessionId && !['active','draft'].includes(status?.state) && reason!=='closed'){
+      const id=this._materialSessionId,cleanup=this._materialSessionCleanup;this._materialSessionId=null;this._materialSessionCleanup=null;
+      if(cleanup?.owner)this.managedSession.endMaterialSession?.(id,cleanup).catch(()=>{});
+    }
+  }
+
+  materialsStatus(status = this.materialsManager?.status()) {
+    const managed = this.managedSession.status();
+    return { ...status, remoteCleanupPending: managed.materialCleanupPending || 0, remoteCleanupPersistent: managed.materialCleanupPersistent };
+  }
+
+  async showMaterials() {
+    if(!this.materialsManager)throw new Error('Wait for the app to finish starting.');
+    if(!windowManager.getWindow('materials')){const created=await windowManager.createWindow('materials');windowManager.windows.set('materials',created);}
+    const win=windowManager.getWindow('materials');windowManager.showOnCurrentDesktop(win);win.center();
+    if(process.platform!=='darwin')win.focus();
+    return {success:true};
+  }
+
+  materialSessionMarker() {
+    const status=this.materialsManager?.status();
+    return status?.state==='active'?{sessionId:status.id,generation:status.generation,expiresAt:status.expiresAt}:undefined;
+  }
+
   setupIPCHandlers() {
     const managedHandle = (channel, action, { includeEvent = false } = {}) => ipcMain.handle(channel, async (event, ...args) => {
       assertTrustedRenderer(event, app.getAppPath());
-      try { return await (includeEvent ? action(event, ...args) : action(...args)); }
+      try {
+        const result = await (includeEvent ? action(event, ...args) : action(...args));
+        return channel.startsWith('materials-') && result?.status ? { ...result, status: this.materialsStatus(result.status) } : result;
+      }
       catch (error) { return { success: false, error: { code: error.code || 'REQUEST_FAILED', message: String(error.message || 'The action failed. Please try again.').slice(0, 512) } }; }
     });
+    managedHandle('materials-status',()=>({success:true,status:this.materialsStatus()}));
+    managedHandle('materials-show',()=>this.showMaterials());
+    managedHandle('materials-import',async event=>{
+      const manager=this.materialsManager;if(!manager)throw new Error('Materials are not ready.');
+      await manager.setOwner(this.getMaterialsOwner());
+      const snapshot=manager.snapshot();
+      const selected=await require('electron').dialog.showOpenDialog(require('electron').BrowserWindow.fromWebContents(event.sender),{title:'Add session materials',properties:['openFile','multiSelections'],filters:[{name:'PowerPoint or PDF',extensions:['pptx','pdf']}]});
+      if(!manager.isCurrent(snapshot))throw new Error('This material session changed. Choose the files again.');
+      if(selected.canceled)return {success:true,status:manager.status()};
+      return {success:true,status:await manager.importFiles(selected.filePaths)};
+    },{includeEvent:true});
+    managedHandle('materials-start',async options=>{
+      if(this._shieldExamModeActive && !this.isRootMode)throw new Error('Return to the main app before starting a material session.');
+      await this.materialsManager.setOwner(this.getMaterialsOwner());
+      return {success:true,status:await this.materialsManager.start(options)};
+    });
+    managedHandle('materials-preview',(id,page)=>({success:true,preview:this.materialsManager.preview(id,page)}));
+    managedHandle('materials-remove',async id=>({success:true,status:await this.materialsManager.remove(id)}));
+    managedHandle('materials-end',async()=>({success:true,status:await this.materialsManager.end('ended')}));
+    managedHandle('materials-cancel-import',()=>{this.materialsManager.cancelImports();return {success:true,status:this.materialsManager.status()};});
     managedHandle('managed-status', () => this.managedSession.status());
     managedHandle('managed-sign-in', async event => {
       const epoch = this.operationEpoch + 1;
@@ -2137,7 +2222,7 @@ class ApplicationController {
         } catch (error) {
           logger.error("Failed to process chat message with LLM", {
             error: error.message,
-            text: text.substring(0, 100)
+            textLength: text.length
           });
         }
       })();
@@ -2595,7 +2680,8 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("chat-request-started", { requestId, kind: 'capture' });
     const startTime = Date.now();
     const epoch = this.operationEpoch;
-    const current = () => this.operationEpoch === epoch;
+    const materialSnapshot = this.materialsManager?.snapshot();
+    const current = () => this.operationEpoch === epoch && (!materialSnapshot || this.materialsManager.isCurrent(materialSnapshot));
     const chatHideVersion = windowManager.chatHideVersion;
 
     try {
@@ -2623,7 +2709,8 @@ class ApplicationController {
       windowManager.broadcastToAllWindows("transcription-llm-response-start", {
         messageId,
         requestId,
-        skill: this.activeSkill
+        skill: this.activeSkill,
+        materialSession: this.materialSessionMarker()
       });
 
       const llmResult = await llmService.processImageWithSkillStream(
@@ -2646,7 +2733,9 @@ class ApplicationController {
 
       sessionManager.addModelResponse(llmResult.response, {
         skill: this.activeSkill,
-        processingTime: llmResult.metadata.processingTime,
+        sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
+          processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
         isImageAnalysis: true
       });
@@ -2656,6 +2745,8 @@ class ApplicationController {
       if (this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
+          sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
           isImageAnalysis: true
@@ -2690,7 +2781,8 @@ class ApplicationController {
     const messageId = `chat-${Date.now()}-${this._responseSeq}`;
     requestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 200 ? requestId : messageId;
     const epoch = this.operationEpoch;
-    const current = () => this.operationEpoch === epoch;
+    const materialSnapshot = this.materialsManager?.snapshot();
+    const current = () => this.operationEpoch === epoch && (!materialSnapshot || this.materialsManager.isCurrent(materialSnapshot));
     try {
       // Add user input to session memory
       sessionManager.addUserInput(text, 'llm_input');
@@ -2702,7 +2794,8 @@ class ApplicationController {
       windowManager.broadcastToAllWindows("transcription-llm-response-start", {
         messageId,
         requestId,
-        skill: this.activeSkill
+        skill: this.activeSkill,
+        materialSession: this.materialSessionMarker()
       });
       if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
 
@@ -2727,14 +2820,17 @@ class ApplicationController {
         responseLength: llmResult.response.length,
         skill: this.activeSkill,
         programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : 'not applicable',
-        processingTime: llmResult.metadata.processingTime,
-        responsePreview: llmResult.response.substring(0, 200) + "...",
+        sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
+          processingTime: llmResult.metadata.processingTime,
       });
 
       // Add LLM response to session memory
       sessionManager.addModelResponse(llmResult.response, {
         skill: this.activeSkill,
-        processingTime: llmResult.metadata.processingTime,
+        sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
+          processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
       });
 
@@ -2743,6 +2839,8 @@ class ApplicationController {
       if (this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
+          sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
         });
@@ -2830,7 +2928,7 @@ class ApplicationController {
     } catch (error) {
       logger.error("Failed to process transcription with LLM", {
         error: error.message,
-        text: combined.substring(0, 100)
+        textLength: combined.length
       });
     } finally {
       if ((this._voiceEpoch || 0) !== voiceEpoch) return;
@@ -2848,7 +2946,8 @@ class ApplicationController {
     // leaves an empty streamed bubble stranded next to the fallback message.
     let messageId = null;
     const voiceEpoch = this._voiceEpoch || 0;
-    const current = () => (this._voiceEpoch || 0) === voiceEpoch;
+    const materialSnapshot = this.materialsManager?.snapshot();
+    const current = () => (this._voiceEpoch || 0) === voiceEpoch && (!materialSnapshot || this.materialsManager.isCurrent(materialSnapshot));
     try {
       // Validate input text
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -2862,7 +2961,7 @@ class ApplicationController {
       const cleanText = text.trim();
       if (cleanText.length < 2) {
         logger.debug("Skipping LLM processing for very short transcription", {
-          text: cleanText
+          textLength: cleanText.length
         });
         return;
       }
@@ -2870,7 +2969,6 @@ class ApplicationController {
       logger.info("Processing transcription with intelligent LLM response", {
         skill: this.activeSkill,
         textLength: cleanText.length,
-        textPreview: cleanText.substring(0, 100) + "..."
       });
 
       // Check if current skill needs programming language context
@@ -2884,7 +2982,8 @@ class ApplicationController {
       messageId = `tr-${Date.now()}-${this._responseSeq}`;
       this.sendToVoiceResponseWindows("transcription-llm-response-start", {
         messageId,
-        skill: this.activeSkill
+        skill: this.activeSkill,
+        materialSession: this.materialSessionMarker()
       });
       if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
         windowManager.showLLMLoading();
@@ -2908,7 +3007,9 @@ class ApplicationController {
       // Add LLM response to session memory
       sessionManager.addModelResponse(llmResult.response, {
         skill: this.activeSkill,
-        processingTime: llmResult.metadata.processingTime,
+        sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
+          processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
         isTranscriptionResponse: true
       });
@@ -2917,6 +3018,8 @@ class ApplicationController {
       if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
+          sources: llmResult.metadata.sources,
+          materialSession: llmResult.metadata.materialSession,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
           isTranscriptionResponse: true
@@ -2936,9 +3039,9 @@ class ApplicationController {
         error: error.message,
         errorStack: error.stack,
         skill: this.activeSkill,
-        text: text ? text.substring(0, 100) : 'undefined'
       });
 
+      if(this.materialSessionMarker()){this.sendToVoiceResponseWindows('llm-error',{messageId,error:'Could not get an answer. Please try again.'});return;}
       // Try to provide a fallback response
       try {
         const fallbackResult = llmService.generateIntelligentFallbackResponse(text, this.activeSkill);
@@ -2967,7 +3070,6 @@ class ApplicationController {
         }
         logger.info("Used fallback response for transcription", {
           skill: this.activeSkill,
-          fallbackResponse: fallbackResult.response
         });
         
       } catch (fallbackError) {
@@ -3015,7 +3117,6 @@ class ApplicationController {
       responseLength: llmResult.response.length,
       skill: this.activeSkill,
       dataKeys: Object.keys(broadcastData),
-      responsePreview: llmResult.response.substring(0, 100) + "...",
     });
 
     windowManager.broadcastToAllWindows("llm-response", broadcastData);
@@ -3043,7 +3144,6 @@ class ApplicationController {
     logger.info("Broadcasting transcription LLM response to all windows", {
       responseLength: llmResult.response.length,
       skill: this.activeSkill,
-      responsePreview: llmResult.response.substring(0, 100) + "..."
     });
 
     windowManager.broadcastToAllWindows("transcription-llm-response", broadcastData);
@@ -3060,6 +3160,7 @@ class ApplicationController {
   // (fallback-only mode, --no-hotkey). Fire-and-forget with its own timeout;
   // failures are logged at debug level — the chat is the primary surface.
   _mirrorAnswerToShieldFallback(text) {
+    if(this.materialSessionMarker())return;
     if (!text) return;
     try {
       const shieldClient = require("./src/services/shield-client");
@@ -3174,6 +3275,8 @@ class ApplicationController {
     }
     this.setupService.invalidate();
     this.managedSession.cancelAll();
+    this.materialsManager?.close();
+    this.managedSession.close?.();
     globalShortcut.unregisterAll();
     if (this._captureHelper) {
       try { this._captureHelper.kill("SIGTERM"); } catch (_) { /* already dead */ }
@@ -3305,6 +3408,9 @@ class ApplicationController {
 
   async invalidateManagedWork() {
     this.operationEpoch++;
+    this._invalidatingManaged=true;
+    let materialCleanup;
+    try {materialCleanup=this.materialsManager?.end('owner-changed');} finally {this._invalidatingManaged=false;}
     this.setupService.invalidate();
     const cancellation = this.managedSession.cancelAll();
     clearTimeout(this._utteranceTimer);
@@ -3314,7 +3420,7 @@ class ApplicationController {
     windowManager.broadcastToAllWindows('session-cleared');
     windowManager.hideLLMResponse();
     if (this.managedSession.status().signingIn) await this.managedSession.signOut();
-    await cancellation;
+    await Promise.all([cancellation,materialCleanup]);
   }
 
   getSettings() {

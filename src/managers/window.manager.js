@@ -93,6 +93,7 @@ class WindowManager {
         visibleOnAllWorkspaces: true,
         fullscreenable: false
       },
+      materials: {width:620,height:740,file:'materials.html',title:'Session materials'},
       onboarding: {
         width: 560,
         height: 680,
@@ -344,7 +345,7 @@ class WindowManager {
           disableAutoHideCursor: true
         })
       };
-  } else if (type === 'onboarding') {
+  } else if ((type === 'onboarding' || type === 'materials')) {
       // First-run onboarding wizard — same frameless/panel style as
       // settings, with visible renderer controls and native minimize support.
       browserWindowOptions = {

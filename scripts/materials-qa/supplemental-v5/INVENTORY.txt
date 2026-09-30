@@ -1,0 +1,3 @@
+Lifecycle v5 environment calibration. Frozen v4 remains unchanged.
+The QA root is on DrvFS, which rejects mkfifo before production code runs. Only the FIFO test temporary directory moves to os.tmpdir() (Linux /tmp); cleanup still runs immediately and child execution has the same 2-second outer timeout. All outcome assertions and other lifecycle checks are unchanged. Windows explicitly skips POSIX FIFO.
+Run MATERIALS_PROJECT=<repo> node run.cjs (portable copy infers repo). Includes both frozen v4 generation tests, total five cases.

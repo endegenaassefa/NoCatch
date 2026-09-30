@@ -1,0 +1,88 @@
+{
+  "expected": {
+    "pptx": {
+      "1": "LOGICAL FIRST / MARIGOLD-629 / FIRST_SLIDE_NOTE",
+      "2": "PHYSICAL ONE / 17 minutes / 318 liters / PRIVATE_NOTES_SENTINEL",
+      "3": "image only; partial/unavailable coverage"
+    },
+    "pdf": {
+      "1": "PDF_ONE_SENTINEL / 961 liters",
+      "2": "PDF_TWO_SENTINEL plus image gap",
+      "3": "image-only coverage gap"
+    }
+  },
+  "files": {
+    "251-pages.pdf": {
+      "bytes": 117376,
+      "sha256": "fa6593e24afdb52cc958e7e572e1e9ec5d5f3cebf351a6991871263bf45d2bca"
+    },
+    "corrupt.pdf": {
+      "bytes": 29,
+      "sha256": "ef71af3d1dd250cb27ca537b241428ef129b2a34bc323547ecbf1b8ac9d9bd84"
+    },
+    "corrupt.pptx": {
+      "bytes": 18,
+      "sha256": "d47a0e1d7474c8ae47fa79384d93fad6b0e66fc5b119ee66389b376db9382edd"
+    },
+    "inflated-text.pptx": {
+      "bytes": 50929,
+      "sha256": "76b28cdb6b6bc12f03c4053cac6f675cc282c8563008af49cc61c905d1909940"
+    },
+    "legacy.ppt": {
+      "bytes": 36,
+      "sha256": "9096e8ff553354adff49a791b2665b93b7dc21360b838bbad4a10bafd79fc978"
+    },
+    "relationship-order-notes-visual.pptx": {
+      "bytes": 45582,
+      "sha256": "91061d995c75bbfdf21aa45e7494c2a4816c482fba3226e266ef074cf8da35c0"
+    },
+    "three-pages.pdf": {
+      "bytes": 13688,
+      "sha256": "0a8633dec6ae9f9d48b885155e8370bbeb62d015c21941c18f6db0c1fd47c201"
+    },
+    "unique-1.pdf": {
+      "bytes": 1378,
+      "sha256": "52976bdb28d0279ed78c201bb4bea3ee9131c1a03847732ce8e8acf513417d35"
+    },
+    "unique-10.pdf": {
+      "bytes": 1381,
+      "sha256": "0a7b8c6076964f7b19f3595a7f249461517b76d3a36ccb23006e9b0d1aadad20"
+    },
+    "unique-11.pdf": {
+      "bytes": 1381,
+      "sha256": "7ee850e61eded77afe2a152c686cdd8a5d6d643af24c0450f3eded5e8196fc58"
+    },
+    "unique-2.pdf": {
+      "bytes": 1378,
+      "sha256": "191d67233de151b6588c3451b664d98072eb341334e6e5e9976e30efa039ed34"
+    },
+    "unique-3.pdf": {
+      "bytes": 1378,
+      "sha256": "3c70dfff4344bd899f05f9a1d8c39be7f96d14955d9b95688337387190dbda11"
+    },
+    "unique-4.pdf": {
+      "bytes": 1378,
+      "sha256": "f67e2331dc1f74aa54ede5b8c6a478040317cb212f874ca91827aa76dcb6f6ef"
+    },
+    "unique-5.pdf": {
+      "bytes": 1378,
+      "sha256": "c0271b1f141c02fa125585a1e2d5fe2e57faf8921e83d15b98468bada3b41efd"
+    },
+    "unique-6.pdf": {
+      "bytes": 1378,
+      "sha256": "fef3c7740afe43c241ae978be6e6782e53259efd70730694526b8d5b0c6aeb7d"
+    },
+    "unique-7.pdf": {
+      "bytes": 1378,
+      "sha256": "b093ce62dbf25fa26b25fe81b5f31b0e3510986e4361957d1e24392fc663164f"
+    },
+    "unique-8.pdf": {
+      "bytes": 1378,
+      "sha256": "8e9fc72a8f350b1062a7241ecc8ddca0bfcfe6423072f6c0e4ccedf16adaa440"
+    },
+    "unique-9.pdf": {
+      "bytes": 1378,
+      "sha256": "85399949430314869be870a5402749aa485052bba0aa2e401745767cabf49d6c"
+    }
+  }
+}

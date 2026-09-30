@@ -1,0 +1,10 @@
+Representative 5-to-10 PowerPoint workload v7. One integration workload, no hard performance threshold.
+Generate ten distinct 60-slide real PPTX decks: paragraphs, speaker notes, tables, some image-only slides.
+Import first five then next five with actual MaterialsManager and worker parsers. Confirm 300 then600pages,
+all10accepted. After consent retrieve unique deck10 slide55 fact, verify file/page/answer and 4000char bound.
+Report source bytes, decoded text bytes, stage timings, retrieval time, sampled NodeRSS, lifetime maxRSS.
+Sampled processRSS includes workerthreads; a measurement is not an enforced memory cap or worstcase proof.
+Commands: python3 generate.py; MATERIALS_PROJECT=<repo> node workload.cjs.
+Portable copy infers repo. Python python-pptx/Pillow required, same fixture dependencies as initial suite.
+All generated binary fixtures, manifests, runtime profiles and result JSON are under ignored results/.
+No user documents, live providers, accounts or production edits.

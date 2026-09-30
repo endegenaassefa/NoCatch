@@ -1,0 +1,17 @@
+{
+  "version": 5,
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "1cf44c33f5aaced28e30ad01ff84602c123320d5de5a7a9fc184639f8a080c37",
+      "bytes": 537
+    },
+    "lifecycle.test.cjs": {
+      "sha256": "4911f20bac58f8124591b15b70a45a8b9a01298336f175af16bdc4744aca180a",
+      "bytes": 3418
+    },
+    "run.cjs": {
+      "sha256": "8a5c1e660c043352b6cb25afea253a4223589b8c4f2fdc54a5a85627a57f637e",
+      "bytes": 865
+    }
+  }
+}

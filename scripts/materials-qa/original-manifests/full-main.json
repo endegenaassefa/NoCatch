@@ -1,0 +1,22 @@
+{
+  "version": "supplemental-v2",
+  "createdUtc": "2026-09-30T03:57:18.575311+00:00",
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "e5864e5d74050ef02bbf4cb0e42853d68fe1ddc7c43a8945b443baee6c784b0a",
+      "bytes": 2163
+    },
+    "full-main.cjs": {
+      "sha256": "206703f5b30186a53b9a32e179d1333d83241332017aa51fb4a6b31f4007d7c2",
+      "bytes": 9421
+    },
+    "run-full-main.ps1": {
+      "sha256": "915f9c1b635d43c8b7db0433a15c8dddee01337de9e2180b8f4617a0222b96de",
+      "bytes": 406
+    },
+    "verify-archive.cjs": {
+      "sha256": "c01c9df39e2d55b4d0a86dc3d91c446c654b684f5955c7a978c7505a5ee64778",
+      "bytes": 2345
+    }
+  }
+}

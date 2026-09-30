@@ -724,6 +724,7 @@
         </div>
       </div>
 
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 16px;font-size:12px;color:#d0d8e8;background:#151923"><span id="material-summary">Materials optional</span><button id="chat-materials" class="icon-button" style="width:auto;font:inherit;padding:4px 8px">Materials</button></div>
       <div id="speechStatus" role="status" aria-live="polite" style="padding: 4px 16px; font-size: 12px; color: #a9b6cc; min-height: 24px;">Microphone idle</div>
       <div class="exam-banner" id="examModeBanner">
         🛡️ Exam mode armed — the shield captures and answers land in this chat. Mic, question types and typing keep working. Click 🛡️ or press ⌃⌥⇧E to restore.
@@ -821,6 +822,14 @@
       // Chat persistence and deduplication
       const CHAT_HISTORY_KEY = 'sru_chat_history_v1';
       let chatHistory = [];
+      let materialPrivacy=true, materialSeen=false, materialStatusResolved=false;
+      function protectMaterials(data){if(data?.materialSession||data?.metadata?.materialSession){materialSeen=true;materialPrivacy=true;try{localStorage.removeItem(CHAT_HISTORY_KEY);}catch{}}}
+      document.getElementById('chat-materials').onclick=()=>whysperAPI.showMaterials();
+      whysperAPI.onMaterialsStatus?.(status=>{
+        if(['draft','active'].includes(status.state)){materialSeen=true;materialPrivacy=true;try{localStorage.removeItem(CHAT_HISTORY_KEY);}catch{}}
+        document.getElementById('material-summary').textContent=status.state==='active'?`${status.documents.filter(d=>['ready','partial'].includes(d.state)).length} files · ${Math.max(0,Math.ceil((status.expiresAt-Date.now())/60000))} min left`:'Materials optional';
+      });
+      whysperAPI.onMaterialsInvalidated?.(()=>{materialSeen=true;materialPrivacy=true;clearChatHistory(true);document.getElementById('messageInput').value='';});
       const recentResponseHashes = new Set();
       const RECENT_HASH_LIMIT = 50;
 
@@ -839,6 +848,7 @@
 
       function saveHistory() {
         try {
+          if(materialPrivacy){localStorage.removeItem(CHAT_HISTORY_KEY);return;}
           localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory.slice(-500)));
         } catch (e) {
           console.warn('Failed to save history', e);
@@ -910,6 +920,7 @@
       // Also capture generic LLM responses (from OCR/screenshot flows)
       if (whysperAPI && whysperAPI.onLlmResponse) {
         whysperAPI.onLlmResponse((event, data) => {
+          protectMaterials(data);
           const request = pendingResponse(data);
           if (responseId(data) && !request) return;
           if (request) finishPendingResponse(request);
@@ -932,6 +943,7 @@
 
       if (whysperAPI && whysperAPI.onChatRequestStarted) {
         whysperAPI.onChatRequestStarted((event, data) => {
+          protectMaterials(data);
           if (data && data.requestId) beginRequest(data.requestId);
         });
       }
@@ -1125,7 +1137,11 @@
       }
 
       // Initialize availability and history
-      loadHistory();
+      if(whysperAPI.getMaterialsStatus){whysperAPI.getMaterialsStatus().then(reply=>{
+        const status=reply.status||reply;materialStatusResolved=true;
+        if(reply.success===false||!status.state||['draft','active'].includes(status.state))materialSeen=true;
+        materialPrivacy=materialSeen;if(materialPrivacy)localStorage.removeItem(CHAT_HISTORY_KEY);else if(!chatHistory.length)loadHistory();
+      }).catch(()=>{materialSeen=true;materialPrivacy=true;});}else{materialPrivacy=false;loadHistory();}
       initSpeechAvailability();
 
       // Basic message function with markdown support for assistant messages
@@ -1494,6 +1510,7 @@
         // chunks arrive (transcription-llm-response-chunk), then the final
         // event replaces it with the fully formatted markdown render.
         function beginStreamingResponse(data) {
+          protectMaterials(data);
           const request = beginRequest(responseId(data));
           if (!request || request.streamingBubble) return;
           // Voice starts carry messageId; retire only their pre-stream indicator.
@@ -1518,6 +1535,8 @@
         }
 
         function appendStreamingChunk(data) {
+          protectMaterials(data);
+          protectMaterials(data);
           const request = pendingResponse(data);
           const streamingBubble = request && request.streamingBubble;
           const delta = data.delta || '';
@@ -1532,6 +1551,7 @@
 
         // Replace the temporary stream with one formatted final response.
         whysperAPI.onTranscriptionLlmResponse((event, data) => {
+          protectMaterials(data);
           const request = pendingResponse(data);
           if (responseId(data) && !request) return;
           if (request) finishPendingResponse(request);
@@ -1739,5 +1759,6 @@
       // Chat now starts clean; the capture-mode banner appears only while
       // keystroke capture is actually active.
     </script>
-  </body>
+  <script src="src/ui/materials-links.js"></script>
+</body>
 </html>

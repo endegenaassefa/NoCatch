@@ -24,7 +24,7 @@ class SetupService {
   #lastRequestId = null;
 
   constructor({ userDataPath, platformAdapter, captureService, managedSession,
-    getAIMode = () => 'managed', answer, now = Date.now, legacyCompleted = false } = {}) {
+    getAIMode = () => 'managed', answer, materialsManager, now = Date.now, legacyCompleted = false } = {}) {
     if (!userDataPath || !platformAdapter || !captureService || !managedSession) throw new TypeError('Setup dependencies are required');
     this.filename = path.join(userDataPath, 'setup-state.json');
     this.platformAdapter = platformAdapter;
@@ -32,6 +32,8 @@ class SetupService {
     this.managedSession = managedSession;
     this.getAIMode = getAIMode;
     this.answer = answer;
+    this.materialsManager = materialsManager;
+    this.materialDraft = null;
     this.now = now;
     this.#context = this._context();
     this.#state = this._read(legacyCompleted);
@@ -60,7 +62,7 @@ class SetupService {
     let fd;
     try {
       fd = fs.openSync(staging, 'wx', 0o600);
-      fs.writeFileSync(fd, JSON.stringify(next), 'utf8');
+      fs.writeFileSync(fd, JSON.stringify(this._materialScope() ? {...next,draft:''} : next), 'utf8');
       fs.fsyncSync(fd);
       fs.closeSync(fd); fd = undefined;
       fs.renameSync(staging, this.filename);
@@ -70,6 +72,8 @@ class SetupService {
       try { fs.unlinkSync(staging); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
   }
+
+  _materialScope() { return ['draft','active'].includes(this.materialsManager?.status().state); }
 
   _context() {
     const status = this.managedSession.status();
@@ -87,6 +91,7 @@ class SetupService {
   // Synchronous invalidation is also used before account/mode changes in main.
   invalidate() {
     this.#epoch++;
+    if(this.materialDraft!==null){this.#state.draft='';this.materialDraft=null;this._write({...this.#state,draft:''});}
     this.#preview = null;
     this.#answered = false;
     this.#lastRequestId = null;
@@ -122,6 +127,7 @@ class SetupService {
       next.inputMode = progress.inputMode;
     }
     const inputChanged = next.inputMode !== this.#state.inputMode;
+    if(this._materialScope())this.materialDraft=next.draft;
     this._write(next);
     // Includes changing to text while capture is still pending.
     if (inputChanged) this.cancel().catch(() => {});
@@ -131,14 +137,14 @@ class SetupService {
   _begin(kind) {
     this._syncContext();
     if (this.#operation) throw fail('SETUP_BUSY', 'Wait for the current operation or cancel it.');
-    const operation = { kind, epoch: this.#epoch, controller: new AbortController() };
+    const operation = { kind, epoch: this.#epoch, controller: new AbortController(), materialSnapshot:this.materialsManager?.snapshot() };
     this.#operation = operation;
     return operation;
   }
 
   _check(operation) {
     this._syncContext();
-    if (operation.epoch !== this.#epoch || operation.controller.signal.aborted) throw fail('CANCELLED', 'Setup operation was cancelled.');
+    if (operation.epoch !== this.#epoch || operation.controller.signal.aborted || (operation.materialSnapshot && !this.materialsManager.isCurrent(operation.materialSnapshot))) throw fail('CANCELLED', 'Setup operation was cancelled.');
   }
 
   async _wait(promise, operation) {
@@ -235,11 +241,16 @@ class SetupService {
           this.#preview = null;
           throw fail('STALE_DISPLAY_LAYOUT', 'Display layout changed. Capture a new preview.');
         }
-        if (this.getAIMode() !== 'direct' && input.provider !== 'gemini') throw fail('image_not_supported', 'Choose Gemini for screenshot questions.');
+        if (input.provider !== 'gemini') throw fail('image_not_supported', 'Choose Gemini for screenshot questions.');
         payload.image = { mimeType: preview.mimeType, data: preview.bytes.toString('base64') };
+      }
+      if(this.materialsManager?.status().state==='active'){
+        payload.materialContext=this.materialsManager.retrieve(input.text,{maxChars:Math.min(24000,30000-input.text.length)});
+        this._check(operation);
       }
       this.#answered = false;
       this.#lastRequestId = null;
+      if(this._materialScope())this.materialDraft=input.text;
       // Persist the retryable question before spending allowance, never the answer/image.
       this._write({ ...this.#state, step: 'question', draft: input.text });
       const scoped = typeof this.managedSession.answerScoped === 'function';
@@ -252,7 +263,7 @@ class SetupService {
       if (typeof result?.text !== 'string' || !result.text.trim() || result.text.length > 2 * 1024 * 1024) throw fail('EMPTY_ANSWER', 'No answer was returned. You can explicitly try again.');
       this.#answered = true;
       this.#lastRequestId = typeof result.requestId === 'string' ? result.requestId : null;
-      return { text: result.text, requestId: this.#lastRequestId };
+      return { text: result.text, requestId: this.#lastRequestId, ...(payload.materialContext?{sources:payload.materialContext.sources.map(({text,...source})=>source),materialSession:{sessionId:payload.materialContext.sessionId,generation:payload.materialContext.generation,expiresAt:payload.materialContext.expiresAt}}:{}) };
     } finally { if (this.#operation === operation) this.#operation = null; }
   }
 

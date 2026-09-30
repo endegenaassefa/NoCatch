@@ -1,0 +1,6 @@
+One exact combined-failure manager test and three native renderer warning assertions.
+Run node scripts/materials-qa/supplemental-v9/run.cjs
+Native: Windows Node scripts/materials-qa/supplemental-v9/run.cjs native <standalone Electron path>
+Actual MaterialsManager/EncryptedStore with injected SQLite DELETE, unlink and tombstone ENOSPC; RAM invalidation, cleanupPending true/cleanupPersistent false, observer propagation, successful explicit retry clears pending and restores cleanupPersistent true.
+Actual production materials.html/preload/UI receives deterministic trusted-status boundary. Verifies explicit unsaved cleanup and keep-open warning, durable marker wording, clearing after retry. HTTP blocked; disposable profile; no production main or account loaded.
+No claim of guaranteed revocation after process death if every durable write fails. Frozen v8 assets remain unchanged.

@@ -1,0 +1,61 @@
+{
+  "note": "Files copied byte-identically from independently authored frozen external QA assets. Original manifests preserve broader original fixture/inventory scope.",
+  "files": {
+    "generate-fixtures.py": {
+      "source": "generate-fixtures.py",
+      "sha256": "9a367f3fdcb73e6f0ffd9ec415ccc02c0da0a094c0e9a011739c5177c102943b"
+    },
+    "materials-public.test.cjs": {
+      "source": "materials-public.test.cjs",
+      "sha256": "06709d654cb825c27f0e7bc9b9e8bb5169e0dcc36f63843bcca9228f66749d70"
+    },
+    "materials-context.test.cjs": {
+      "source": "materials-context.test.cjs",
+      "sha256": "3d9b9666a45d2f5424a43b3210b2e96647a2f46c77a75d6b03d4015bcf789e72"
+    },
+    "materials-managed.test.cjs": {
+      "source": "materials-managed.test.cjs",
+      "sha256": "f6106ffc3c8d43fffac2fb7227a721026b872ba78a958d585233dc1991e7ddd8"
+    },
+    "supplemental-v1/helpers.cjs": {
+      "source": "supplemental-v1/helpers.cjs",
+      "sha256": "34685544b816a177f5cc7b62efe34d5fd1f9e9e75ac135f48dec8451450613bb"
+    },
+    "supplemental-v1/routing.test.cjs": {
+      "source": "supplemental-v1/routing.test.cjs",
+      "sha256": "6293050ce31974df3b2e3438458339f65fb46aa3988f653bce77de600e2cca3b"
+    },
+    "supplemental-v1/setup.test.cjs": {
+      "source": "supplemental-v1/setup.test.cjs",
+      "sha256": "927ff8c664586b1a3c18a2e262fce54131a5ae8f2433535c31e6d0cba5ed40fc"
+    },
+    "supplemental-v1/main-boundary.test.cjs": {
+      "source": "supplemental-v1/main-boundary.test.cjs",
+      "sha256": "064c47b39d7914925c8f62e0ddfd6aaa94b01b9cb2e7ce0ffb606c2dcc433397"
+    },
+    "supplemental-v1/managed-client.test.cjs": {
+      "source": "supplemental-v1/managed-client.test.cjs",
+      "sha256": "73576ae4546a8d5652985dcc45b65887a1024b4be86f76b6be808e9533e83247"
+    },
+    "supplemental-v1/backend-restart.test.cjs": {
+      "source": "supplemental-v1/backend-restart.test.cjs",
+      "sha256": "567f570350ef657761e6dd71b101c8cff7ae905f9d80455d0ea7a380e159bc18"
+    },
+    "supplemental-v1/native-renderer.cjs": {
+      "source": "supplemental-v1/native-renderer.cjs",
+      "sha256": "9a0de32148ba110a8375bb5965bfda3fa02ff7a46f24a7d3056789a69e0461be"
+    },
+    "supplemental-v1/chat-v3/native-chat.cjs": {
+      "source": "supplemental-v1/chat-v3/native-chat.cjs",
+      "sha256": "e71784ed2c1a2964eb314d3eacc7e6e4b8e5d13cc556749c20955be939ec33ee"
+    },
+    "supplemental-v2/full-main.cjs": {
+      "source": "supplemental-v2/full-main.cjs",
+      "sha256": "206703f5b30186a53b9a32e179d1333d83241332017aa51fb4a6b31f4007d7c2"
+    },
+    "supplemental-v2/verify-archive.cjs": {
+      "source": "supplemental-v2/verify-archive.cjs",
+      "sha256": "c01c9df39e2d55b4d0a86dc3d91c446c654b684f5955c7a978c7505a5ee64778"
+    }
+  }
+}

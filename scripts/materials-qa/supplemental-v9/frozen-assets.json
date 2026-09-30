@@ -1,0 +1,21 @@
+{
+  "version": 9,
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "f46c2a44be3e2e0598587e217684b568292fd6e2f65c0b6a5b6c83401c1e1244",
+      "bytes": 886
+    },
+    "cleanup-durability.test.cjs": {
+      "sha256": "3a59d066c5016d7ef24cb330f5c03a0bc24772c9b7cfeb0b6d5d97f6152e449c",
+      "bytes": 2352
+    },
+    "native-cleanup.cjs": {
+      "sha256": "345e179416d9d128eaf78751898818638c3768366dd525c3d41bcd91e8fb39d0",
+      "bytes": 2806
+    },
+    "run.cjs": {
+      "sha256": "06d340f5a578db6458ea4f6c0b77ec708c148fe539a75170da410f04fa2377f0",
+      "bytes": 1039
+    }
+  }
+}

@@ -1,5 +1,8 @@
 'use strict';
 const messages = {
+  material_expired: 'This material session ended or expired. Start a new session to continue.',
+  invalid_material_context: 'These material references are invalid or expired. Please ask again.',
+  invalid_material_session: 'This material session could not be registered. Please start again.',
   not_configured: 'Managed service is not configured in this build.', signed_out: 'Sign in to continue.',
   cancelled: 'The operation was cancelled.', auth_failed: 'Sign-in could not be completed. Please try again.',
   auth_expired: 'Sign-in expired. Please try again.', network: 'The managed service could not be reached. Please try again.',

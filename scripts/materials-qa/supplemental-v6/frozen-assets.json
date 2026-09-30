@@ -1,0 +1,21 @@
+{
+  "version": 6,
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "eafa4a149977e91c664b6a995b81fa3aacbae0505048bf8a79de364a6523c6b9",
+      "bytes": 960
+    },
+    "native-preview.cjs": {
+      "sha256": "90b20e6e803aa00177d5f70bf91600786146e388fa6e990c67e8eaa6e24fff73",
+      "bytes": 6475
+    },
+    "provider.test.cjs": {
+      "sha256": "4cc55017dcf465e5adc95b1ce45128480a0a1ba2c1318bf855805b25829fc0e4",
+      "bytes": 3501
+    },
+    "run.cjs": {
+      "sha256": "4a4553cde402fc098684f35c5d131643d812efb8b77b5ceda87d7ab9c68b30c7",
+      "bytes": 1137
+    }
+  }
+}

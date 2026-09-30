@@ -6,6 +6,7 @@ const { RefreshStore } = require('./store');
 const { createLoopback } = require('./loopback');
 const { ManagedError, safeError } = require('./errors');
 const { readJson, sameOriginUrl, events } = require('./network');
+const { MaterialCleanup } = require('./material-cleanup');
 
 function safeAccount(data) {
   if (!data || typeof data.subject !== 'string' || !data.subject || data.subject.length > 512) throw new ManagedError('invalid_response');
@@ -22,8 +23,13 @@ class ManagedManager {
     this.config = loadConfig(app, env); this.fetchImpl = fetchImpl; this.externalBrowser = externalBrowser; this.onStatus = onStatus; this.authTimeoutMs = authTimeoutMs;
     const binding = crypto.createHash('sha256').update(JSON.stringify([this.config.issuer, this.config.clientId, this.config.audience, this.config.apiBaseUrl, this.config.scopes])).digest('hex');
     this.store = new RefreshStore(path.join(app.getPath('userData'), 'managed-session.json'), safeStorage, binding);
+    this.materialCleanup = new MaterialCleanup({
+      file: path.join(app.getPath('userData'), 'material-cleanup.json'), binding,
+      getOwner: () => this.#account?.subject,
+      send: value => this.#sendMaterialCleanup(value), onChange: () => this.#emit()
+    });
   }
-  status() { return { configured: this.config.configured, authenticated: Boolean(this.#access && this.#account), signingIn: Boolean(this.#signingPromise), persistence: this.#persistent ? 'encrypted' : 'session_only', account: this.#account ? structuredClone(this.#account) : null, error: this.#error ? { code: this.#error.code, message: this.#error.message } : null, ...(this.config.reason ? { reason: this.config.reason } : {}) }; }
+  status() { const cleanup = this.materialCleanup?.status(); return { configured: this.config.configured, authenticated: Boolean(this.#access && this.#account), signingIn: Boolean(this.#signingPromise), persistence: this.#persistent ? 'encrypted' : 'session_only', account: this.#account ? structuredClone(this.#account) : null, error: this.#error ? { code: this.#error.code, message: this.#error.message } : null, materialCleanupPending: cleanup?.pending || 0, materialCleanupPersistent: cleanup?.persistent ?? true, ...(this.config.reason ? { reason: this.config.reason } : {}) }; }
   #emit() { try { this.onStatus(this.status()); } catch {} }
   #check(epoch) { if (epoch !== this.#sessionEpoch) throw new ManagedError('cancelled'); }
   #configured() { if (!this.config.configured) throw new ManagedError('not_configured'); }
@@ -59,6 +65,7 @@ class ManagedManager {
     this.#check(epoch); const account = safeAccount(data);
     if (this.#account && this.#account.subject !== account.subject) this.cancelAll();
     this.#account = account; this.#error = null; this.#emit();
+    void this.retryMaterialCleanup();
   }
   async #accessToken(epoch) {
     this.#check(epoch);
@@ -165,7 +172,34 @@ class ManagedManager {
     socket.once?.('close', () => this.#sockets.delete(socket)); return socket;
   }
   requestStatus(id) { return this.authenticatedRequest(`/v1/requests/${requestId(id)}`); }
-  answerScoped(payload, { signal } = {}) { return this.answer(payload, () => {}, { signal }); }
+  answerScoped(payload, { signal, onDelta = () => {} } = {}) { return this.answer(payload, onDelta, { signal }); }
+  async syncMaterialSession(context, { owner } = {}) { return this.materialCleanup.enqueue(context, 'revision', owner); }
+  async endMaterialSession(id, options = {}) {
+    if (options.expiresAt === undefined) return this.authenticatedRequest(`/v1/material-sessions/${encodeURIComponent(id)}`, {method:'DELETE'});
+    return this.materialCleanup.enqueue({ sessionId: id, expiresAt: options.expiresAt, generation: options.generation ?? 0 }, 'end', options.owner);
+  }
+  retryMaterialCleanup() { return this.materialCleanup.retry(); }
+  close() { this.materialCleanup.close(); this.cancelAll(); }
+  async #sendMaterialCleanup(value) {
+    const epoch = this.#sessionEpoch, work = this.#workEpoch;
+    const controller = new AbortController(), operation = { controller }; this.#operations.add(operation);
+    const check = () => {
+      this.#check(epoch);
+      if (work !== this.#workEpoch || controller.signal.aborted || value.expiresAt <= Date.now() ||
+        this.materialCleanup.owner(this.#account?.subject) !== value.owner) throw new ManagedError('cancelled');
+    };
+    try {
+      await this.#accessToken(epoch); check();
+      const body = { sessionId: value.sessionId, expiresAt: value.expiresAt, generation: value.generation };
+      const result = await this.#json(value.action === 'end' ? `/v1/material-sessions/${encodeURIComponent(value.sessionId)}` : '/v1/material-sessions', {
+        method: value.action === 'end' ? 'DELETE' : 'POST', signal: controller.signal, timeoutMs: 5000,
+        ...(value.action === 'revision' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
+      }, epoch, false);
+      check();
+      if (value.action === 'revision' && (result.sessionId !== value.sessionId || result.expiresAt !== value.expiresAt)) throw new ManagedError('invalid_response');
+      return result;
+    } finally { this.#operations.delete(operation); }
+  }
   async answer(payload, onDelta = () => {}, { signal } = {}) {
     this.#configured(); const epoch = this.#sessionEpoch, work = this.#workEpoch, controller = new AbortController();
     const operation = { controller, id: null }; this.#operations.add(operation);
@@ -173,11 +207,18 @@ class ManagedManager {
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     const check = () => { this.#check(epoch); if (work !== this.#workEpoch || controller.signal.aborted) throw new ManagedError('cancelled'); };
+    const materialTimer = payload?.materialContext ? setTimeout(abort, Math.max(1,payload.materialContext.expiresAt-Date.now())) : null;
+    materialTimer?.unref?.();
     let text = '', lastId = 0;
     try {
       check();
       if (!payload || typeof payload.text !== 'string' || payload.text.length > 100000 || JSON.stringify(payload).length > 16 * 1024 * 1024) throw new ManagedError('invalid_request');
-      const body = Object.fromEntries(['text', 'image', 'history', 'skill', 'language', 'provider'].filter(k => payload[k] !== undefined).map(k => [k, payload[k]]));
+      const body = Object.fromEntries(['text', 'image', 'history', 'skill', 'language', 'provider', 'materialContext'].filter(k => payload[k] !== undefined).map(k => [k, payload[k]]));
+      if(body.materialContext){
+        const {validateMaterialContext}=require('../materials/context');validateMaterialContext(body.materialContext);
+        const registered=await this.#json('/v1/material-sessions',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:body.materialContext.sessionId,expiresAt:body.materialContext.expiresAt,generation:body.materialContext.generation})},epoch);
+        check();if(registered.sessionId!==body.materialContext.sessionId||registered.expiresAt!==body.materialContext.expiresAt)throw new ManagedError('material_expired');
+      }
       const idempotencyKey = crypto.randomUUID(); let accepted;
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -204,7 +245,7 @@ class ManagedManager {
       }
       throw new ManagedError('network');
     } catch (error) { if (operation.id) this.#cancelUpstream(operation.id); throw safeError(error); }
-    finally { signal?.removeEventListener('abort', abort); controller.abort(); this.#operations.delete(operation); }
+    finally { clearTimeout(materialTimer); signal?.removeEventListener('abort', abort); controller.abort(); this.#operations.delete(operation); }
   }
 }
 function createManagedManager(options) { return new ManagedManager(options); }

@@ -2,6 +2,8 @@
 document.addEventListener('DOMContentLoaded', () => {
   const api = window.electronAPI;
   const $ = id => document.getElementById(id);
+  $('materials-button')?.addEventListener('click',()=>api.showMaterials());
+  api.onMaterialsInvalidated?.(()=>{epoch++;busy=null;clearPreview();answer=null;$('question').value='';$('answerText').textContent='';refresh();});
   let state, preview = null, answer = null, layout = null, busy = null;
   let epoch = 0, refreshId = 0, initialized = false, context = null;
   let preferredProvider = null;
@@ -30,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const id of ['inputMode', 'question', 'provider', 'consent', 'sample', 'display', 'capture', 'refreshDisplays', 'screenSettings', 'discard', 'recapture']) $(id).disabled = locked;
     const screenshot = $('inputMode').value === 'screenshot';
     $('capture').disabled = locked || !$('display').value;
-    $('submit').disabled = locked || !usable() || !$('question').value.trim() || !$('consent').checked || !$('provider').value || (screenshot && (!preview || (state.aiMode !== 'direct' && $('provider').value !== 'gemini')));
+    $('submit').disabled = locked || !usable() || !$('question').value.trim() || !$('consent').checked || !$('provider').value || (screenshot && (!preview || ($('provider').value !== 'gemini')));
     $('submit').textContent = busy === 'submit' ? 'Getting your answer…' : 'Ask question';
     $('cancelWork').hidden = !['submit', 'capture', 'displays'].includes(busy);
     $('cancelWork').textContent = busy === 'submit' ? 'Cancel request' : 'Cancel capture';
@@ -61,9 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('previewPanel').hidden = !preview;
     $('consentText').textContent = `Send this question${preview ? ' and the screenshot preview' : ''} to ${state.aiMode === 'direct' ? 'the selected AI provider' : 'the managed service and selected AI provider'}.`;
     $('providerNote').hidden = $('inputMode').value !== 'screenshot';
-    $('providerNote').textContent = state.aiMode === 'direct'
-      ? 'Choose a provider configured in Settings.'
-      : 'Screenshot questions require Gemini.';
+    $('providerNote').textContent = 'Screenshot questions require Gemini.';
     const capability = state.capabilities?.screen;
     $('screenStatus').textContent = capability ? `Screen access: ${capability.permission}. ${capability.reason || ''}` : 'Screen access will be checked when you capture.';
     controls();
@@ -199,7 +199,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if ($('inputMode').value === 'screenshot' && preview) input.previewId = preview.id;
       const result = checked(await api.submitSetupQuestion(input)); if (!current()) return;
       if (!result.text?.trim()) throw new Error('No answer was returned. You can explicitly try again.');
-      answer = result.text; $('answerText').textContent = answer;
+      window.MaterialSourceLinks?.render(result);
+      answer = result.text;
+      $('answerText').textContent = answer;
       $('readiness').textContent = input.previewId ? 'This screenshot question succeeded. Microphone access has not been tested.' : 'Your text question succeeded. Screen capture and microphone access have not been tested.';
       clearPreview(); await save({ step: 'success' }); if (!current() || saveError) return;
       status('Answer received. You can finish setup.'); render(); $('answerHeading').focus();

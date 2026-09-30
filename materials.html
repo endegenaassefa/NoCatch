@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"><title>Session materials</title><link rel="stylesheet" href="src/ui/materials.css"></head>
+<body><main>
+<header><span class="brand">OpenCluely <span>/ Materials</span></span><button id="close" aria-label="Close materials">×</button></header>
+<section class="intro"><p class="eyebrow">OPTIONAL CONTEXT</p><h1>Your references, ready to ask.</h1><p class="muted">Add PowerPoint decks or PDFs to help the AI answer from your material. Google Slides works as an exported PowerPoint or PDF.</p></section>
+<div class="session-bar"><span id="state">No session started</span><strong id="timer">90 minutes when you start</strong></div>
+<p id="status" role="status" aria-live="polite"></p>
+<section class="upload"><div><h2>Add your material</h2><p class="muted">Up to 10 files · 50 MiB each · 250 MiB total</p><p class="small">Up to 250 pages per file and 1,000 pages total. Text and speaker notes are extracted. Charts, images and scanned pages may be missing.</p></div><button id="add" class="primary">Add files</button></section>
+<div class="row"><span id="capacity" class="small">0 / 10 files</span><button id="cancel" hidden>Cancel import</button></div>
+<ul id="documents" aria-label="Imported files"></ul>
+<p id="empty" class="empty">No files yet. You can continue without material.</p>
+<p id="persistence" class="small"></p>
+<section id="start-panel" class="consent-card"><label><input id="consent" type="checkbox"><span>Use these materials with my questions. Relevant excerpts will be sent to the selected AI service.</span></label><p class="small">The fixed 90 minute timer starts when you press Start session. Preparation expires after 30 minutes. While the app is running, expiry clears its local copies. If the app is closed, expired encrypted data is cleared on the next launch. Your original files stay where they are. Your AI provider may retain what you send under its own policy.</p><button id="start" class="primary" disabled>Start session</button></section>
+<footer><button id="skip">Continue without materials</button><button id="end" class="danger" hidden>End session</button></footer>
+<dialog id="preview"><div class="preview-header"><h2 id="preview-title">Source preview</h2><button id="preview-close" aria-label="Close source preview">×</button></div><label for="page">Slide or page</label><div class="row"><input id="page" type="number" min="1" value="1"><button id="open-page">Open source</button></div><p id="preview-coverage" class="small"></p><pre id="preview-text"></pre></dialog>
+</main><script src="src/ui/materials.js"></script></body></html>

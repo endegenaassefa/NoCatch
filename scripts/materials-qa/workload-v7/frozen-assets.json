@@ -1,0 +1,17 @@
+{
+  "version": 7,
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "b242ad98cf1a32c669b3e0e041fac2b785be10618a461231e90311fe6c239f3c",
+      "bytes": 992
+    },
+    "generate.py": {
+      "sha256": "b757cb6da9fea15a723c4e90fee7257458b707f60cacff03baaafb5fdd559258",
+      "bytes": 3169
+    },
+    "workload.cjs": {
+      "sha256": "b576a9a821fc18c2aad0e10579ba7e4e084416a0e2799812728130b342d9e2a6",
+      "bytes": 3337
+    }
+  }
+}

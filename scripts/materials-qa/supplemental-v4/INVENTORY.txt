@@ -1,0 +1,12 @@
+Supplemental v4 independent review regressions. Earlier frozen checks unchanged.
+Tests: fresh expired snapshot permits new preparation, old active snapshot remains stale;
+concurrent import rejects before queuing; directory and POSIX FIFO fail within external 2s subprocess budget;
+managed generation replacement revokes completed GET/SSE, older dispatch/register and pending provider.
+Native main expiry: v3 full isolation+actual main journey, injected main Date.now advances exactly to
+original expiry, then real picker IPC must import and start a new session with a fresh 90-minute deadline.
+Native renderer cancellation: delayed extractor; real Cancel click while import awaits; late result discarded.
+No provider/account. See v2/v3 full-main inventory for external-boundary isolation limits.
+External use: MATERIALS_PROJECT=<worktree> node run.cjs test
+Native Windows: node run.cjs cancel|main --electron <standalone electron.exe> --project <worktree/app.asar>
+For main use --phase first-run or returning. Main-process clock injection intentionally makes renderer
+wall-clock countdown differ after artificial expiry; this test verifies real IPC/lifecycle, not timer copy.

@@ -1,0 +1,1 @@
+Native v9 calibration only: all three DOM assertions unchanged. Wait500ms before screenshot and retain screenshotCaptured/error without blocking subsequent DOM assertions if Windows compositor capture fails. Frozen v9 remains unchanged. Invoke Windows Node scripts/materials-qa/supplemental-v10/run.cjs native <standalone Electron>. No non-native test command in this version.

@@ -1,0 +1,14 @@
+'use strict';
+const {app,BrowserWindow,ipcMain,session}=require('electron'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const PROJECT=process.env.MATERIALS_PROJECT||path.resolve(__dirname,'../../..'),OUT=path.join(__dirname,'results');fs.mkdirSync(OUT,{recursive:true});app.setPath('userData',fs.mkdtempSync(path.join(OUT,'cleanup-profile-')));app.setName('NoCatch Isolated Cleanup Warning QA');
+let win;const report={project:PROJECT,electron:process.versions.electron,checks:[]};const delay=ms=>new Promise(r=>setTimeout(r,ms));
+const status={state:'ended',id:null,expiresAt:null,generation:4,persistence:'memory-only',documents:[],busy:false,error:null,cleanupPending:true,cleanupPersistent:false,remoteCleanupPending:0,limits:{maxFiles:10}};
+app.whenReady().then(async()=>{try{
+ session.defaultSession.webRequest.onBeforeRequest((d,cb)=>cb({cancel:/^https?:/i.test(d.url)}));ipcMain.handle('materials-status',()=>({success:true,status}));
+ win=new BrowserWindow({show:true,width:680,height:800,webPreferences:{preload:path.join(PROJECT,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}});await win.loadFile(path.join(PROJECT,'materials.html'));
+ const text=()=>win.webContents.executeJavaScript("document.querySelector('#persistence').textContent");let warning='';for(let i=0;i<100;i++){warning=await text();if(/pending/i.test(warning))break;await delay(50)}
+ assert.match(warning,/could not be saved|not saved|not durable|cannot be saved/i);assert.match(warning,/keep.*(?:app|application).*open/i);assert.ok(!/recovery is blocked[.!]/i.test(warning),'nonpersistent tombstone must not promise restart blocking');report.nonpersistentWarning=warning;report.checks.push('actual renderer warns cleanup block is not saved and asks to keep app open');
+ await delay(500);try{fs.writeFileSync(path.join(OUT,'cleanup-nonpersistent.png'),await (await win.webContents.capturePage()).toPNG());report.screenshotCaptured=true}catch(error){report.screenshotCaptured=false;report.screenshotError=String(error.message||error)}
+ status.cleanupPersistent=true;win.webContents.send('materials-status-changed',status);await delay(100);warning=await text();assert.match(warning,/recovery is blocked/i);assert.ok(!/could not be saved|not durable/i.test(warning));report.checks.push('durable pending marker displays blocked recovery accurately');
+ status.cleanupPending=false;win.webContents.send('materials-status-changed',status);await delay(100);warning=await text();assert.ok(!/cleanup is pending|keep.*app.*open|recovery is blocked/i.test(warning));report.checks.push('successful retry removes pending warning');report.success=true;
+ }catch(e){report.success=false;report.error=e.stack}finally{win?.destroy();fs.writeFileSync(path.join(OUT,'native-cleanup.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({success:report.success,checks:report.checks}));app.exit(report.success?0:1)}});

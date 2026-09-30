@@ -1,0 +1,18 @@
+{
+  "version": "supplemental-v1/chat-v3",
+  "createdUtc": "2026-09-30T03:57:18.522345+00:00",
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "dca3153e43382ce2a36d75f3961e1f0d17755593f05e7108b555e8140cfa037e",
+      "bytes": 1035
+    },
+    "native-chat.cjs": {
+      "sha256": "e71784ed2c1a2964eb314d3eacc7e6e4b8e5d13cc556749c20955be939ec33ee",
+      "bytes": 7709
+    },
+    "run-native-chat.ps1": {
+      "sha256": "24a810c06bcea43e9366c2917179120593a67f7b84e27d5646125cd8e23250ab",
+      "bytes": 349
+    }
+  }
+}

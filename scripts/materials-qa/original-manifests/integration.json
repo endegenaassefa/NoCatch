@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "createdUtc": "2026-09-30T03:33:47.608437+00:00",
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "6102445f5b3131a501d317119100298d7e4470c4bd98f1a6fea7324f096d29a0",
+      "bytes": 3760
+    },
+    "backend-restart.test.cjs": {
+      "sha256": "567f570350ef657761e6dd71b101c8cff7ae905f9d80455d0ea7a380e159bc18",
+      "bytes": 2782
+    },
+    "helpers.cjs": {
+      "sha256": "34685544b816a177f5cc7b62efe34d5fd1f9e9e75ac135f48dec8451450613bb",
+      "bytes": 1680
+    },
+    "main-boundary.test.cjs": {
+      "sha256": "064c47b39d7914925c8f62e0ddfd6aaa94b01b9cb2e7ce0ffb606c2dcc433397",
+      "bytes": 4645
+    },
+    "managed-client.test.cjs": {
+      "sha256": "73576ae4546a8d5652985dcc45b65887a1024b4be86f76b6be808e9533e83247",
+      "bytes": 3540
+    },
+    "native-renderer.cjs": {
+      "sha256": "9a0de32148ba110a8375bb5965bfda3fa02ff7a46f24a7d3056789a69e0461be",
+      "bytes": 8168
+    },
+    "routing.test.cjs": {
+      "sha256": "6293050ce31974df3b2e3438458339f65fb46aa3988f653bce77de600e2cca3b",
+      "bytes": 4195
+    },
+    "run-supplemental.py": {
+      "sha256": "c5e67554dafb92d5d8b23912843034a22bcf070dce1713729eeb9861d5901462",
+      "bytes": 858
+    },
+    "setup.test.cjs": {
+      "sha256": "927ff8c664586b1a3c18a2e262fce54131a5ae8f2433535c31e6d0cba5ed40fc",
+      "bytes": 2824
+    }
+  }
+}

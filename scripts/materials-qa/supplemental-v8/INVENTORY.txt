@@ -1,0 +1,5 @@
+Independent cleanup retry acceptance, authored before implementation.
+Run: node scripts/materials-qa/supplemental-v8/run.cjs
+Seven production-boundary checks: real encrypted store with DELETE and unlink failures, synchronous content invalidation, visible pending state, bounded retries, restart-before-decrypt gate and successful cleanup; actual managed auth loopback with injected HTTP transport, durable content-free queue, revision ordering/immutable deadline, terminal end precedence, restart and owner isolation, expiry dropping, 64-entry/64KiB cap, sign-out during cleanup prevents the next dispatch.
+No live identity/provider calls: HTTPS endpoints are entirely intercepted and only OAuth callback uses loopback. safeStorage is a cryptographic OS-boundary stand-in. Fault injection patches only the test process DB/file boundary. Native safeStorage and renderer behavior covered by separate native journeys.
+Generated results are ignored. Frozen initial and supplemental v1-v7 assets unchanged.

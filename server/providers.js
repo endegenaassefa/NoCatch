@@ -1,6 +1,7 @@
-﻿'use strict';
+'use strict';
 const { PromptLoader } = require('../prompt-loader');
 const prompts = new PromptLoader();
+const { formatMaterialContext } = require('../src/materials/context');
 const failure = (code, message) => Object.assign(new Error(message), { code });
 
 // Streaming upstream response parser bounds wire bytes and individual events.
@@ -37,15 +38,19 @@ async function readSSE(response, signal, consume) {
 function createProvider(config, testEndpoints = {}) {
   prompts.loadPrompts();
   return async function generate(input, { signal, onDelta }) {
-    const system = input.skill === 'general'
+    if(input.image && input.provider==='deepseek')throw failure('image_not_supported','Choose Gemini for image questions.');
+    const material = input.materialContext ? formatMaterialContext(input.materialContext) : null;
+    let system = input.skill === 'general'
       ? 'You are a helpful assistant. Answer the user clearly and accurately.'
       : prompts.getSkillPrompt(input.skill, input.language);
     if (!system) throw failure('invalid_skill', 'Unknown skill.');
+    if(material)system += '\n'+material.instruction;
     let url, headers, body, finished = false;
     if (input.provider === 'gemini') {
       url = testEndpoints.gemini || `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.geminiModel)}:streamGenerateContent?alt=sse`;
       headers = { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey };
       const parts = [{ text: input.text || 'Describe the image and answer the question shown.' }];
+      if(material)parts.push({text:material.text});
       if (input.image) parts.push({ inlineData: input.image });
       body = { systemInstruction: { parts: [{ text: system }] },
         contents: [...input.history.map(turn => ({ role: turn.role === 'assistant' ? 'model' : 'user', parts: [{ text: turn.content }] })), { role: 'user', parts }],
@@ -54,10 +59,11 @@ function createProvider(config, testEndpoints = {}) {
       url = testEndpoints.deepseek || 'https://api.deepseek.com/chat/completions';
       headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${config.deepseekKey}` };
       body = { model: config.deepseekModel, stream: true, max_tokens: config.limits.outputTokens,
-        messages: [{ role: 'system', content: system }, ...input.history, { role: 'user', content: input.text }] };
+        messages: [{ role: 'system', content: system }, ...input.history, { role: 'user', content: input.text }, ...(material?[{role:'user',content:material.text}]:[])] };
     }
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal, redirect: 'error' });
     await readSSE(response, signal, data => {
+      if(input.materialContext && Date.now()>=input.materialContext.expiresAt)throw failure('material_expired','This material session expired.');
       if (data === '[DONE]') { finished = true; return; }
       let message;
       try { message = JSON.parse(data); } catch { throw failure('provider_error', 'The AI provider returned an invalid response.'); }
@@ -79,6 +85,7 @@ function createProvider(config, testEndpoints = {}) {
         }
       }
     });
+    if(input.materialContext && Date.now()>=input.materialContext.expiresAt)throw failure('material_expired','This material session expired.');
     if (!finished) throw failure('provider_interrupted', 'The AI provider stream ended unexpectedly.');
   };
 }

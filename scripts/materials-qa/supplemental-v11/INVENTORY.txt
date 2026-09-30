@@ -1,0 +1,4 @@
+One actual main IPC boundary check. Run node scripts/materials-qa/supplemental-v11/run.cjs
+Loads real ApplicationController class and registers real setupIPCHandlers; actual MaterialsManager imports real PPTX/PDF fixture workers. External Electron picker and authenticated managed-status boundaries are deterministic; actual trusted-renderer validation accepts only the fixture materials.html frame. No account/provider/network calls.
+Import/start/remove/cancel/end plus cancelled picker action replies must carry remoteCleanupPending2/remoteCleanupPersistentfalse consistently with broadcasts, preventing action() from erasing a previously displayed warning. A non-material status-returning IPC remains unchanged.
+Existing53 frozen QA files remain unchanged.

@@ -1,0 +1,4 @@
+fixtures/
+results/
+**/results/
+__pycache__/

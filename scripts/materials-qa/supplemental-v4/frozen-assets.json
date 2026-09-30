@@ -1,0 +1,29 @@
+{
+  "version": 4,
+  "files": {
+    "INVENTORY.txt": {
+      "sha256": "83d7bd8769621ae3d6d9936a888c5eb1d9d293f2902f0f44cf2368357e2b3fdc",
+      "bytes": 1176
+    },
+    "full-main-expiry.cjs": {
+      "sha256": "bbd094cf0192ec744d955966bd983f659517a5553ff8013a95ea0f794d039386",
+      "bytes": 10440
+    },
+    "generation.test.cjs": {
+      "sha256": "065cc9e7fe034e189b4a3a0e1e244f1355d6e9bee1814ca3e88da53fc43e8417",
+      "bytes": 3641
+    },
+    "lifecycle.test.cjs": {
+      "sha256": "c72e54e24367ae0f3348609c069a2532926bd118bc6762a9356f626c2daaa3d8",
+      "bytes": 3377
+    },
+    "native-cancel.cjs": {
+      "sha256": "245f9d07cdeaa0405b09346455d677dc6316731df3f283d5c3fba695d45e9e48",
+      "bytes": 2808
+    },
+    "run.cjs": {
+      "sha256": "22215852daf2fd189bd6903c8341b87f96b453f0c3f6bdac2776e14885c76ca2",
+      "bytes": 1389
+    }
+  }
+}

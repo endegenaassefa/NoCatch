@@ -45,9 +45,9 @@ The baseline preserves the existing keyword algorithm, with capacity raised to a
 
 Both candidates fail the independently selected retrieval acceptance gates. The local candidate's uncalibrated zero-logit relevance filter discarded useful evidence: nine answerable questions had no final excerpts, and none of the eight multi-evidence questions received all required evidence. A faster or more articulate answer model cannot fix that missing context. The next retrieval experiment must assess evidence selection, not merely swap embedding models.
 
-**The semantic candidate is not connected to application answering or the installed launcher.** `MaterialsManager.search()` and its worker are an experimental benchmark path. Existing application routing still calls the historical `retrieve()`. Do not market the candidate as an upgrade until it passes retrieval and answer-quality checks.
+**The rejected semantic experiment is preserved at Git commit `5fc14c1ec692ee39f1c9ee8e18cb2df27f121f8c` and removed from active application code.** Its `MaterialsManager.search()` and worker exist at that checkpoint for reproduction. Active application routing still uses the historical keyword `retrieve()`. The installed launcher has not been updated. A stronger retrieval implementation remains unfinished.
 
-Model revisions are pinned in `src/materials/search-worker.js`. Public model weights are cached separately from materials; vectors and searchable passages stay in worker memory. The first model download is excluded from the measured warm-cache run. Transformers/ONNX is a development-only benchmark dependency, excluded from production dependencies. It adds substantial local development size; the observed installed runtime dependencies are roughly 350 MB, separate from about 60 MB of model weights. A hosted embedding API may be the better product tradeoff.
+At the experimental checkpoint, model revisions are pinned in `src/materials/search-worker.js`. Public model weights are cached separately from materials; vectors and searchable passages stay in worker memory. The first model download is excluded from the measured warm-cache run. Transformers/ONNX was a development-only benchmark dependency at that checkpoint; it is absent from the active package manifest. It adds substantial local development size; the observed installed runtime dependencies are roughly 350 MB, separate from about 60 MB of model weights. A hosted embedding API may be the better product tradeoff.
 
 ## Actual answer and image checks
 
@@ -70,10 +70,11 @@ Total live work so far: **82 requests, $0.08440 conservative token-based estimat
 ## Engineering checks
 
 - The accepted-file cap is now 11; aggregate pages remain 1,000, including a possible 1,000-page individual PDF. Existing byte/text limits remain enforced.
-- Independent new lifecycle suites: 17/17 passed after repairing manager validation of source identities, session metadata and context size, prompt cancellation during a shared build, visible query failures, and opt-in candidate diagnostics. Ordinary queries expose only scoped excerpts; developer diagnostics have a separate 24-candidate/64 KiB limit.
+- Experimental checkpoint only: independent lifecycle suites passed 17/17 after repairing manager validation of source identities, session metadata and context size, prompt cancellation during a shared build, visible query failures, and opt-in candidate diagnostics. Ordinary queries expose only scoped excerpts; developer diagnostics have a separate 24-candidate/64 KiB limit.
 - Separate capacity checks: 3/3 passed, including the 4 MiB decoded-text boundary and aggregate page overflow.
 - Prior core acceptance suite: 28/30 passed. The two failures assert the superseded ten-file and 250-page limits. The old tests were preserved; they were not edited to hide the changed contract.
-- Semantic results are not a shipping gate pass. No new installer, launcher replacement, six-user concurrency result, real-course result or visual understanding result is claimed.
+- Independent code review additionally found that cancelling an active experimental query closes its shared worker and disrupts other queries. The controlled lifecycle checks do not establish real-worker concurrency safety. The experiment was parked instead of enabled.
+- Semantic results are not a shipping gate pass. No new installer, launcher replacement, six-user concurrency result, real-course result or application visual-retrieval result is claimed.
 
 ## Budget and next comparison
 
@@ -88,7 +89,7 @@ For context, six users × 12 sessions/month × 30 questions/session, with 8K inp
 Evidence root: `/mnt/c/users/your-user/Documents/NoCatch-session-materials-evidence-20260929/retrieval-v2`.
 
 - `qa/freeze.json`: immutable corpus/scorer hashes; `python3 qa/freeze.py --verify` checks them.
-- `qa/results/lexical-run.json`, `lexical-score.json`, `local-run.json`, `local-score.json`: raw retrieval outputs and independent scores.
+- `qa/results/lexical-run.json`, `lexical-score.json`, `local-run.json`, `local-score.json`, `local-hardened-run.json`, `local-hardened-score.json`: raw retrieval outputs and independent scores.
 - `qa/extensions/adapter-v1`: thin wrappers exercising real imports and manager methods; no gold sent to retrieval.
 - `qa/extensions/answer-v1`: separately frozen fixed-context answer comparison, no gold sent to providers.
 - `qa/results/lifecycle-final.log`: actual new lifecycle checks.

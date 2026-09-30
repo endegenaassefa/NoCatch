@@ -40,7 +40,6 @@
     "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@huggingface/transformers": "3.8.1",
     "electron": "^44.4.4",
     "electron-builder": "26.15.3",
     "js-yaml": "4.3.2"

@@ -10,6 +10,16 @@ param(
   [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedExeSha256
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 Get-FileHash can inherit WhatIf and return no hash.
+# Reading bytes through .NET keeps validation active during a dry run.
+function Get-PayloadHash([string]$Path) {
+  $algorithm = [Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($Path)
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $stream.Dispose() }
+  } finally { $algorithm.Dispose() }
+}
 $PackagePath = [IO.Path]::GetFullPath($PackagePath).TrimEnd('\')
 $InstallPath = [IO.Path]::GetFullPath($InstallPath).TrimEnd('\')
 $BackupPath = [IO.Path]::GetFullPath($BackupPath).TrimEnd('\')
@@ -18,7 +28,7 @@ foreach ($a in $paths) {
   if ($a.Length -le [IO.Path]::GetPathRoot($a).Length) { throw 'A drive root is not an application directory.' }
   $ancestor = $a
   while ($ancestor) {
-    if ((Test-Path -LiteralPath $ancestor) -and ((Get-Item -LiteralPath $ancestor).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    if ((Test-Path -LiteralPath $ancestor) -and ((Get-Item -Force -LiteralPath $ancestor).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
       throw 'Directory links are not supported in installation paths.'
     }
     $ancestor = Split-Path -Parent $ancestor
@@ -35,7 +45,7 @@ if (Test-Path -LiteralPath $BackupPath) { throw 'Backup already exists; preserve
 if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'screen-reader-util.exe'))) { throw 'Existing installation not found.' }
 if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'resources\app.asar'))) { throw 'Existing app archive not found.' }
 foreach ($p in @($PackagePath, $InstallPath)) {
-  if ((Get-Item -LiteralPath $p).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Directory links are not supported.' }
+  if ((Get-Item -Force -LiteralPath $p).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Directory links are not supported.' }
 }
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 if ($manifest.Count -lt 2) { throw 'The independent package manifest is empty or incomplete.' }
@@ -54,7 +64,7 @@ function Assert-Candidate([string]$Directory) {
   if ($files.Count -ne $expected.Count) { throw 'Package file count differs from the independent manifest.' }
   foreach ($file in $files) {
     $relative = $file.FullName.Substring($Directory.Length + 1).Replace('\', '/')
-    if (-not $expected.ContainsKey($relative) -or (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne $expected[$relative]) {
+    if (-not $expected.ContainsKey($relative) -or (Get-PayloadHash $file.FullName) -ne $expected[$relative]) {
       throw ('Package payload differs from the independent manifest: ' + $relative)
     }
   }
@@ -62,7 +72,7 @@ function Assert-Candidate([string]$Directory) {
     @('screen-reader-util.exe', $ExpectedExeSha256),
     @('resources\app.asar', $ExpectedArchiveSha256)
   )) {
-    $actual = (Get-FileHash -LiteralPath (Join-Path $Directory $entry[0]) -Algorithm SHA256).Hash
+    $actual = Get-PayloadHash (Join-Path $Directory $entry[0])
     if ($actual -ne $entry[1]) { throw ('Candidate identity differs from the verified build: ' + $entry[0]) }
   }
 }
@@ -81,10 +91,10 @@ try {
   Assert-Candidate $InstallPath
   $uninstaller = Join-Path $BackupPath 'Uninstall screen-reader-util.exe'
   if (Test-Path -LiteralPath $uninstaller) {
-    if ((Get-Item -LiteralPath $uninstaller).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Existing uninstaller must be an ordinary file.' }
-    $uninstallerHash = (Get-FileHash -LiteralPath $uninstaller -Algorithm SHA256).Hash
+    if ((Get-Item -Force -LiteralPath $uninstaller).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Existing uninstaller must be an ordinary file.' }
+    $uninstallerHash = Get-PayloadHash $uninstaller
     Copy-Item -LiteralPath $uninstaller -Destination $InstallPath
-    if ((Get-FileHash -LiteralPath (Join-Path $InstallPath 'Uninstall screen-reader-util.exe') -Algorithm SHA256).Hash -ne $uninstallerHash) { throw 'Existing uninstaller copy differs.' }
+    if ((Get-PayloadHash (Join-Path $InstallPath 'Uninstall screen-reader-util.exe')) -ne $uninstallerHash) { throw 'Existing uninstaller copy differs.' }
   }
 } catch {
   $originalFailure = $_.Exception.Message

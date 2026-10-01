@@ -2,7 +2,7 @@
 
 ## Current branch
 
-`feature/semantic-materials-retrieval`, built from `468cd75`. The installed launcher and original checkout have not been replaced. Source integration is implemented; this is not a release qualification or six-person beta result.
+`feature/semantic-materials-retrieval`, built from `468cd75`. The measurements below describe source-level evaluation. Subsequent Windows packaging, local installation and desktop-launcher evidence are recorded in [Local Windows package](local-windows-package.md). The original checkout is unchanged; a six-person beta remains untested.
 
 ### Answer paths
 

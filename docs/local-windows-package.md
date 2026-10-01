@@ -41,14 +41,43 @@ Existing settings and API keys belong in the user's profile and are never includ
 
 The public pinned E5 weights are cached per profile. New machines may download them during preparation; failed model loading produces a visible keyword-search fallback. On this machine the public cache was seeded and hash-verified before rollout.
 
+## Desktop launcher
+
+`scripts/launch-local-windows.cjs` targets the installed EXE under `%LOCALAPPDATA%/Programs/screen-reader-util`. It uses the existing `NoCatch-Clean-Slate-Exam` profile by default. `--check` verifies dependencies without reading keys or launching. The optional `--model-dir` argument retains this machine's existing public Whisper model cache in manual recording mode.
+
+The saved profile's provider and key take priority. A key from the normal app profile is an in-memory fallback only when its normalized endpoint matches; it is never copied into the package or written into the new profile. This prevents the former launcher from forcing DeepSeek after a user selects Qwen. The regular installed-app shortcut remains independent of this development checkout.
+
 ## Defects found during package qualification
 
 - Reopening Materials after using Continue without materials left its preview handler permanently closed. Closing now invalidates pending requests; only unloading destroys the handler. Both successful and failed late replies are guarded by the request version.
 - Windows PowerShell 5.1 treated a wrapped JSON manifest array as one entry. Independent installation tests caught the issue before any real binary replacement; manifest parsing was corrected.
+- The real installation preflight exposed two Windows-specific issues: hidden AppData ancestors required `Get-Item -Force`, and a fresh PowerShell process suppressed `Get-FileHash` under `-WhatIf`. Read-only .NET hashing now verifies the complete payload during dry runs. Independent regressions reproduce both failures against the original code.
 - Local deployment now checks every packaged file, including native DLLs and the speech runtime, and reports recovery paths if rollback fails.
 
 Live DeepSeek calls in this packaging run repeatedly received no answer before their deadlines. A separate Windows request returned HTTP 200 and SSE keep-alive comments, and the older HTTPS client also timed out. This is consistent with DeepSeek's documented [request keep-alive mechanism](https://api-docs.deepseek.com/quick_start/rate_limit). It does not establish a service-wide outage. The packaged no-files UI stopped its spinner and showed an error after its 90-second deadline. Earlier successful source-level evaluations remain historical evidence; they do not turn these failed live attempts into passes.
 
 ## Completion record
 
-Packaging and actual-EXE qualification are in progress. No installed-launcher completion claim is made yet.
+The complete Windows application was built from runtime commit `ba24f29` and installed locally on October 1, 2026. The deployment helper verifies all 16,021 independently hashed package files before and after the directory swap. The regular installed-app shortcut targets the new binaries. The existing **NoCatch Clean Slate Exam** desktop shortcut now runs the versioned local wrapper through its existing VBS launcher.
+
+| Artifact | Location / identity |
+| --- | --- |
+| Installed EXE | `C:\Users\your-user\AppData\Local\Programs\screen-reader-util\screen-reader-util.exe` |
+| EXE SHA256 | `e7fc71f92ab925514a67c4abdc1fda72a8bb9396c60f90088f66ae2f6367777c` |
+| Installed ASAR SHA256 | `33f9bb9f718a1a49fd131a56a3e5aa95ab2af682dcaf811ef6aaeaa5f2cec602` |
+| Installer | `dist/session-materials/OpenCluely-Setup-1.0.0-x64.exe` (417,134,340 bytes) |
+| Installer SHA256 | `16ccce02465e107b9ba4e40eb31d46743202cd5731e7ede9e92bc73194dfcef2` |
+
+Independent checks passed for the complete archive, actual packaged PDF rendering, two consecutive E5 semantic-search processes, and the Windows EXE journey: skip materials, reopen, native file picker, import a 49-page PDF, prepare hybrid search, start the session, preview an original page, close/reopen, end/clear and quit. Cleanup confirmed no remaining synthetic material/session rows or owned processes. Additional checks covered launcher provider routing (10), deployment/rollback including calibrated Windows failures (8), and preview lifecycle handling (3 positive cases plus broken controls). Existing packaging regressions passed 33/33.
+
+After installation, QA launched the actual existing Desktop shortcut. Native Windows UI Automation confirmed the visible **Session materials** window and its **Add files** and **Continue without materials** controls. The running installed EXE/ASAR hashes matched the qualified package. QA then opened Settings and invoked Quit; no installed app processes remained. This ordinary shortcut check used no debugging port, question submission or microphone action.
+
+Both final packaged live-answer attempts timed out at 90 seconds; errors appeared and spinners cleared. Successful live answers, the 5–10 second response target, Qwen with a real key, and a six-person real-course beta remain unqualified. The NSIS installer was built but its fresh-machine installation UI was not exercised; this machine uses the verified local directory replacement.
+
+All four existing `.env` and setup-state files had identical hashes before installation, after installation, and after the actual shortcut launch/quit. The normal and Clean Slate profiles remain separate. Public E5 cache files were added; original course files were not modified. Reproducible old build outputs were removed for space, with the deletion inventory retained in `space-cleanup.json` in the evidence directory.
+
+### Recovery
+
+Prior installed binaries remain at `C:\Users\your-user\AppData\Local\Programs\screen-reader-util.previous-materials-20261001`. Close every app process before recovery. Rename the current `screen-reader-util` directory to a new unused path, then rename that retained previous directory back to `screen-reader-util`. Do not run an uninstaller or delete the profile directories. Restore the original VBS from the evidence directory's `rollback/NoCatch-Clean-Slate-Exam.vbs` if returning the Clean Slate shortcut to its old build. The old Clean Slate build and original launcher CJS are retained.
+
+The raw qualification record is `qa/results/qualification.json`; `install-whatif-v3.log` and `install-result.json` record the successful real preflight and installation. Earlier failed preflights and provider requests are preserved alongside them.

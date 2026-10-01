@@ -55,6 +55,7 @@ class ConfigManager {
             thinkingConfig: { thinkingBudget: 0 }
           }
         },
+        qwen: {baseUrl:'https://dashscope-us.aliyuncs.com/compatible-mode/v1',model:'qwen3.8-flash',fallbackModels:[],fallbackEnabled:false,generation:{maxOutputTokens:4096}},
         deepseek: {
           baseUrl: 'https://api.deepseek.com',
           model: 'deepseek-flash',

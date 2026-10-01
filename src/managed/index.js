@@ -11,7 +11,7 @@ const { MaterialCleanup } = require('./material-cleanup');
 function safeAccount(data) {
   if (!data || typeof data.subject !== 'string' || !data.subject || data.subject.length > 512) throw new ManagedError('invalid_response');
   const numbers = value => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).filter(([k, v]) => /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(k) && typeof v === 'number' && Number.isFinite(v)).slice(0, 32));
-  return { subject: data.subject, providers: Array.isArray(data.providers) ? data.providers.filter(p => ['gemini', 'deepseek'].includes(p)) : [], limits: numbers(data.limits), usage: numbers(data.usage) };
+  return { providerCapabilities: Object.fromEntries(['gemini','deepseek','qwen'].map(p=>[p,{vision:data.providerCapabilities?.[p]?.vision === true,contextTokens:Number.isSafeInteger(data.providerCapabilities?.[p]?.contextTokens)?data.providerCapabilities[p].contextTokens:null}])), subject: data.subject, providers: Array.isArray(data.providers) ? data.providers.filter(p => ['gemini', 'deepseek', 'qwen'].includes(p)) : [], limits: numbers(data.limits), usage: numbers(data.usage) };
 }
 function requestId(value) { if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(value)) throw new ManagedError('invalid_response'); return value; }
 

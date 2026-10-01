@@ -18,12 +18,28 @@ class LLMService {
   }
 
   initializeClient() {
+    this.isInitialized = false;
+    this.client = null;
+    this.deepseekClient = null;
+    this.qwenClient = null;
     // LLM_PROVIDER wins at runtime (settings persist it to .env and
     // process.env), falling back to the config default ('gemini').
     const provider = String(process.env.LLM_PROVIDER || config.get('llm.provider') || 'gemini')
       .trim()
       .toLowerCase();
 
+    if (!require('../core/ai-providers').isProvider(provider)) {this.provider=provider;logger.warn('Unknown AI provider');return;}
+    if (provider === 'qwen') {
+      this.provider = 'qwen';
+      try {
+        const route = require('../core/ai-providers').resolveProvider({provider});
+        this.model = route.model;
+        if (!route.apiKey || /your.*key/i.test(route.apiKey)) return;
+        this.qwenClient = new DeepSeekClient({...route, maxRetries: 1, generation: {maxOutputTokens:4096}});
+        this.isInitialized = true;
+      } catch { logger.warn('Invalid Qwen configuration'); }
+      return;
+    }
     if (provider === 'deepseek') {
       this._initializeDeepSeekClient();
       return;
@@ -46,7 +62,7 @@ class LLMService {
       this.client = new GoogleGenAI({ apiKey });
       
       // Use the configured model name (default: gemini-3.5-flash)
-      this.model = config.get('llm.gemini.model');
+      this.model = process.env.GEMINI_MODEL || config.get('llm.gemini.model');
       this.isInitialized = true;
       
       logger.info('Gemini AI client initialized successfully', {
@@ -64,7 +80,7 @@ class LLMService {
 
     this.provider = 'deepseek';
     this.client = null;
-    this.model = config.get('llm.deepseek.model') || 'deepseek-flash';
+    this.model = process.env.DEEPSEEK_MODEL || config.get('llm.deepseek.model') || 'deepseek-flash';
 
     if (!apiKey || apiKey === 'your-api-key-here') {
       logger.warn('DeepSeek API key not configured', {
@@ -80,7 +96,7 @@ class LLMService {
       this.deepseekClient = new DeepSeekClient({
         apiKey,
         model: this.model,
-        baseUrl: config.get('llm.deepseek.baseUrl'),
+        baseUrl: require('../core/ai-providers').resolveProvider({provider:'deepseek', model:this.model}).baseUrl,
         timeout: config.get('llm.deepseek.timeout'),
         maxRetries: config.get('llm.deepseek.maxRetries'),
         fallbackModels: config.get('llm.deepseek.fallbackModels') || [],
@@ -101,17 +117,19 @@ class LLMService {
     }
   }
 
-  _isDeepSeek() {
-    return this.provider === 'deepseek';
+  _isDeepSeek() { return this.provider === 'deepseek'; }
+
+  _isOpenAICompatible() {
+    return ['deepseek', 'qwen'].includes(this.provider);
   }
 
   _fallbackEnabled() {
-    const enabled = config.get(this._isDeepSeek() ? 'llm.deepseek.fallbackEnabled' : 'llm.gemini.fallbackEnabled');
+    const enabled = config.get(this.provider==='qwen' ? 'llm.qwen.fallbackEnabled' : this._isOpenAICompatible() ? 'llm.deepseek.fallbackEnabled' : 'llm.gemini.fallbackEnabled');
     return enabled !== false;
   }
 
   getGenerationConfig(overrides = {}) {
-    const section = this._isDeepSeek() ? 'llm.deepseek.generation' : 'llm.gemini.generation';
+    const section = this.provider==='qwen' ? 'llm.qwen.generation' : this._isOpenAICompatible() ? 'llm.deepseek.generation' : 'llm.gemini.generation';
     const defaults = config.get(section) || {};
     const fallback = {
       temperature: 0.7,
@@ -195,6 +213,7 @@ class LLMService {
       throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
+    if (!require('../core/ai-providers').getProviderCapabilities(this.provider,this.model,(this.qwenClient || this.deepseekClient)?.baseUrl).vision) throw new Error('The selected model does not support images.');
     if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
       throw new Error('Invalid image buffer provided to processImageWithSkill');
     }
@@ -230,8 +249,8 @@ class LLMService {
 
       // Execute with retries/timeout - try alternative method first for network reliability
       let responseText;
-      if (this._isDeepSeek()) {
-        responseText = await this._executeDeepSeek(request);
+      if (this._isOpenAICompatible()) {
+        responseText = await this._executeCompatible(request);
       } else {
       const preferAlternative = !!config.get('llm.gemini.enableFallbackMethod');
       try {
@@ -300,6 +319,7 @@ class LLMService {
       throw new Error('LLM service not initialized. Check your API key configuration in Settings.');
     }
 
+    if (!require('../core/ai-providers').getProviderCapabilities(this.provider,this.model,(this.qwenClient || this.deepseekClient)?.baseUrl).vision) throw new Error('The selected model does not support images.');
     if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
       throw new Error('Invalid image buffer provided to processImageWithSkillStream');
     }
@@ -404,8 +424,8 @@ If the visible task is not a coding problem, ignore coding-only instructions in 
 
       const preferAlternative = !!config.get('llm.gemini.enableFallbackMethod');
       let response;
-      if (this._isDeepSeek()) {
-        response = await this._executeDeepSeek(geminiRequest);
+      if (this._isOpenAICompatible()) {
+        response = await this._executeCompatible(geminiRequest);
       } else {
       try {
         if (preferAlternative) {
@@ -543,8 +563,8 @@ If the visible task is not a coding problem, ignore coding-only instructions in 
 
       const preferAlternative = !!config.get('llm.gemini.enableFallbackMethod');
       let response;
-      if (this._isDeepSeek()) {
-        response = await this._executeDeepSeek(geminiRequest);
+      if (this._isOpenAICompatible()) {
+        response = await this._executeCompatible(geminiRequest);
       } else {
       try {
         if (preferAlternative) {
@@ -932,11 +952,11 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
    * The DeepSeekClient translates contents/systemInstruction into OpenAI
    * chat messages internally.
    */
-  async _executeDeepSeek(geminiRequest) {
-    if (!this.deepseekClient) {
+  async _executeCompatible(geminiRequest) {
+    if (!(this.qwenClient || this.deepseekClient)) {
       throw new Error('DeepSeek client not initialized. Check your DeepSeek API key.');
     }
-    return this.deepseekClient.executeNonStreaming(geminiRequest);
+    return (this.qwenClient || this.deepseekClient).executeNonStreaming(geminiRequest);
   }
 
   /**
@@ -944,11 +964,11 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
    * callback that receives each text delta.
    */
   _executeStreaming(geminiRequest, onDelta) {
-    if (this._isDeepSeek()) {
-      if (!this.deepseekClient) {
+    if (this._isOpenAICompatible()) {
+      if (!(this.qwenClient || this.deepseekClient)) {
         return Promise.reject(new Error('DeepSeek client not initialized. Check your DeepSeek API key.'));
       }
-      return this.deepseekClient.executeStreaming(geminiRequest, onDelta);
+      return (this.qwenClient || this.deepseekClient).executeStreaming(geminiRequest, onDelta);
     }
     return this.executeStreamingRequest(geminiRequest, onDelta);
   }
@@ -1307,8 +1327,8 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     // Quick connectivity check
     try {
       const startTime = Date.now();
-      const host = this._isDeepSeek() ? 'api.deepseek.com' : 'generativelanguage.googleapis.com';
-      const name = this._isDeepSeek() ? 'DeepSeek API Endpoint' : 'Gemini API Endpoint';
+      const host = this.provider==='qwen' ? new URL(this.qwenClient.baseUrl).hostname : this._isOpenAICompatible() ? 'api.deepseek.com' : 'generativelanguage.googleapis.com';
+      const name = this.provider==='qwen' ? 'Qwen API Endpoint' : this._isOpenAICompatible() ? 'DeepSeek API Endpoint' : 'Gemini API Endpoint';
       await this.testNetworkConnection({ 
         host, 
         port: 443, 
@@ -1396,8 +1416,8 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     const connectivityTests = [
       { host: 'google.com', port: 443, name: 'Google (HTTPS)' }
     ];
-    connectivityTests.push(this._isDeepSeek()
-      ? { host: 'api.deepseek.com', port: 443, name: 'DeepSeek API Endpoint' }
+    connectivityTests.push(this._isOpenAICompatible()
+      ? { host: this.provider==='qwen' ? new URL(this.qwenClient.baseUrl).hostname : 'api.deepseek.com', port: 443, name: this.provider==='qwen' ? 'Qwen API Endpoint' : 'DeepSeek API Endpoint' }
       : { host: 'generativelanguage.googleapis.com', port: 443, name: 'Gemini API Endpoint' });
 
     const results = await Promise.allSettled(
@@ -1513,8 +1533,8 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       return { success: false, error: 'Service not initialized' };
     }
 
-    if (this._isDeepSeek()) {
-      return this._testDeepSeekConnection();
+    if (this._isOpenAICompatible()) {
+      return this._testCompatibleConnection();
     }
 
     try {
@@ -1608,7 +1628,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
    * through the DeepSeekClient. Returns the same { success, error, ... }
    * shape the UI expects.
    */
-  async _testDeepSeekConnection() {
+  async _testCompatibleConnection() {
     try {
       const networkCheck = await this.checkNetworkConnectivity();
 
@@ -1618,7 +1638,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       };
 
       const startTime = Date.now();
-      const text = await this._executeDeepSeek(request);
+      const text = await this._executeCompatible(request);
       const latency = Date.now() - startTime;
 
       logger.info('DeepSeek connection test successful', {
@@ -1657,8 +1677,9 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   _friendlyTestError(error, analysis) {
     const type = analysis?.type;
     const raw = (error?.message || '').toLowerCase();
-    const isDeepSeek = this._isDeepSeek();
-    const providerName = isDeepSeek ? 'DeepSeek' : 'Gemini';
+    const isDeepSeek = this._isOpenAICompatible();
+    const providerName = this.provider === 'qwen' ? 'Qwen' : isDeepSeek ? 'DeepSeek' : 'Gemini';
+    if (this.provider === 'qwen') return 'Qwen connection failed. Check the endpoint, regional API key and model, then try again.';
 
     if (type === 'NETWORK_ERROR' || raw.includes('fetch failed') || raw.includes('enotfound')) {
       return isDeepSeek
@@ -1685,7 +1706,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       return `${providerName} is experiencing high demand. Please wait a moment and try again.`;
     }
     // Fall back to a stripped-down raw message (no SDK prefix noise)
-    return (error?.message || 'Connection failed').replace(/^\[(GoogleGenerativeAI|GoogleGenAI) Error\]:\s*/i, '');
+    return 'Connection failed. Check the selected provider endpoint, model and API key.';
   }
 
   updateApiKey(newApiKey) {
@@ -1695,7 +1716,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     const activeProvider = String(process.env.LLM_PROVIDER || config.get('llm.provider') || 'gemini')
       .trim()
       .toLowerCase();
-    const envKey = activeProvider === 'deepseek' ? 'DEEPSEEK_API_KEY' : 'GEMINI_API_KEY';
+    const envKey = activeProvider === 'qwen' ? 'QWEN_API_KEY' : activeProvider === 'deepseek' ? 'DEEPSEEK_API_KEY' : 'GEMINI_API_KEY';
     process.env[envKey] = newApiKey;
     this.isInitialized = false;
     this.initializeClient();
@@ -1704,7 +1725,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   getStats() {
-    const activeSection = this._isDeepSeek() ? 'llm.deepseek' : 'llm.gemini';
+    const activeSection = this.provider==='qwen' ? 'llm.qwen' : this._isOpenAICompatible() ? 'llm.deepseek' : 'llm.gemini';
     return {
       isInitialized: this.isInitialized,
       provider: this.provider || 'gemini',

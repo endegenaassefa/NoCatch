@@ -37,8 +37,9 @@ class FirstRunManager {
   _hasLlmKey(env) {
     const gemini = (env.GEMINI_API_KEY || '').trim();
     const deepseek = (env.DEEPSEEK_API_KEY || '').trim();
+    const qwen = (env.QWEN_API_KEY || '').trim();
     return (!!gemini && gemini !== 'your_gemini_api_key_here') ||
-      (!!deepseek && deepseek !== 'your_deepseek_api_key_here');
+      (!!deepseek && deepseek !== 'your_deepseek_api_key_here') || (!!qwen && !/your.*key/i.test(qwen));
   }
 
   /**
@@ -87,6 +88,7 @@ class FirstRunManager {
     const env = this._readEnv();
     const gemini = (env.GEMINI_API_KEY || '').trim();
     const deepseek = (env.DEEPSEEK_API_KEY || '').trim();
+    const qwen = (env.QWEN_API_KEY || '').trim();
 
     // Placeholder values (your_*_here) are NOT real configuration — the
     // previous logic counted them as configured, which made the app believe
@@ -118,6 +120,8 @@ class FirstRunManager {
       sentinelExists: fs.existsSync(this.sentinelPath),
       geminiConfigured: !!gemini && !isPlaceholder(gemini),
       deepseekConfigured: !!deepseek && !isPlaceholder(deepseek),
+      qwenConfigured: !!qwen && !isPlaceholder(qwen),
+      providerCapabilities: Object.fromEntries(['gemini','deepseek','qwen'].map(provider => [provider,require('./ai-providers').getProviderCapabilities(provider,env[provider.toUpperCase()+'_MODEL'],env[provider.toUpperCase()+'_BASE_URL'])])),
       llmProvider: (env.LLM_PROVIDER || 'gemini').trim().toLowerCase(),
       azureConfigured: !!azureKey && !!azureRegion && !isPlaceholder(azureKey) && !isPlaceholder(azureRegion),
       whisperConfigured,
@@ -174,7 +178,7 @@ class FirstRunManager {
     }
     return [
       '# App configuration',
-      '# LLM provider: "gemini" or "deepseek".',
+      '# LLM provider: "gemini", "deepseek" or "qwen".',
       '# Add the matching API key below — the app picks it up immediately.',
       '# Gemini:  https://aistudio.google.com/',
       '# DeepSeek: https://platform.deepseek.com/api_keys',
@@ -182,6 +186,9 @@ class FirstRunManager {
       'LLM_PROVIDER=gemini',
       'GEMINI_API_KEY=your_gemini_api_key_here',
       'DEEPSEEK_API_KEY=your_deepseek_api_key_here',
+      'QWEN_API_KEY=your_qwen_api_key_here',
+      'QWEN_MODEL=qwen3.8-flash',
+      'QWEN_BASE_URL=https://dashscope-us.aliyuncs.com/compatible-mode/v1',
       '',
       '# Speech provider: "whisper" (local) or "azure" (cloud).',
       '# WHISPER_COMMAND is auto-set to the project-local venv when you',

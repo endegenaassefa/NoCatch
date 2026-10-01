@@ -22,8 +22,8 @@ function createDirectSetupAnswer({ llmService, fetchImpl = globalThis.fetch }) {
         config: { abortSignal, maxOutputTokens: 4096, httpOptions: { timeout: 60000, retryOptions: { attempts: 1 } } } });
       return { text: llmService.extractTextFromCandidates(result).text, requestId };
     }
-    const client = llmService.deepseekClient;
-    if (provider !== 'deepseek' || !client) throw new Error('Select and configure DeepSeek in Advanced Settings first.');
+    const client = provider === 'qwen' ? llmService.qwenClient : llmService.deepseekClient;
+    if (!['deepseek','qwen'].includes(provider) || !client) throw new Error('Select and configure DeepSeek in Advanced Settings first.');
     const response = await fetchImpl(`${client.baseUrl}/chat/completions`, {
       method: 'POST', signal: abortSignal, redirect: 'error',
       headers: { Authorization: `Bearer ${client.apiKey}`, 'Content-Type': 'application/json' },

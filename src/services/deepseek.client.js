@@ -17,6 +17,7 @@ const logger = require('../core/logger').createServiceLogger('DeepSeek');
 
 class DeepSeekClient {
   constructor(options = {}) {
+    this.provider = options.provider || 'deepseek';
     this.apiKey = options.apiKey || '';
     this.model = options.model || 'deepseek-flash';
     this.baseUrl = String(options.baseUrl || 'https://api.deepseek.com').replace(/\/+$/, '');
@@ -100,6 +101,8 @@ class DeepSeekClient {
    * @param {boolean} stream
    */
   buildChatBody(geminiRequest, stream = false) {
+    const {getProviderCapabilities} = require('../core/ai-providers');
+    if ((geminiRequest.contents || []).some(c => (c.parts || []).some(p => p.inlineData)) && !getProviderCapabilities(this.provider, this.model, this.baseUrl).vision) throw new Error('The selected model does not support images.');
     const gen = geminiRequest.generationConfig || this.generation || {};
     const body = {
       model: this.model,
@@ -112,7 +115,7 @@ class DeepSeekClient {
       // content. (Validated live: thinking disabled returns content in ~36
       // tokens instead of burning the entire cap.) The reasoning text was
       // never surfaced in the UI anyway, so this is pure latency/cost saved.
-      thinking: { type: 'disabled' }
+      ...(this.provider === 'deepseek' ? {thinking: { type: 'disabled' }} : this.baseUrl.includes('maas.aliyuncs.com') || this.baseUrl.includes('dashscope') ? {enable_thinking: false} : this.baseUrl.includes('openrouter.ai') ? {reasoning: {enabled: false}} : {})
     };
 
     if (gen.temperature !== undefined && gen.temperature !== null) {
@@ -284,7 +287,7 @@ class DeepSeekClient {
                 const parsed = JSON.parse(data);
                 apiMessage = parsed?.error?.message || '';
               } catch (_) { /* keep raw body */ }
-              reject(new Error(`HTTP ${res.statusCode}: ${apiMessage || data.slice(0, 300)}`));
+              reject(new Error(`Provider HTTP ${res.statusCode}`));
               return;
             }
             const json = JSON.parse(data);
@@ -335,7 +338,7 @@ class DeepSeekClient {
         if (res.statusCode !== 200) {
           let errBody = '';
           res.on('data', (c) => { errBody += c; });
-          res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 300)}`)));
+          res.on('end', () => reject(new Error(`Provider HTTP ${res.statusCode}`)));
           return;
         }
 

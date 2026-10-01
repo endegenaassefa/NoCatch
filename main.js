@@ -55,7 +55,7 @@ if (PRIVILEGE.isRoot && process.platform === "win32") {
         // straight into chat instead of replaying the wizard.
         try {
           const raw = fs.readFileSync(path.join(normalUserData, ".env"), "utf8");
-          if (/(?:DEEPSEEK_API_KEY|GEMINI_API_KEY|LLM_API_KEY)\s*=\s*\S+/.test(raw)) {
+          if (/(?:DEEPSEEK_API_KEY|QWEN_API_KEY|GEMINI_API_KEY|LLM_API_KEY)\s*=\s*\S+/.test(raw)) {
             fs.writeFileSync(rootSentinel, new Date().toISOString(), "utf8");
           }
         } catch (_) {
@@ -1733,7 +1733,7 @@ class ApplicationController {
 
   async initializeMaterials() {
     if(this.materialsManager)return;
-    this.materialsManager=new MaterialsManager({userDataPath:app.getPath('userData'),safeStorage:require('electron').safeStorage,owner:this.getMaterialsOwner(),
+    this.materialsManager=new MaterialsManager({userDataPath:app.getPath('userData'),safeStorage:require('electron').safeStorage,owner:this.getMaterialsOwner(),visualAssets:true,
       onStatus:status=>{
         if(status.state==='active') {
           this._materialSessionId=status.id;
@@ -1743,11 +1743,21 @@ class ApplicationController {
       },
       onInvalidate:reason=>this.invalidateMaterialWork(reason)});
     this.setupService.materialsManager=this.materialsManager;
-    attachMaterialsSession(llmService,{materials:this.materialsManager,managedSession:this.managedSession,getAIMode:()=>this.getAIMode(),answerDirect:createMaterialsDirectAnswer({llmService})});
+    const answerDependencies = {materials:this.materialsManager,readSourceImages:(sources,options)=>{
+      const vision = this.getAIMode()==='direct'
+        ? require('./src/core/ai-providers').getProviderCapabilities(options.provider,llmService.model,llmService.qwenClient?.baseUrl).vision
+        : this.managedSession.status().account?.providerCapabilities?.[options.provider]?.vision;
+      return vision ? this.materialsManager.sourceImages(sources,options) : [];
+    },managedSession:this.managedSession,getAIMode:()=>this.getAIMode(),answerDirect:createMaterialsDirectAnswer({llmService})};
+    this.answerOrchestrator = require('./src/services/answer-orchestrator').createAnswerOrchestrator(answerDependencies);
+    this.setupService.answerOrchestrator = this.answerOrchestrator;
+    attachMaterialsSession(llmService,{...answerDependencies,orchestrator:this.answerOrchestrator});
     await this.materialsManager.restore();
   }
 
   invalidateMaterialWork(reason) {
+    if (['imported','removed','cancelled'].includes(reason) && this.materialsManager?.session.state !== 'active') return;
+    this.answerOrchestrator?.cancelAll();
     if(!this._invalidatingManaged && !(reason==='owner-changed' && this._managedSignInEpoch===this.operationEpoch))this.operationEpoch++;
     this.setupService?.invalidate();this.managedSession.cancelAll();
     clearTimeout(this._utteranceTimer);this._utteranceBuffer='';this.cancelVoiceWork();sessionManager.clear();
@@ -1795,18 +1805,20 @@ class ApplicationController {
     managedHandle('materials-import',async event=>{
       const manager=this.materialsManager;if(!manager)throw new Error('Materials are not ready.');
       await manager.setOwner(this.getMaterialsOwner());
+      if (manager.status().state === 'active') throw new Error('End and clear this session before changing its materials.');
       const snapshot=manager.snapshot();
       const selected=await require('electron').dialog.showOpenDialog(require('electron').BrowserWindow.fromWebContents(event.sender),{title:'Add session materials',properties:['openFile','multiSelections'],filters:[{name:'PowerPoint or PDF',extensions:['pptx','pdf']}]});
       if(!manager.isCurrent(snapshot))throw new Error('This material session changed. Choose the files again.');
       if(selected.canceled)return {success:true,status:manager.status()};
       return {success:true,status:await manager.importFiles(selected.filePaths)};
     },{includeEvent:true});
+    managedHandle('materials-prepare',async()=>({success:true,status:await this.materialsManager.prepare()}));
     managedHandle('materials-start',async options=>{
       if(this._shieldExamModeActive && !this.isRootMode)throw new Error('Return to the main app before starting a material session.');
       await this.materialsManager.setOwner(this.getMaterialsOwner());
       return {success:true,status:await this.materialsManager.start(options)};
     });
-    managedHandle('materials-preview',(id,page)=>({success:true,preview:this.materialsManager.preview(id,page)}));
+    managedHandle('materials-preview',async(id,page)=>({success:true,preview:await this.materialsManager.previewWithImages(id,page)}));
     managedHandle('materials-remove',async id=>({success:true,status:await this.materialsManager.remove(id)}));
     managedHandle('materials-end',async()=>({success:true,status:await this.materialsManager.end('ended')}));
     managedHandle('materials-cancel-import',()=>{this.materialsManager.cancelImports();return {success:true,status:this.materialsManager.status()};});
@@ -2320,7 +2332,7 @@ class ApplicationController {
       assertTrustedRenderer(event, app.getAppPath());
       const settings = this.getSettings();
       if (path.basename(fileURLToPath(event.senderFrame.url)) !== 'settings.html') {
-        for (const key of ['geminiKey', 'deepseekKey', 'azureKey']) delete settings[key];
+        for (const key of ['geminiKey', 'deepseekKey', 'qwenKey', 'azureKey']) delete settings[key];
       }
       return settings;
     });
@@ -2735,6 +2747,8 @@ class ApplicationController {
         skill: this.activeSkill,
         sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
         isImageAnalysis: true
@@ -2747,6 +2761,8 @@ class ApplicationController {
           skill: this.activeSkill,
           sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
           isImageAnalysis: true
@@ -2822,6 +2838,8 @@ class ApplicationController {
         programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : 'not applicable',
         sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
       });
 
@@ -2830,6 +2848,8 @@ class ApplicationController {
         skill: this.activeSkill,
         sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
       });
@@ -2841,6 +2861,8 @@ class ApplicationController {
           skill: this.activeSkill,
           sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
         });
@@ -3009,6 +3031,8 @@ class ApplicationController {
         skill: this.activeSkill,
         sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
         isTranscriptionResponse: true
@@ -3020,6 +3044,8 @@ class ApplicationController {
           skill: this.activeSkill,
           sources: llmResult.metadata.sources,
           materialSession: llmResult.metadata.materialSession,
+          materialStatus: llmResult.metadata.materialStatus,
+          materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
           isTranscriptionResponse: true
@@ -3451,6 +3477,11 @@ class ApplicationController {
       geminiKey: process.env.GEMINI_API_KEY || "",
       llmProvider: process.env.LLM_PROVIDER || "gemini",
       deepseekKey: process.env.DEEPSEEK_API_KEY || "",
+      deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-flash',
+      deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+      qwenKey: process.env.QWEN_API_KEY || '',
+      qwenModel: process.env.QWEN_MODEL || 'qwen3.8-flash',
+      qwenBaseUrl: process.env.QWEN_BASE_URL || 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
       captureHotkey: this.getCaptureHotkey(),
 
       azureConfigured: !!process.env.AZURE_SPEECH_KEY && !!process.env.AZURE_SPEECH_REGION,
@@ -3462,6 +3493,13 @@ class ApplicationController {
     try {
       if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("Invalid settings");
       if (settings.aiMode !== undefined && !['managed', 'direct'].includes(settings.aiMode)) throw new Error('Invalid AI mode');
+      if (['llmProvider','deepseekModel','deepseekBaseUrl','qwenModel','qwenBaseUrl'].some(k=>settings[k]!==undefined)) {
+      const {resolveProvider,isProvider} = require('./src/core/ai-providers');
+      if (settings.llmProvider !== undefined && !isProvider(settings.llmProvider)) throw new Error('Invalid AI provider');
+      for (const provider of ['deepseek','qwen']) {
+        if (settings[provider+'Model'] !== undefined || settings[provider+'BaseUrl'] !== undefined) resolveProvider({provider,model:settings[provider+'Model'] ?? process.env[provider.toUpperCase()+'_MODEL'],baseUrl:settings[provider+'BaseUrl'] ?? process.env[provider.toUpperCase()+'_BASE_URL']});
+      }
+      }
       this.cancelVoiceWork();
       // ── In-memory updates + window broadcasts ──
       if (settings.codingLanguage) {
@@ -3533,7 +3571,12 @@ class ApplicationController {
       if (settings.deepseekKey !== undefined) {
         envUpdates.DEEPSEEK_API_KEY = settings.deepseekKey;
       }
-      if (settings.llmProvider === "gemini" || settings.llmProvider === "deepseek") {
+      for (const provider of ['deepseek','qwen']) {
+        for (const [field,suffix] of [['Key','API_KEY'],['Model','MODEL'],['BaseUrl','BASE_URL']]) {
+          if (settings[provider+field] !== undefined) envUpdates[provider.toUpperCase()+'_'+suffix] = settings[provider+field];
+        }
+      }
+      if (['gemini','deepseek','qwen'].includes(settings.llmProvider)) {
         envUpdates.LLM_PROVIDER = settings.llmProvider;
       }
 
@@ -3608,6 +3651,7 @@ class ApplicationController {
       // "Service not initialized" because the client was first created
       // at app startup, before any key was set.
       const llmConfigChanged = settings.geminiKey !== undefined ||
+        ['deepseekModel','deepseekBaseUrl','qwenKey','qwenModel','qwenBaseUrl'].some(k=>settings[k] !== undefined) ||
         settings.deepseekKey !== undefined ||
         settings.llmProvider !== undefined;
       if (llmConfigChanged) {

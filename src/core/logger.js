@@ -5,7 +5,7 @@ const os = require('os');
 
 // Redact credentials before either console or file formatting. Settings should
 // log field names only; this also protects nested metadata from other callers.
-const sensitiveField = name => /^(?:text|content|prompt|response|responsepreview|textpreview|fallbackresponse|transcription|transcript|notes|sources|materialcontext)$/.test(name) || /^(?:azurekey|azurespeechkey|geminikey|deepseekkey|authorization|cookie|setcookie|subscriptionkey)$/.test(name) ||
+const sensitiveField = name => /^(?:text|content|prompt|response|responsepreview|textpreview|fallbackresponse|transcription|transcript|notes|sources|materialcontext)$/.test(name) || /^(?:azurekey|azurespeechkey|geminikey|deepseekkey|qwenkey|authorization|cookie|setcookie|subscriptionkey)$/.test(name) ||
   /(?:apikey|subscriptionkey|authorization|password|passwd|secret|token)$/.test(name);
 function redactMetadata(value, field = '', ancestors = new Set()) {
   if (sensitiveField(field.replace(/[^a-z0-9]/gi, '').toLowerCase())) return '[REDACTED]';

@@ -16,9 +16,12 @@ const LIMITS = Object.freeze({
   extractionTimeoutMs: 60000,
   draftDurationMs: 30 * 60000,
   sessionDurationMs: 90 * 60000,
-  maxSources: 8,
-  maxContextChars: 24000,
-  maxContextTokens: 6000
+  maxSources: 48,
+  maxContextChars: 64000,
+  maxContextTokens: 64000,
+  maxSearchChunks: 16000,
+  preparationTimeoutMs: 10 * 60000,
+  retrievalTimeoutMs: 2500
 });
 
 module.exports = { LIMITS };

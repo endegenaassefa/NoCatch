@@ -1,4 +1,77 @@
-# Retrieval and model selection — September 30, 2026
+# Materials implementation and evaluation — October 1, 2026
+
+## Current branch
+
+`feature/semantic-materials-retrieval`, built from `468cd75`. The installed launcher and original checkout have not been replaced. Source integration is implemented; this is not a release qualification or six-person beta result.
+
+### Answer paths
+
+- **No files:** the shared answer orchestrator dispatches directly to the selected provider without preparing or querying an index.
+- **Prepared files:** before the 90-minute timer starts, read native text/speaker notes and prepare search. Small collections fitting 48 source pages and 64,000 serialized text characters use whole-context text. Larger collections use pinned quantized E5 embeddings plus SQLite FTS5, rank fusion and nearby passages. No rejected MiniLM reranker is enabled.
+- On each question, send bounded original excerpts, stable source IDs, and up to four available source images. The model is stateless with respect to the textbook: the application supplies evidence each time. A larger advertised model context window does not replace this index or guarantee recall.
+- Only IDs actually cited by the answer become source buttons. Unsupported UUID/coordinate citations trigger a visible warning. This checks identity, not semantic entailment; the live benchmark still found unsupported model additions.
+- Missing/corrupt search gives visibly labeled general reasoning; intact partial material remains useful. A local model-load failure offers explicitly labeled keyword-only search. Cancellation, End, expiry and owner changes cancel work instead of invoking fallback.
+
+### Providers and UI
+
+Qwen and DeepSeek use the existing OpenAI-compatible HTTP client; no additional provider SDK is required. Qwen settings include key, model and region/host. Direct Alibaba defaults to Virginia `qwen3.8-flash`; explicit Alibaba workspace regions, OpenRouter and Together hosts are supported. A key must match its issuing host/region. API keys are excluded from general settings broadcasts/log output.
+
+Qwen has not been called live. Current direct Qwen vision/model/pricing claims are from [Alibaba's compatibility guide](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope), [vision guide](https://www.alibabacloud.com/help/en/model-studio/vision) and [regional price table](https://www.alibabacloud.com/help/en/model-studio/model-pricing). Together's `Qwen/Qwen3.8-Flash` vision capability is not established by its catalog, so this route remains conservatively text-only. No claim that Qwen outperforms DeepSeek is supported by these application tests.
+
+Current DeepSeek Flash supports images; the old application restriction was removed according to its [vision API contract](https://api-docs.deepseek.com/guides/vision/). The source launcher flow exposes optional materials, visible preparation/coverage, consent, Skip, source previews and End. Active Add/Remove are disabled and rejected by the backend.
+
+### Storage, visuals and limits
+
+The workload remains 11 files, 1,000 combined pages, 50 MiB/file, 250 MiB total, and 16 MiB total decoded text. SQLite text/image encryption runs off the main thread, with an OS-wrapped session key. Recovery checks the original owner and deadline before unwrapping. A durable revocation marker prevents a queued save/crash from reviving ended data. Expiry/End immediately revoke reads; physical cleanup can take longer. Closed apps clean expired copies on next launch; original user files are untouched.
+
+PDF pages are rendered locally; PNG/JPEG images embedded in PPTX are retained and can be previewed or supplied as source evidence. Assets are limited to 2 MiB each and 128 MiB per session; answer images are capped at four and 4 MiB combined base64. Rendering has a bounded per-document window; missing/corrupt/over-limit visuals leave text usable and coverage incomplete. PPTX shapes, SmartArt and full slide layout are not rendered; a PDF export gives better page fidelity.
+
+**Image-only facts are not semantically indexed.** Source images can be read once a page is selected, especially in small whole-context collections or explicit page requests. This does not demonstrate finding an unknown diagram among 1,000 pages. There is no automatic visual-description/OCR indexing stage in this build.
+
+The local E5 runtime lives in a separate process that exits with its session. Independent diagnosis reproduced ONNX native-addon reload failure across destroyed worker threads; fresh processes fix that actual failure. Vectors and text indexes stay in process memory. Public model weights remain cached separately; the first download (about 34 MiB) is excluded from warm-cache timing. JS heap limits do not cap native runtime memory.
+
+### Measured evidence
+
+Independent QA owns frozen fixtures, test code and scoring. Current text quality corpus: four real synthetic files, 73 substantive/visual pages, 27 questions. It is separate from the 1,000-page capacity fixture, which contains filler.
+
+| Measurement | Observed result | Limit |
+| --- | --- | --- |
+| Required evidence recall / all-required evidence | 100% / 100% across 23 answerable cases | Broad selection: precision 3.65%; not proof of semantic superiority |
+| Live DeepSeek strict grounding/citation review | 24/27 (88.9%) | Three unsupported additions/malformed citations; core requested content correct in all 27 |
+| Missing/visual abstention and conflict cases | 4/4 and 3/3 | Synthetic cases only |
+| Reviewed first useful answer content | median 1.128 s; p95 1.970 s; worst 2.062 s | Typed questions, one machine/network; a native smoke overlapped early requests |
+| Complete text answer | median 2.099 s; worst 4.762 s | Distinct from first text and first useful content |
+| Live ingested-source image answers | 3/3 strict passes; useful content worst 1.760 s | Small known visual files; no unknown-diagram recall claim |
+| Two consecutive 1,000-page preparations | 14.97 s / 15.81 s | Cached model; Linux capacity fixture, not a real 1,000-page book |
+| Capacity retrieval | 38.2 ms / 40.8 ms | One capacity query per session |
+| Peak aggregate process-tree RSS | 400.4 MB / 415.0 MB | Includes child runtime; parent-only memory is not total memory |
+| Worst 50 ms heartbeat overshoot | 1.64 ms / 1.33 ms | CLI event loop, not an Electron frame-rate claim |
+
+The first eight live answers scored 6/8 strict; their failures remain intact. General citation instructions were revised, then all 27 cases were run and independently reviewed. No per-question gold was supplied to retrieval or generation. The process-isolation change reproduced exactly the same ordered source names/pages/text for all 27 questions; no additional paid text rerun was necessary.
+
+Final independently owned regression checks passed **94/94**, with **6/6** targeted asset checks and **4/4** current Windows visual-preview checks. Frozen integrity: 32 files across 19 QA manifests unchanged (retrieval manifests are audited separately). Checks cover provider settings/transport, no-files and scoped answers, exact deadline, late extraction/restore/Start/usage, cancellation, encrypted assets, parser bounds and citation warnings. Rendered materials/notices and actual Windows Electron settings/previews were exercised. Native E5 and PDF work in Windows source and a tiny source-ASAR smoke, including two sessions and process cleanup. **A full release package/installer with relocated native dependencies has not been qualified.** Existing packaging tests passed 33/33. A preserved legacy provider/setup run was 71/74: its three failures still assert the superseded Gemini-only image restriction or require both old provider keys; those tests were not edited to hide the contract change. Two fresh isolated Codex reviews identified additional lifecycle/queue defects; their repairs are covered by frozen regressions and recorded in `review-dispositions.json`. Claude timed out, so these reviews are explicitly same-family.
+
+Evaluation spending is recorded in the shared ledger against the authorized $10 total. Across historical and current runs, 120 completed requests totaled $0.16519542 using conservative published rates, not invoice charges. This includes the final three-request source-image integration sample. Qwen has no live usage or performance result.
+
+Evidence directory: `/mnt/c/users/your-user/Documents/NoCatch-session-materials-evidence-20260929/retrieval-v2/build-20261001`.
+
+- `qa/retrieval/results/live-flash-v4-all27.*`: raw stream, independent claims/citation and useful-text timing review.
+- `qa/retrieval/results/live-source-vision-first.*`: actual imported/encrypted image reads, matching dispatched bytes and independent image/answer review.
+- `qa/retrieval/results/semantic-provenance-review.json`: pinned E5 cache/runtime trace; historical raw default flags were not rewritten.
+- `qa/retrieval/results/capacity-v3.json`: preserved second-worker failure; `capacity-v4-after.json` measures repaired process tree.
+- `qa/retrieval/results/semantic-restart-{before,after}.json`: independently frozen restart regression.
+- `qa/results/native-*`: actual Windows screenshots, runtime and lifecycle evidence with stated scope.
+- `review-*-result.json`: fresh isolated review findings; no reviewer verdict substitutes for tests.
+
+## Remaining qualification
+
+Live Qwen comparison awaits the user's key. Real course files, dense equations, degraded scans, multilingual retrieval, screenshot-to-question latency on large collections, six-person beta usage and a full packaged installer remain unqualified. English E5-small-v2 is the current embedding model. Source-image access should not be confused with searchable visual facts or perfect citation entailment.
+
+---
+
+Everything below records the September 30 decision and failed experiment at that time; current behavior is described above.
+
+# Archived research and rejected experiment — September 30, 2026
 
 ## Decision so far
 

@@ -220,7 +220,7 @@ class SetupService {
       if (!object(input)) throw fail('INVALID_REQUEST', 'Enter a question.');
       if (input.consent !== true) throw fail('CONSENT_REQUIRED', 'Confirm sending this question and any preview to the service/provider.');
       if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > MAX_TEXT) throw fail('INPUT_LIMIT', `Enter a question of at most ${MAX_TEXT} characters.`);
-      if (!['gemini', 'deepseek'].includes(input.provider)) throw fail('INVALID_PROVIDER', 'Choose Gemini or DeepSeek.');
+      if (!['gemini', 'deepseek', 'qwen'].includes(input.provider)) throw fail('INVALID_PROVIDER', 'Choose Gemini, DeepSeek or Qwen.');
       if (Object.keys(input).some(key => !['text', 'previewId', 'provider', 'consent'].includes(key))) throw fail('INVALID_REQUEST', 'Only a question and a local preview reference can be submitted.');
       const managed = this.managedSession.status();
       if (this.getAIMode() === 'managed') {
@@ -241,29 +241,26 @@ class SetupService {
           this.#preview = null;
           throw fail('STALE_DISPLAY_LAYOUT', 'Display layout changed. Capture a new preview.');
         }
-        if (input.provider !== 'gemini') throw fail('image_not_supported', 'Choose Gemini for screenshot questions.');
+        if (!(this.getAIMode()==='managed' && managed.account?.providerCapabilities ? managed.account.providerCapabilities[input.provider] : require('./ai-providers').getProviderCapabilities(input.provider, process.env[input.provider.toUpperCase()+'_MODEL'], process.env[input.provider.toUpperCase()+'_BASE_URL']))?.vision) throw fail('image_not_supported', 'The selected model does not support screenshot questions.');
         payload.image = { mimeType: preview.mimeType, data: preview.bytes.toString('base64') };
-      }
-      if(this.materialsManager?.status().state==='active'){
-        payload.materialContext=this.materialsManager.retrieve(input.text,{maxChars:Math.min(24000,30000-input.text.length)});
-        this._check(operation);
       }
       this.#answered = false;
       this.#lastRequestId = null;
       if(this._materialScope())this.materialDraft=input.text;
       // Persist the retryable question before spending allowance, never the answer/image.
       this._write({ ...this.#state, step: 'question', draft: input.text });
-      const scoped = typeof this.managedSession.answerScoped === 'function';
-      const answer = this.getAIMode() === 'direct' ? this.answer
-        : (scoped ? this.managedSession.answerScoped : this.managedSession.answer).bind(this.managedSession);
-      if (typeof answer !== 'function') throw fail('DIRECT_UNAVAILABLE', 'Direct AI is not configured. Open Advanced Settings.');
-      const result = await this._wait(this.getAIMode() === 'direct'
-        ? answer(payload, { signal: operation.controller.signal })
-        : scoped ? answer(payload, { signal: operation.controller.signal }) : answer(payload), operation);
+      if (!this.answerOrchestrator) {
+        this.answerOrchestrator = require('../services/answer-orchestrator').createAnswerOrchestrator({
+          materials: this.materialsManager, getAIMode: this.getAIMode, answerDirect: this.answer,
+          managedSession: { answerScoped: (payload, options) => typeof this.managedSession.answerScoped === 'function'
+            ? this.managedSession.answerScoped(payload, options) : this.managedSession.answer(payload) }
+        });
+      }
+      const result = await this._wait(this.answerOrchestrator(payload, { signal: operation.controller.signal }), operation);
       if (typeof result?.text !== 'string' || !result.text.trim() || result.text.length > 2 * 1024 * 1024) throw fail('EMPTY_ANSWER', 'No answer was returned. You can explicitly try again.');
       this.#answered = true;
       this.#lastRequestId = typeof result.requestId === 'string' ? result.requestId : null;
-      return { text: result.text, requestId: this.#lastRequestId, ...(payload.materialContext?{sources:payload.materialContext.sources.map(({text,...source})=>source),materialSession:{sessionId:payload.materialContext.sessionId,generation:payload.materialContext.generation,expiresAt:payload.materialContext.expiresAt}}:{}) };
+      return { text: result.text, requestId: this.#lastRequestId, sources: result.sources, materialSession: result.materialSession, materialStatus: result.materialStatus, materialNotice: result.materialNotice };
     } finally { if (this.#operation === operation) this.#operation = null; }
   }
 

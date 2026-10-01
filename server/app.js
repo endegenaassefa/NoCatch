@@ -12,9 +12,9 @@ function publicRequest(row) {
     createdAt: new Date(row.created).toISOString(), updatedAt: new Date(row.updated).toISOString(),
     ...(row.error ? { error: JSON.parse(row.error) } : {}) };
 }
-function validateInput(value, limits) {
+function validateInput(value, limits, config = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw error(400, 'invalid_input', 'Expected a JSON object.');
-  if (!['gemini', 'deepseek'].includes(value.provider)) throw error(400, 'invalid_provider', 'Choose Gemini or DeepSeek.');
+  if (!['gemini', 'deepseek', 'qwen'].includes(value.provider)) throw error(400, 'invalid_provider', 'Choose Gemini, DeepSeek or Qwen.');
   const text = value.text === undefined ? '' : value.text;
   if (typeof text !== 'string') throw error(400, 'invalid_input', 'Text must be a string.');
   const skill = value.skill || 'general';
@@ -44,7 +44,7 @@ function validateInput(value, limits) {
       : img.mimeType === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
       : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
     if (!valid) throw error(400, 'invalid_image', 'Image bytes do not match the image type.');
-    if (value.provider === 'deepseek') throw error(422, 'image_not_supported', 'Choose Gemini for image questions. DeepSeek supports text questions.');
+    if (!require('../src/core/ai-providers').getProviderCapabilities(value.provider, config[value.provider+'Model'], config[value.provider+'BaseUrl']).vision) throw error(422,'image_not_supported','The selected model does not support images.');
     image = { mimeType: img.mimeType, data: img.data };
   }
   if (!text.trim() && !image) throw error(400, 'empty_input', 'Enter a question or attach an image.');
@@ -149,7 +149,7 @@ function createManagedServer({ config, authenticate, provider, store = new Store
       const auth = await authenticate(req);
       if (extraRoute && await extraRoute(req, res, auth, url)) return;
       if (req.method === 'GET' && url.pathname === '/v1/me') return send(res, 200, {
-        subject: auth.subject, providers: ['gemini', 'deepseek'], limits,
+        subject: auth.subject, providers: ['gemini', 'deepseek', 'qwen'].filter(p=>config[p+'Key']), providerCapabilities: Object.fromEntries(['gemini','deepseek','qwen'].filter(p=>config[p+'Key']).map(p=>[p,require('../src/core/ai-providers').getProviderCapabilities(p,config[p+'Model'],config[p+'BaseUrl'])])), limits,
         usage: { requestsToday: store.usage(auth.account), dailyLimit: limits.dailyAccount }
       });
       if(req.method==='POST' && url.pathname==='/v1/material-sessions') {
@@ -180,7 +180,8 @@ function createManagedServer({ config, authenticate, provider, store = new Store
       if (req.method === 'POST' && url.pathname === '/v1/answers') {
         const idem = req.headers['idempotency-key'];
         if (typeof idem !== 'string' || !/^[A-Za-z0-9_.:-]{8,128}$/.test(idem)) throw error(400, 'idempotency_key_required', 'Supply an Idempotency-Key of 8–128 safe characters.');
-        const input = validateInput(await readBody(req, limits.bodyBytes), limits);
+        const input = validateInput(await readBody(req, limits.bodyBytes), limits, config);
+        if (!config[input.provider+'Key']) throw error(422,'provider_unavailable','This provider is unavailable for your account.');
         if(input.materialContext)validMaterial(input.materialContext,auth.owner);
         const fingerprint = createHash('sha256').update(JSON.stringify(input)).digest('hex');
         store.prune(limits.retentionMs);

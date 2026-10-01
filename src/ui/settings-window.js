@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const whisperSegmentMsInput = document.getElementById('whisperSegmentMs');
     const geminiKeyInput = document.getElementById('geminiKey');
     const llmProviderSelect = document.getElementById('llmProvider');
+    const providerFields = ['qwenKey','qwenModel','qwenBaseUrl','deepseekModel','deepseekBaseUrl'];
+    const dirtyKeys = new Set();
+    for (const id of ['geminiKey','deepseekKey','qwenKey','azureKey']) document.getElementById(id)?.addEventListener('input',()=>dirtyKeys.add(id));
     const deepseekKeyInput = document.getElementById('deepseekKey');
     const windowGapInput = document.getElementById('windowGap');
     const captureHotkeyInput = document.getElementById('captureHotkey');
@@ -94,9 +97,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperCaptureModeSelect) whisperCaptureModeSelect.value = settings.whisperCaptureMode || 'vad';
         if (whisperResponseTargetSelect) whisperResponseTargetSelect.value = settings.whisperResponseTarget || 'both';
         if (whisperSegmentMsInput) whisperSegmentMsInput.value = settings.whisperSegmentMs || '';
-        if (geminiKeyInput) geminiKeyInput.value = settings.geminiKey || '';
+        if (geminiKeyInput && !dirtyKeys.has('geminiKey')) geminiKeyInput.value = settings.geminiKey || '';
         if (llmProviderSelect) llmProviderSelect.value = settings.llmProvider || 'gemini';
-        if (deepseekKeyInput) deepseekKeyInput.value = settings.deepseekKey || '';
+        if (deepseekKeyInput && !dirtyKeys.has('deepseekKey')) deepseekKeyInput.value = settings.deepseekKey || '';
+        for (const id of providerFields) { const field=document.getElementById(id); if(field && !dirtyKeys.has(id)) field.value=settings[id] || ''; }
         if (windowGapInput) windowGapInput.value = settings.windowGap || '';
         if (captureHotkeyInput) captureHotkeyInput.value = settings.captureHotkey || '';
 
@@ -149,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveSettings = () => {
         const settings = {};
         if (speechProviderSelect) settings.speechProvider = speechProviderSelect.value;
-        if (azureKeyInput) settings.azureKey = azureKeyInput.value;
+        if (azureKeyInput && dirtyKeys.has('azureKey')) settings.azureKey = azureKeyInput.value;
         if (azureRegionInput) settings.azureRegion = azureRegionInput.value;
         if (whisperCommandInput) settings.whisperCommand = whisperCommandInput.value;
         if (whisperModelInput) settings.whisperModel = whisperModelInput.value;
@@ -158,9 +162,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperCaptureModeSelect) settings.whisperCaptureMode = whisperCaptureModeSelect.value;
         if (whisperResponseTargetSelect) settings.whisperResponseTarget = whisperResponseTargetSelect.value;
         if (whisperSegmentMsInput) settings.whisperSegmentMs = whisperSegmentMsInput.value;
-        if (geminiKeyInput) settings.geminiKey = geminiKeyInput.value;
+        if (geminiKeyInput && dirtyKeys.has('geminiKey')) settings.geminiKey = geminiKeyInput.value;
         if (llmProviderSelect) settings.llmProvider = llmProviderSelect.value;
-        if (deepseekKeyInput) settings.deepseekKey = deepseekKeyInput.value;
+        if (deepseekKeyInput && dirtyKeys.has('deepseekKey')) settings.deepseekKey = deepseekKeyInput.value;
+        for (const id of providerFields) { const field=document.getElementById(id); if(field && (!id.endsWith('Key') || dirtyKeys.has(id))) settings[id]=field.value; }
         if (windowGapInput) settings.windowGap = windowGapInput.value;
         if (captureHotkeyInput && captureHotkeyInput.value.trim()) settings.captureHotkey = captureHotkeyInput.value.trim();
         if (codingLanguageSelect) settings.codingLanguage = codingLanguageSelect.value;
@@ -218,6 +223,19 @@ document.addEventListener('DOMContentLoaded', () => {
         captureHotkeyInput
     ];
 
+    inputs.push(...providerFields.map(id=>document.getElementById(id)));
+    document.getElementById('qwenPreset')?.addEventListener('change',()=> {
+      const preset=document.getElementById('qwenPreset').value;
+      const bases={virginia:'https://dashscope-us.aliyuncs.com/compatible-mode/v1',together:'https://api.together.ai/v1',openrouter:'https://openrouter.ai/api/v1'};
+      const field=document.getElementById('qwenBaseUrl');
+      if(bases[preset]) field.value=bases[preset];
+      else if(preset!=='custom') { const id=document.getElementById('qwenWorkspace').value.trim(); if(!/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(id)) {document.getElementById('qwenWorkspace').focus();return;} field.value=`https://${id}.${preset}.maas.aliyuncs.com/compatible-mode/v1`; }
+      if(preset==='together') document.getElementById('qwenModel').value='Qwen/Qwen3.8-Flash';
+      else if(preset==='openrouter') document.getElementById('qwenModel').value='qwen/qwen3.8-flash';
+      else if(preset!=='custom') document.getElementById('qwenModel').value='qwen3.8-flash';
+      saveSettings();
+    });
+    document.getElementById('qwenWorkspace')?.addEventListener('change',()=>document.getElementById('qwenPreset').dispatchEvent(new Event('change')));
     inputs.forEach(input => {
         if (input) {
             input.addEventListener('change', saveSettings);
@@ -251,6 +269,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (deepseekGroup) {
             deepseekGroup.style.display = provider === 'deepseek' ? '' : 'none';
         }
+        const qwenGroup = document.getElementById('qwenFields');
+        if(qwenGroup) qwenGroup.style.display=provider==='qwen'?'':'none';
+        for(const id of providerFields) {const field=document.getElementById(id);if(field) field.disabled=!id.startsWith(provider);}
         if (geminiKeyInput) geminiKeyInput.disabled = provider !== 'gemini';
         if (deepseekKeyInput) deepseekKeyInput.disabled = provider !== 'deepseek';
     };

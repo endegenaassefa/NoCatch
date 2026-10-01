@@ -6,7 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
   api.onMaterialsInvalidated?.(()=>{epoch++;busy=null;clearPreview();answer=null;$('question').value='';$('answerText').textContent='';refresh();});
   let state, preview = null, answer = null, layout = null, busy = null;
   let epoch = 0, refreshId = 0, initialized = false, context = null;
-  let preferredProvider = null;
+  let preferredProvider = null, directCapabilities = {};
+  const supportsImages = () => Boolean((state?.aiMode==='direct' ? directCapabilities : state?.managed?.account?.providerCapabilities)?.[$('provider').value]?.vision);
   let saves = Promise.resolve(), saveError = null;
   const message = error => typeof error === 'string' ? error : error?.message || 'Something went wrong. Please try again.';
   const checked = result => {
@@ -32,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const id of ['inputMode', 'question', 'provider', 'consent', 'sample', 'display', 'capture', 'refreshDisplays', 'screenSettings', 'discard', 'recapture']) $(id).disabled = locked;
     const screenshot = $('inputMode').value === 'screenshot';
     $('capture').disabled = locked || !$('display').value;
-    $('submit').disabled = locked || !usable() || !$('question').value.trim() || !$('consent').checked || !$('provider').value || (screenshot && (!preview || ($('provider').value !== 'gemini')));
+    $('submit').disabled = locked || !usable() || !$('question').value.trim() || !$('consent').checked || !$('provider').value || (screenshot && (!preview || !supportsImages()));
     $('submit').textContent = busy === 'submit' ? 'Getting your answer…' : 'Ask question';
     $('cancelWork').hidden = !['submit', 'capture', 'displays'].includes(busy);
     $('cancelWork').textContent = busy === 'submit' ? 'Cancel request' : 'Cancel capture';
@@ -63,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('previewPanel').hidden = !preview;
     $('consentText').textContent = `Send this question${preview ? ' and the screenshot preview' : ''} to ${state.aiMode === 'direct' ? 'the selected AI provider' : 'the managed service and selected AI provider'}.`;
     $('providerNote').hidden = $('inputMode').value !== 'screenshot';
-    $('providerNote').textContent = 'Screenshot questions require Gemini.';
+    $('providerNote').textContent = supportsImages() ? 'The selected model supports screenshots.' : 'Select a model with verified screenshot support in Advanced Settings.';
     const capability = state.capabilities?.screen;
     $('screenStatus').textContent = capability ? `Screen access: ${capability.permission}. ${capability.reason || ''}` : 'Screen access will be checked when you capture.';
     controls();
@@ -71,9 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function providers() {
     const previous = $('provider').value;
-    const allowed = state.aiMode === 'direct' ? ['gemini', 'deepseek'] : state.managed?.account?.providers || [];
+    const allowed = state.aiMode === 'direct' ? ['gemini', 'deepseek', 'qwen'] : state.managed?.account?.providers || [];
     $('provider').replaceChildren();
-    for (const id of ['gemini', 'deepseek'].filter(id => allowed.includes(id))) $('provider').add(new Option(id === 'gemini' ? 'Gemini' : 'DeepSeek', id));
+    for (const id of ['gemini', 'deepseek', 'qwen'].filter(id => allowed.includes(id))) $('provider').add(new Option(id === 'gemini' ? 'Gemini' : id === 'qwen' ? 'Qwen' : 'DeepSeek', id));
     if (!allowed.length) $('provider').add(new Option('No provider available for this account', ''));
     if (allowed.includes(previous)) $('provider').value = previous;
     else if (allowed.includes(preferredProvider)) $('provider').value = preferredProvider;
@@ -89,12 +90,13 @@ document.addEventListener('DOMContentLoaded', () => {
         status('Your account or AI mode changed. Review your question before continuing.');
       }
       context = nextContext;
+      if(next.aiMode==='direct') {try {directCapabilities=(checked(await api.getFirstRunStatus())).providerCapabilities || {};}catch {directCapabilities={};}}
       if (initial) {
         if (next.busy || next.hasPreview) { checked(await api.cancelSetup()); next = checked(await api.getSetupState()); }
         if (next.aiMode === 'direct') {
           try {
             const setup = checked(await api.getFirstRunStatus());
-            preferredProvider = ['gemini', 'deepseek'].includes(setup.llmProvider) ? setup.llmProvider : null;
+            preferredProvider = ['gemini', 'deepseek', 'qwen'].includes(setup.llmProvider) ? setup.llmProvider : null;
             if (preferredProvider === 'gemini' && !setup.geminiConfigured && setup.deepseekConfigured) preferredProvider = 'deepseek';
             if (preferredProvider === 'deepseek' && !setup.deepseekConfigured && setup.geminiConfigured) preferredProvider = 'gemini';
           } catch (_) { /* The provider selector remains usable. */ }
@@ -178,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await save({ step: 'question' }); if (token !== epoch || saveError) return;
     render(); $('question').focus();
   });
-  $('provider').addEventListener('change', () => { $('consent').checked = false; controls(); });
+  $('provider').addEventListener('change', () => { $('consent').checked = false; render(); });
   $('consent').addEventListener('change', controls);
   $('display').addEventListener('change', () => { clearPreview(); render(); });
   $('refreshDisplays').addEventListener('click', () => { clearPreview(); render(); displays(); });

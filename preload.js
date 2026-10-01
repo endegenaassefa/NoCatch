@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('electronAPI', {
   getMaterialsStatus: () => ipcRenderer.invoke('materials-status'),
   importMaterials: () => ipcRenderer.invoke('materials-import'),
+  prepareMaterials: () => ipcRenderer.invoke('materials-prepare'),
   startMaterials: options => ipcRenderer.invoke('materials-start',options),
   previewMaterial: (id,page) => ipcRenderer.invoke('materials-preview',id,page),
   removeMaterial: id => ipcRenderer.invoke('materials-remove',id),

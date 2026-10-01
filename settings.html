@@ -530,6 +530,7 @@
                         <select class="input-field" id="llmProvider">
                             <option value="gemini">Google Gemini</option>
                             <option value="deepseek">DeepSeek</option>
+                            <option value="qwen">Qwen (Model Studio, Together, OpenRouter)</option>
                         </select>
                     </div>
                     <div id="geminiFields">
@@ -542,6 +543,8 @@
                         </div>
                     </div>
                     <div id="deepseekFields" style="display:none;">
+                        <div class="settings-item"><div><div class="settings-item-label">DeepSeek model</div><div class="settings-item-description">deepseek-flash supports screenshots. deepseek-v4-pro supports text only.</div></div><input class="input-field" id="deepseekModel" placeholder="deepseek-flash"></div>
+                        <div class="settings-item"><div class="settings-item-label">DeepSeek endpoint</div><input class="input-field" id="deepseekBaseUrl" placeholder="https://api.deepseek.com"></div>
                         <div class="settings-item">
                             <div>
                                 <div class="settings-item-label">DeepSeek API Key</div>
@@ -549,6 +552,13 @@
                             </div>
                             <input type="password" class="input-field" id="deepseekKey" placeholder="Enter your DeepSeek API key">
                         </div>
+                    </div>
+                    <div id="qwenFields" style="display:none;">
+                        <div class="settings-item"><div><div class="settings-item-label">Qwen API Key</div><div class="settings-item-description">Use the key for this endpoint: regional Model Studio, Together, or OpenRouter.</div></div><input type="password" class="input-field" id="qwenKey" placeholder="Enter the endpoint's API key"></div>
+                        <div class="settings-item"><div><div class="settings-item-label">Qwen model</div><div class="settings-item-description">Model Studio: qwen3.8-flash. Together: Qwen/Qwen3.8-Flash (vision unverified). OpenRouter: qwen/qwen3.8-flash.</div></div><input class="input-field" id="qwenModel" placeholder="qwen3.8-flash"></div>
+                        <div class="settings-item"><div><div class="settings-item-label">Endpoint preset</div><div class="settings-item-description">Workspace regions require a matching regional key and workspace ID.</div></div><select class="input-field" id="qwenPreset"><option value="custom">Keep current endpoint</option><option value="virginia">Model Studio Virginia</option><option value="ap-southeast-1">Model Studio Singapore workspace</option><option value="cn-beijing">Model Studio Beijing workspace</option><option value="cn-hongkong">Model Studio Hong Kong workspace</option><option value="ap-northeast-1">Model Studio Tokyo workspace</option><option value="together">Together</option><option value="openrouter">OpenRouter</option></select></div>
+                        <div class="settings-item"><div class="settings-item-label">Workspace ID</div><input class="input-field" id="qwenWorkspace" placeholder="Workspace ID for workspace regions"></div>
+                        <div class="settings-item"><div><div class="settings-item-label">Qwen endpoint</div><div class="settings-item-description">HTTPS compatible-mode/v1 on an approved Model Studio host, or the fixed Together/OpenRouter endpoint. dashscope-intl is a legacy host.</div></div><input class="input-field" id="qwenBaseUrl"></div>
                     </div>
                     <div class="settings-note">
                         Keys apply immediately and are also written back to <code>.env</code> so they persist across restarts.

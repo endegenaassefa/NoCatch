@@ -8,7 +8,7 @@ function attachManagedSession(service, manager, mode = () => 'managed') {
     ).slice(-20).map(item => ({ role: item.role === 'model' ? 'assistant' : item.role, content: item.content.slice(0, 16000) }));
     const result = await manager.answer({ text, ...(image ? { image } : {}), skill,
       history: messages, language: language || undefined,
-      provider: process.env.LLM_PROVIDER === 'deepseek' ? 'deepseek' : 'gemini' }, onDelta);
+      provider: process.env.LLM_PROVIDER || 'gemini' }, onDelta);
     return { response: result.text, metadata: { skill, programmingLanguage: language,
       processingTime: Date.now() - started, usedFallback: false, managed: true, requestId: result.requestId } };
   };

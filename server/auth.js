@@ -17,14 +17,15 @@ function readConfig(env = process.env) {
   const issuer = httpsUrl(env.OIDC_ISSUER, 'OIDC_ISSUER').href;
   const jwksUrl = httpsUrl(env.OIDC_JWKS_URL, 'OIDC_JWKS_URL').href;
   if (!env.OIDC_AUDIENCE?.trim()) throw new Error('OIDC_AUDIENCE is required');
-  if (!env.GEMINI_API_KEY || !env.DEEPSEEK_API_KEY) throw new Error('Both GEMINI_API_KEY and DEEPSEEK_API_KEY are required');
+  if (!env.GEMINI_API_KEY && !env.DEEPSEEK_API_KEY && !env.QWEN_API_KEY) throw new Error('At least one AI provider key is required');
+  const qwen = require('../src/core/ai-providers').resolveProvider({provider:'qwen'},env);
   return {
     issuer, jwksUrl, audience: env.OIDC_AUDIENCE,
     allowedSubjects: (env.OIDC_ALLOWED_SUBJECTS || '').split(',').map(s => s.trim()).filter(Boolean),
     port: integer(env, 'PORT', 8080, 65535), host: env.HOST || '0.0.0.0',
     database: env.DATABASE_PATH || './data/managed.sqlite',
-    geminiKey: env.GEMINI_API_KEY, deepseekKey: env.DEEPSEEK_API_KEY,
-    geminiModel: env.GEMINI_MODEL || 'gemini-3.1-flash-lite', deepseekModel: env.DEEPSEEK_MODEL || 'deepseek-chat',
+    qwenKey:qwen.apiKey,qwenModel:qwen.model,qwenBaseUrl:qwen.baseUrl,geminiKey: env.GEMINI_API_KEY, deepseekKey: env.DEEPSEEK_API_KEY,
+    geminiModel: env.GEMINI_MODEL || 'gemini-3.1-flash-lite', deepseekBaseUrl: require('../src/core/ai-providers').resolveProvider({provider:'deepseek'},env).baseUrl, deepseekModel: env.DEEPSEEK_MODEL || 'deepseek-flash',
     limits: {
       dailyAccount: integer(env, 'DAILY_ACCOUNT_REQUESTS', 50, 10000),
       dailyGlobal: integer(env, 'DAILY_GLOBAL_REQUESTS', 1000, 100000),
@@ -33,8 +34,8 @@ function readConfig(env = process.env) {
       maxRecords: integer(env, 'MAX_STORED_REQUESTS', 2000, 10000),
       retentionMs: integer(env, 'RETENTION_HOURS', 24, 168) * 3600000,
       timeoutMs: integer(env, 'REQUEST_TIMEOUT_SECONDS', 90, 180) * 1000,
-      bodyBytes: 4 * 1024 * 1024, imageBytes: 2 * 1024 * 1024,
-      inputChars: 32000, historyTurns: 20, outputChars: 32768, outputTokens: 4096,
+      bodyBytes: 8 * 1024 * 1024, imageBytes: 2 * 1024 * 1024,
+      inputChars: 96000, historyTurns: 20, outputChars: 32768, outputTokens: 4096,
       eventsPerRequest: 512, subscribersPerRequest: 3, subscribersGlobal: 100
     }
   };

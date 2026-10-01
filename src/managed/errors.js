@@ -8,7 +8,7 @@ const messages = {
   auth_expired: 'Sign-in expired. Please try again.', network: 'The managed service could not be reached. Please try again.',
   invalid_response: 'The managed service returned an invalid response.', quota_exceeded: 'Your usage limit has been reached.',
   rate_limited: 'Too many requests. Please try again shortly.', request_failed: 'The answer could not be completed. Please try again.',
-  invalid_request: 'The answer request is invalid.', image_not_supported: 'Choose Gemini to answer questions about an image.',
+  invalid_request: 'The answer request is invalid.', image_not_supported: 'The selected model does not support image questions. Choose a model with verified image support.',
   callback_unavailable: 'The sign-in callback port is busy. Close other NoCatch sign-in windows and try again.',
 };
 class ManagedError extends Error {

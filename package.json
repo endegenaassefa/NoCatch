@@ -37,7 +37,9 @@
     "prismjs": "^1.30.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^4.7.1",
-    "yauzl": "3.4.0"
+    "yauzl": "3.4.0",
+    "@huggingface/transformers": "3.8.1",
+    "@napi-rs/canvas": "1.0.9"
   },
   "devDependencies": {
     "electron": "^44.4.4",
@@ -79,6 +81,10 @@
       "server/providers.js"
     ],
     "asarUnpack": [
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/@napi-rs/**/*",
       "assets/icons/**/*",
       "prompts/**/*",
       "scripts/whisper_worker.py"

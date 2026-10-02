@@ -1,14 +1,15 @@
 # =============================================================================
 #  cluely.ps1 -- one-command root exam mode for OpenCluely on Windows
 #
-#  The ONLY command you need. Run it, then open LockDown Browser.
-#  It checks everything, launches Cluely itself elevated (Administrator token,
-#  High integrity -- the Windows equivalent of the macOS root launch), waits
-#  until the app has really booted, and tells you what to do next.
+#  Launches the packaged app with a SYSTEM token, confirms the root-mode boot
+#  markers AND that a visible window reached your desktop. It does not prove
+#  the UI will stay above a secure-desktop app -- that is the summon hotkey's
+#  job (Ctrl+Shift+V re-fronts the shared topmost band).
 #
 #  Usage:
 #    cluely              # doctor + start (idempotent -- safe to re-run)
 #    cluely start        # same as above
+#    cluely system       # SYSTEM-integrity exam mode (one UAC prompt)
 #    cluely stop         # kill the elevated Cluely and clean up
 #    cluely status       # is it running? elevation + boot-log tail
 #    cluely doctor       # prerequisite checks only
@@ -18,13 +19,12 @@
 #    setx PATH "%PATH%;<repo>\scripts"     # then restart the terminal
 #    or run it as:  <repo>\scripts\cluely.cmd
 #
-#  Why elevation: LockDown Browser sweeps and kills user-level GUI apps during
-#  an exam; a High-integrity (Administrator) process is what the app detects
-#  as root mode. The whole Cluely UI -- chat, question-type switching, mic,
-#  typing, settings, capture -- runs as that elevated instance.
+#  `cluely system` runs Cluely at SYSTEM integrity: elevated apps can no
+#  longer demote, hide, or message-close the exam UI (UIPI), and the summon
+#  hotkeys re-front it in the shared topmost band.
 #
 #  Rules that stay true:
-#    * cluely BEFORE LockDown Browser (launch order matters).
+#    * Start the app before measuring behavior in a practice environment.
 #    * The macOS cluely-shield helper does not exist on Windows -- elevated
 #      Cluely replaces it entirely.
 #    * `cluely start` requests ONE UAC elevation; `cluely stop` requests one
@@ -33,7 +33,7 @@
 
 param(
   [Parameter(Position = 0)]
-  [ValidateSet('start', 'stop', 'status', 'doctor', 'help')]
+  [ValidateSet('start', 'stop', 'status', 'doctor', 'help', 'system')]
   [string]$Command = 'start',
   [switch]$FromElevated,
   [string]$Exe = ''
@@ -92,6 +92,9 @@ function Get-SessionId {
 
 function Resolve-Exe {
   if ($Exe) { return $Exe }
+  # A normal local Windows package is the first choice in this worktree.
+  $localBuild = Join-Path $Repo 'dist\win-unpacked\screen-reader-util.exe'
+  if (Test-Path $localBuild) { return $localBuild }
   $found = @()
   # Depth 1: .depthengine\<name>\win-unpacked[*]\screen-reader-util.exe
   foreach ($d in (Get-ChildItem -Path (Join-Path $Repo '.depthengine') -Directory -ErrorAction SilentlyContinue)) {
@@ -136,7 +139,7 @@ function Get-PidFileCreated {
 
 function Get-PidFileStamp {
   if (-not (Test-Path $PidFile)) { return '' }
-  $line = Select-String -Path $PidFile -Pattern '^STAMP=(cluely-root-[A-Za-z0-9-]+)$' -ErrorAction SilentlyContinue | Select-Object -First 1
+  $line = Select-String -Path $PidFile -Pattern '^STAMP=(cluely-(?:root|system)-[A-Za-z0-9-]+)$' -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($line) { return $line.Matches[0].Groups[1].Value }
   return ''
 }
@@ -220,6 +223,30 @@ function Test-Marker([string]$Marker, [long]$AppLogOffset) {
   return $false
 }
 
+function Test-VisibleWindow([int]$ProcessId) {
+  # Fail-fast UI proof for `cluely system`: markers in a log are not the same
+  # as a window on the user's desktop (the token dance can land the app on the
+  # wrong session/desktop and still boot cleanly).
+  if (-not ('CluelyWinProbe' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CluelyWinProbe {
+  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lp);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public static int VisibleWindowsOf(int pid) {
+    int n = 0;
+    EnumWindows((h, p) => { uint wpid; GetWindowThreadProcessId(h, out wpid); if (wpid == (uint)pid && IsWindowVisible(h)) n++; return true; }, IntPtr.Zero);
+    return n;
+  }
+}
+'@
+  }
+  return ([CluelyWinProbe]::VisibleWindowsOf($ProcessId) -gt 0)
+}
+
 function Clear-RootSingletonLocks {
   foreach ($name in @('SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
     Remove-Item (Join-Path $RootProfile $name) -Force -ErrorAction SilentlyContinue
@@ -245,7 +272,7 @@ function Invoke-Doctor {
 
   $exePath = Resolve-Exe
   if (-not $exePath) {
-    Write-Fail 'No packaged win-unpacked build found under .depthengine\*\win-unpacked\screen-reader-util.exe'
+    Write-Fail 'No packaged Windows build found. Run npm run build:win -- --dir, or pass -Exe.'
     $problems++
   } elseif (-not (Test-Path $exePath)) {
     Write-Fail ('Configured executable not found: ' + $exePath)
@@ -254,11 +281,11 @@ function Invoke-Doctor {
     $vi = (Get-Item $exePath).VersionInfo
     Write-Ok ('Packaged app: ' + $exePath)
     Write-Info ('  product version ' + $vi.ProductVersion + ', ' + [math]::Round((Get-Item $exePath).Length / 1MB, 1) + ' MB')
-    $stampFile = Join-Path (Split-Path $exePath) 'CLUELY-ROOT-MODE-BUILD.txt'
-    if (Test-Path $stampFile) {
-      Write-Ok ('Root-mode support: ' + (Get-Content $stampFile -Raw).Trim())
+    $archive = Join-Path (Split-Path $exePath) 'resources\app.asar'
+    if (Test-Path $archive) {
+      Write-Ok 'App archive present; startup must confirm the root-mode marker.'
     } else {
-      Write-Warn 'This build predates Windows root-mode support -- running it elevated activates nothing. Rebuild the package first.'
+      Write-Fail ('Packaged app archive not found: ' + $archive)
       $problems++
     }
   }
@@ -315,6 +342,37 @@ function Invoke-Doctor {
 # ---------------------------------------------------------------------------
 # start
 # ---------------------------------------------------------------------------
+
+# Seed the root profile + process environment for an elevated/system launch.
+# The API key travels in the process environment, never into a persistent
+# machine-readable file (the SYSTEM launch path passes it through a transient,
+# ACL-hardened params file that is deleted right after process creation).
+function Seed-RootLaunchEnvironment {
+  New-Item -ItemType Directory -Force -Path $RootProfile | Out-Null
+  $rootEnv = Join-Path $RootProfile '.env'
+  if (-not (Test-Path $rootEnv)) {
+    @('AI_MODE=direct', 'LLM_PROVIDER=deepseek', 'SPEECH_PROVIDER=whisper', 'WHISPER_COMMAND=whisper', 'WHISPER_CAPTURE_MODE=manual', 'WHISPER_RESPONSE_TARGET=chat') |
+      Set-Content -Path $rootEnv -Encoding ASCII
+  }
+  $env:CLUELY_ROOT_EXAM = '1'
+  $env:AI_MODE = 'direct'
+  $env:LLM_PROVIDER = 'deepseek'
+  $env:SPEECH_PROVIDER = 'whisper'
+  $env:WHISPER_COMMAND = 'whisper'
+  $env:WHISPER_CAPTURE_MODE = 'manual'
+  $env:WHISPER_RESPONSE_TARGET = 'chat'
+  if (Test-Path $NormalEnv) {
+    $keyLine = Select-String -Path $NormalEnv -Pattern '^\s*DEEPSEEK_API_KEY\s*=' | Select-Object -First 1
+    if ($keyLine) {
+      $value = ($keyLine.Line -split '=', 2)[1].Trim().Trim("'").Trim('"')
+      if ($value.Length -gt 0) { $env:DEEPSEEK_API_KEY = $value }
+    }
+  }
+  if (Test-Path (Join-Path $ModelsDir 'small.pt')) {
+    $env:WHISPER_MODEL_DIR = $ModelsDir
+    $env:WHISPER_MODEL = 'small'
+  }
+}
 
 function Invoke-Start {
   $isAdmin = Test-IsAdmin
@@ -390,33 +448,7 @@ function Invoke-Start {
     }
   }
 
-  # Seed the root profile so the elevated instance starts with the operator's
-  # current config (mirrors the qualified Windows Test launcher). The API key
-  # travels in the process environment, never into a machine-readable file.
-  New-Item -ItemType Directory -Force -Path $RootProfile | Out-Null
-  $rootEnv = Join-Path $RootProfile '.env'
-  if (-not (Test-Path $rootEnv)) {
-    @('AI_MODE=direct', 'LLM_PROVIDER=deepseek', 'SPEECH_PROVIDER=whisper', 'WHISPER_COMMAND=whisper', 'WHISPER_CAPTURE_MODE=manual', 'WHISPER_RESPONSE_TARGET=chat') |
-      Set-Content -Path $rootEnv -Encoding ASCII
-  }
-  $env:CLUELY_ROOT_EXAM = '1'
-  $env:AI_MODE = 'direct'
-  $env:LLM_PROVIDER = 'deepseek'
-  $env:SPEECH_PROVIDER = 'whisper'
-  $env:WHISPER_COMMAND = 'whisper'
-  $env:WHISPER_CAPTURE_MODE = 'manual'
-  $env:WHISPER_RESPONSE_TARGET = 'chat'
-  if (Test-Path $NormalEnv) {
-    $keyLine = Select-String -Path $NormalEnv -Pattern '^\s*DEEPSEEK_API_KEY\s*=' | Select-Object -First 1
-    if ($keyLine) {
-      $value = ($keyLine.Line -split '=', 2)[1].Trim().Trim("'").Trim('"')
-      if ($value.Length -gt 0) { $env:DEEPSEEK_API_KEY = $value }
-    }
-  }
-  if (Test-Path (Join-Path $ModelsDir 'small.pt')) {
-    $env:WHISPER_MODEL_DIR = $ModelsDir
-    $env:WHISPER_MODEL = 'small'
-  }
+  Seed-RootLaunchEnvironment
 
   # A crashed previous root run can leave Chromium singleton locks behind;
   # the root profile is root-exclusive, so clearing them here is safe.
@@ -531,12 +563,201 @@ function Invoke-Start {
   exit 0
 }
 
+function Invoke-StartSystem {
+  $isAdmin = Test-IsAdmin
+  $exePath = Resolve-Exe
+
+  if (-not $exePath -or -not (Test-Path $exePath)) {
+    Write-Fail 'No packaged win-unpacked build found -- run doctor for details.'
+    exit 1
+  }
+
+  if (Test-RootInstanceAlive) {
+    $pidValue = Get-PidFileValue
+    Write-Ok ('Cluely is already running (PID ' + $pidValue + ') -- nothing to start.')
+    exit 0
+  }
+  $strays = @(Get-RootProcesses)
+  if ($strays.Count -gt 0) {
+    Write-Ok ('Cluely is already running (' + $strays.Count + ' processes; pidfile missing).')
+    Write-Info 'If you need to stop it: cluely stop'
+    exit 0
+  }
+
+  if (Test-Path $PidFile) {
+    Write-Warn 'Stale pidfile found -- clearing it before launch.'
+    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+  }
+
+  if (-not $isAdmin -and -not $FromElevated) {
+    Write-Host ''
+    Write-Info 'Requesting elevation (one UAC prompt -- click Yes) ...'
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'), 'system', '-FromElevated', '-Exe', ('"' + $exePath + '"'))
+    try {
+      $elevated = Start-Process powershell -Verb RunAs -ArgumentList $argList -PassThru
+    } catch {
+      Write-Fail 'Elevation was canceled or failed (the UAC prompt was not accepted).'
+      exit 1
+    }
+    $deadline = (Get-Date).AddSeconds(150)
+    while ((Get-Date) -lt $deadline) {
+      Start-Sleep -Seconds 2
+      if (Get-Process -Id $elevated.Id -ErrorAction SilentlyContinue) { continue }
+      $bootOk = (Test-Path $BootLog) -and (Select-String -Path $BootLog -Pattern 'Application initialized successfully' -Quiet -ErrorAction SilentlyContinue)
+      $rootOk = (Test-Path $BootLog) -and (Select-String -Path $BootLog -Pattern 'Root exam mode active' -Quiet -ErrorAction SilentlyContinue)
+      if ($bootOk -and $rootOk) { exit 0 }
+      Write-Fail 'The SYSTEM launch did not complete. Last log lines:'
+      Get-Content $BootLog -Tail 12 -ErrorAction SilentlyContinue | ForEach-Object { Write-Info $_ }
+      exit 1
+    }
+    Write-Fail 'Elevation timed out (150s) -- the UAC prompt was not answered or the launch stalled.'
+    exit 1
+  }
+
+  if (-not $isAdmin) {
+    Write-Fail 'Elevation was declined or failed -- SYSTEM launch needs an elevated launcher.'
+    exit 1
+  }
+
+  if ($FromElevated) {
+    $problems = Invoke-Doctor
+    if ($problems -gt 0) {
+      Write-Fail 'Doctor reported blocking problems -- fix them and rerun cluely system.'
+      exit 1
+    }
+  }
+
+  Seed-RootLaunchEnvironment
+  Clear-RootSingletonLocks
+
+  foreach ($target in @($RootData, (Split-Path $exePath))) {
+    $isRootData = ($target -eq $RootData)
+    $usersPlain = if ($isRootData) { '' } else { ' "*S-1-5-32-545:RX"' }
+    $usersInherit = if ($isRootData) { '' } else { ' "*S-1-5-32-545:(OI)(CI)RX"' }
+    cmd.exe /c ('icacls "' + $target + '" /inheritance:r /grant:r "*S-1-5-32-544:F" "*S-1-5-18:F"' + $usersPlain + ' /T /C /Q >nul 2>&1') | Out-Null
+    cmd.exe /c ('icacls "' + $target + '" /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F"' + $usersInherit + ' /Q >nul 2>&1') | Out-Null
+  }
+
+  $appLogOffset = 0L
+  if (Test-Path $AppLog) { $appLogOffset = (Get-Item $AppLog).Length }
+
+  Remove-Item $BootLog -Force -ErrorAction SilentlyContinue
+  Remove-Item $BootErr -Force -ErrorAction SilentlyContinue
+
+  $stamp = 'cluely-system-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+  Write-Info ('Launching Cluely at SYSTEM integrity (stamp ' + $stamp + ') ...')
+
+  $launcherExe = Join-Path $ScriptDir 'bin\SystemLauncher.exe'
+  if (-not (Test-Path $launcherExe)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $launcherExe) | Out-Null
+    $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+    if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+    if (-not (Test-Path $csc)) { Write-Fail 'csc.exe not found -- cannot build the SYSTEM launcher.'; exit 1 }
+    & $csc /nologo /platform:x64 /target:exe /optimize+ ('/out:' + $launcherExe) (Join-Path $ScriptDir 'SystemLauncher.cs') | Out-Null
+    if (-not (Test-Path $launcherExe)) { Write-Fail 'Failed to compile SystemLauncher.cs.'; exit 1 }
+    Write-Ok ('Built SYSTEM launcher: ' + $launcherExe)
+  }
+
+  $paramsPath = Join-Path $RootData 'system-launch-params.json'
+  $resultPath = Join-Path $env:TEMP 'cluely-system-launch-result.txt'
+  Remove-Item $resultPath -Force -ErrorAction SilentlyContinue
+  $envMap = [ordered]@{}
+  foreach ($k in @('CLUELY_ROOT_EXAM','AI_MODE','LLM_PROVIDER','SPEECH_PROVIDER','WHISPER_COMMAND','WHISPER_CAPTURE_MODE','WHISPER_RESPONSE_TARGET','DEEPSEEK_API_KEY','WHISPER_MODEL_DIR','WHISPER_MODEL')) {
+    $v = [Environment]::GetEnvironmentVariable($k, 'Process')
+    if ($v) { $envMap[$k] = $v }
+  }
+  $params = [ordered]@{
+    exe = $exePath
+    args = ('--user-data-dir="' + $RootProfile + '" --cluely-root-run=' + $stamp)
+    env = $envMap
+    stdout = $BootLog
+    stderr = $BootErr
+    result = $resultPath
+    cwd = (Split-Path $exePath)
+  }
+  [System.IO.File]::WriteAllText($paramsPath, (ConvertTo-Json $params -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
+
+  $svcName = 'CluelySystemLaunch'
+  & sc.exe stop $svcName 2>$null | Out-Null
+  & sc.exe delete $svcName 2>$null | Out-Null
+  $create = & sc.exe create $svcName binPath= ('"' + $launcherExe + '" -params "' + $paramsPath + '"') type= own start= demand 2>&1
+  if ($LASTEXITCODE -ne 0) { Write-Fail ('sc create failed: ' + ($create | Out-String)); exit 1 }
+  & sc.exe start $svcName 2>$null | Out-Null
+  $deadline = (Get-Date).AddSeconds(90)
+  while ((Get-Date) -lt $deadline -and -not (Test-Path $resultPath)) { Start-Sleep -Milliseconds 250 }
+  & sc.exe delete $svcName 2>$null | Out-Null
+  Remove-Item $paramsPath -Force -ErrorAction SilentlyContinue
+
+  if (-not (Test-Path $resultPath)) { Write-Fail 'SYSTEM launch produced no result within 90s.'; exit 1 }
+  $result = (Get-Content $resultPath -Raw).Trim()
+  Write-Info ('SYSTEM launch result: ' + $result)
+  if ($result -notmatch '^ok\|pid=(\d+)') { Write-Fail ('SYSTEM launch failed: ' + $result); exit 1 }
+  $sysPid = [int]$Matches[1]
+
+  Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+  $created = Get-ProcessCreatedWmi $sysPid
+  Set-Content -Path $PidFile -Encoding ASCII -Value @(
+    "PID=$sysPid"
+    "CREATED=$created"
+    "STAMP=$stamp"
+  )
+
+  Write-Info 'Waiting for Cluely to finish booting ...'
+  $deadline = (Get-Date).AddSeconds(45)
+  $bootOk = $false
+  $rootOk = $false
+  $systemOk = $false
+  while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    if (-not (Get-Process -Id $sysPid -ErrorAction SilentlyContinue)) {
+      Write-Fail 'Cluely exited during startup. Last log lines:'
+      Get-Content $BootLog -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Write-Info $_ }
+      Get-Content $BootErr -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Write-Info $_ }
+      exit 1
+    }
+    $bootOk = Test-Marker 'Application initialized successfully' $appLogOffset
+    $rootOk = Test-Marker 'Root exam mode active' $appLogOffset
+    $systemOk = Test-Marker 'integrity system' $appLogOffset
+    if ($bootOk -and $rootOk) { break }
+  }
+
+  if (-not $bootOk) {
+    Write-Fail 'Timed out after 45s -- Cluely is alive but the boot marker never appeared.'
+    Get-Content $BootLog -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Write-Info $_ }
+    exit 1
+  }
+  if (-not $rootOk) {
+    Write-Fail 'Boot marker found but the root-mode marker did not.'
+    exit 1
+  }
+  if (-not $systemOk) {
+    Write-Fail 'App booted but did NOT report SYSTEM integrity -- the band protection is NOT active. Run: cluely stop'
+    exit 1
+  }
+
+  Write-Info 'Waiting for the exam UI to appear on your desktop ...'
+  $winDeadline = (Get-Date).AddSeconds(30)
+  $windowVisible = $false
+  while ((Get-Date) -lt $winDeadline -and -not $windowVisible) {
+    Start-Sleep -Seconds 2
+    $windowVisible = Test-VisibleWindow $sysPid
+  }
+  if (-not $windowVisible) {
+    Write-Fail 'Cluely is running at SYSTEM but no visible window reached your desktop within 30s (wrong session/desktop?). Run: cluely stop'
+    exit 1
+  }
+
+  Write-Ok ('Cluely booted at SYSTEM integrity (PID ' + $sysPid + ')')
+  Write-Ok 'Band protection active: elevated apps can no longer demote, hide, or message-close the exam UI (UIPI); the summon hotkeys re-front it in the topmost band.'
+  Write-Host ''
+  Write-Plan
+  exit 0
+}
+
 function Write-Plan {
-  Write-Host 'You are up. Now:'
-  Write-Info '1. Open LockDown Browser (Cluely is already first -- correct order).'
-  Write-Info '2. On a question, press Ctrl+Shift+S (or the camera button in the chat header).'
-  Write-Info '3. The answer lands in the Cluely chat. Switch question type from the skill dropdown.'
-  Write-Info 'When the exam is over, run: cluely stop'
+  Write-Host 'Windows root mode is running. Band protection was verified by the live SYSTEM smoke; the LockDown Browser exam interaction itself is still unverified.'
+  Write-Info 'Capture shortcut: Ctrl+Shift+S. If the browser covers Cluely, Ctrl+Shift+V re-fronts it instantly.'
+  Write-Info 'When done, run: cluely stop'
 }
 
 # ---------------------------------------------------------------------------
@@ -691,7 +912,7 @@ function Invoke-Status {
 # Atomic start lock guards the whole transaction (including the elevated
 # child's boot wait) so two parallel `cluely` runs cannot double-launch.
 $lockStream = $null
-if ($Command -eq 'start' -and -not $FromElevated) {
+if (($Command -eq 'start' -or $Command -eq 'system') -and -not $FromElevated) {
   try {
     $lockStream = [System.IO.File]::Open($RunLock, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
   } catch {
@@ -704,6 +925,7 @@ if ($Command -eq 'start' -and -not $FromElevated) {
 try {
   switch ($Command) {
     'start'  { Invoke-Start }
+    'system' { Invoke-StartSystem }
     'stop'   { Invoke-Stop }
     'status' { Invoke-Status }
     'doctor' {
@@ -720,6 +942,7 @@ cluely -- one-command root exam mode for OpenCluely (Windows)
   cluely status     show whether it is running + boot-log tail
   cluely doctor     prerequisite checks only (no elevation needed)
   cluely help       this message
+  cluely system     start at SYSTEM integrity (band-protected exam UI)
 
 Exam sequence: run `cluely`, THEN open LockDown Browser, press Ctrl+Shift+S
 (or the camera button) on a question.

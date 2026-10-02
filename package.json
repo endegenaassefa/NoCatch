@@ -1,6 +1,6 @@
 {
   "name": "screen-reader-util",
-  "version": "1.0.0",
+  "version": "1.1.0-beta",
   "description": "Personal desktop reading assistant",
   "main": "main.js",
   "scripts": {
@@ -144,6 +144,10 @@
         {
           "from": "scripts/cluely-admin.cmd",
           "to": "launcher/cluely-admin.cmd"
+        },
+        {
+          "from": "scripts/SystemLauncher.cs",
+          "to": "launcher/SystemLauncher.cs"
         }
       ],
       "target": [

@@ -1029,12 +1029,12 @@
         // elevated instance is new and survival is UNMEASURED — report only
         // verified behavior (independent review finding 3, 2026-09-25).
         const bannerText = s.platform === 'win32'
-          ? `🛡️ Root exam mode — this Cluely runs elevated as Administrator. Chat, question types, mic, settings and ${shortcut} capture are all live. Do not run the shield helper alongside it.`
+          ? `🛡️ Root exam mode — this Cluely runs elevated (Administrator or SYSTEM integrity). Chat, question types, mic, settings and ${shortcut} capture are all live. Do not run the shield helper alongside it.`
           : `🛡️ Root exam mode — this Cluely runs as root: LockDown Browser cannot kill it. Chat, question types, mic, settings and ${shortcut} capture are all live. Do not run the shield helper alongside it.`;
         if (chatExamBtn) {
           chatExamBtn.classList.add('active');
           chatExamBtn.title = s.platform === 'win32'
-            ? 'Root mode: Cluely runs elevated as Administrator — no shield needed.'
+            ? 'Root mode: Cluely runs elevated (Administrator or SYSTEM integrity) — no shield needed.'
             : 'Root mode: Cluely itself is the root, kill-immune exam app — no shield needed.';
         }
         if (examModeBannerEl) {
@@ -1064,7 +1064,7 @@
       async function toggleExamMode() {
         if (!whysperAPI || !whysperAPI.shieldExamMode) return;
         if (rootMode) {
-          addMessage('🛡️ Root mode: Cluely is already the kill-immune exam app — the shield is not needed.', 'system', true);
+          addMessage('🛡️ Root mode: Cluely is already running elevated — the shield is not needed.', 'system', true);
           return;
         }
         if (chatExamBtn) chatExamBtn.disabled = true;

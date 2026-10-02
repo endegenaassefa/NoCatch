@@ -21,7 +21,11 @@ class WindowManager {
     // User intent survives async window creation and native window loss.
     this.desiredWindowVisibility = new Map();
     this.chatHideVersion = 0;
+    this._visibilityIntentEpoch = 0;
+    this._lastVisibilityHideEpoch = 0;
+    this._lastVisibilityShowEpoch = 0;
     this.currentDisplay = null;
+    this._displayChangeTimer = null;
     this.screenWatcher = null;
     this.desktopWatcher = null;
     this.lastActiveSpace = null;
@@ -1035,6 +1039,20 @@ class WindowManager {
         logger.warn('Could not keep window on top', { error: error.message });
       }
       win.showInactive(); // Non-activating show: never steal focus
+      if (process.platform === 'win32') {
+        // Re-front within the topmost band without activation or repaint.
+        // On Windows the topmost band is SHARED: another topmost app (the
+        // exam browser) covers us simply by re-fronting itself, and
+        // showInactive() on an already-visible window does NOT change
+        // z-order. moveTop() = SetWindowPos(HWND_TOPMOST, NOMOVE|NOSIZE|
+        // NOACTIVATE): instant, flicker-free, focus-preserving (validated by
+        // tests/kill-matrix/windows/system-band-probe.ps1).
+        try {
+          win.moveTop();
+        } catch (error) {
+          logger.warn('Could not re-front window in topmost band', { error: error.message });
+        }
+      }
       setTimeout(() => {
         if (win.isDestroyed()) return;
         if (!isLLM) {
@@ -1099,6 +1117,18 @@ class WindowManager {
         if (type !== 'onboarding') {
           event.preventDefault();
           logger.debug('Prevented window minimize', { type });
+        }
+      });
+
+      // WM_CLOSE is on UIPI's benign message allowlist, so even a lower-
+      // integrity process can POST it to these windows (validated by the
+      // system-band probe). The overlays are closable:false; the quit path
+      // flips setClosable(true) right before app.quit(), so closable doubles
+      // as the quit signal here: refuse external closes, allow the real quit.
+      window.on('close', (event) => {
+        if (!window.isClosable()) {
+          event.preventDefault();
+          logger.warn('Prevented external close request', { type });
         }
       });
 
@@ -1318,6 +1348,8 @@ class WindowManager {
       }
     });
     
+    this._visibilityIntentEpoch = (this._visibilityIntentEpoch || 0) + 1;
+    this._lastVisibilityShowEpoch = this._visibilityIntentEpoch;
     this.isVisible = true;
     // NOTE: no .focus() here — focusing would steal focus from the
     // proctored page. Windows are shown with showInactive() above.
@@ -1350,6 +1382,7 @@ class WindowManager {
       }
     });
 
+    this.recordVisibilityHide();
     this.isVisible = false;
     logger.info('All windows hidden except', { keepTypes });
   }
@@ -1358,13 +1391,35 @@ class WindowManager {
     return this.desiredWindowVisibility.get(type) === true;
   }
 
+  recordVisibilityHide() {
+    // A delayed answer may update hidden content, but not reverse a user hide.
+    this._visibilityIntentEpoch = (this._visibilityIntentEpoch || 0) + 1;
+    this._lastVisibilityHideEpoch = this._visibilityIntentEpoch;
+  }
+
+  getVisibilityHideEpoch() {
+    return this._lastVisibilityHideEpoch || 0;
+  }
+
+  shouldRevealAnswerSince(hideEpoch) {
+    const lastHide = this.getVisibilityHideEpoch();
+    return lastHide === hideEpoch || (this._lastVisibilityShowEpoch || 0) > lastHide;
+  }
+
+  hasVisibleWindows() {
+    return Array.from(this.windows.values()).some(window =>
+      window && !window.isDestroyed() && window.isVisible());
+  }
+
   toggleVisibility() {
     if (this.isScreenBeingShared) {
       return this.isVisible;
     }
 
-    if (this.isVisible) {
-      this.hideAllWindows();
+    // Capture and answer delivery can reveal a window without changing isVisible.
+    // Toggle the windows the user can actually see, not a stale group flag.
+    if (process.platform === 'win32' ? this.hasVisibleWindows() : this.isVisible) {
+      this.hideAllWindowsExcept([]);
     } else {
       this.showAllWindows();
       if (process.platform === 'win32' && this.isInteractive) {
@@ -1629,7 +1684,7 @@ class WindowManager {
     return results;
   }
 
-  showLLMResponse(content, metadata = {}) {
+  showLLMResponse(content, metadata = {}, { reveal = true, owner = null } = {}) {
     logger.debug('showLLMResponse called', {
       isScreenBeingShared: this.isScreenBeingShared,
       contentLength: content.length,
@@ -1653,12 +1708,22 @@ class WindowManager {
       return;
     }
 
+    // The latest request owns the shared panel. Older answers still reach
+    // chat/history, but cannot replace this panel's loading/result state.
+    if (owner != null && !this.isAnswerPanelOwner(owner)) return;
+    if (owner == null) this.claimAnswerPanelOwner();
+
     logger.debug('Sending display-llm-response event to window');
     llmWindow.webContents.send('display-llm-response', {
       content,
       metadata,
       timestamp: new Date().toISOString()
     });
+
+    if (!reveal) {
+      logger.debug('Answer content delivered without reopening a hidden panel');
+      return;
+    }
     
     logger.debug('Showing and focusing LLM window');
     this.showOnCurrentDesktop(llmWindow);
@@ -1676,7 +1741,22 @@ class WindowManager {
     });
   }
 
-  showLLMLoading() {
+  claimAnswerPanelOwner() {
+    this._answerPanelOwner = (this._answerPanelOwner || 0) + 1;
+    return this._answerPanelOwner;
+  }
+
+  isAnswerPanelOwner(owner) {
+    return owner != null && owner === this._answerPanelOwner;
+  }
+
+  canDeliverPanelStream(owner, window) {
+    // Preserve the legacy hidden-panel feed for chat-only answers. An
+    // unowned stream must not rewrite a panel another request is showing.
+    return owner == null ? !window.isVisible() : this.isAnswerPanelOwner(owner);
+  }
+
+  showLLMLoading(owner = null) {
     if (this.isScreenBeingShared) {
       logger.warn('LLM loading blocked due to screen sharing mode');
       return;
@@ -1684,6 +1764,8 @@ class WindowManager {
 
     const llmWindow = this.windows.get('llmResponse');
     if (llmWindow) {
+      if (owner != null && !this.isAnswerPanelOwner(owner)) return;
+      if (owner == null) owner = this.claimAnswerPanelOwner();
       logger.debug('Showing LLM loading state');
       llmWindow.webContents.send('show-loading');
       this.showOnCurrentDesktop(llmWindow);
@@ -1694,15 +1776,18 @@ class WindowManager {
       }
       
       logger.debug('LLM loading window shown');
+      return owner;
     } else {
       logger.error('LLM window not available for loading state');
     }
   }
 
-  hideLLMResponse() {
+  hideLLMResponse({ owner = null, explicit = owner == null } = {}) {
+    if (owner != null && owner !== this._answerPanelOwner) return;
     const llmWindow = this.windows.get('llmResponse');
-    if (llmWindow) {
+    if (llmWindow && !llmWindow.isDestroyed()) {
       llmWindow.hide();
+      if (explicit) this.recordVisibilityHide();
     }
   }
 
@@ -1844,10 +1929,15 @@ class WindowManager {
     });
   }
 
-  broadcastToAllWindows(channel, data) {
+  broadcastToAllWindows(channel, data, options = {}) {
     const windowStates = {};
     
     this.windows.forEach((window, type) => {
+      if (type === 'llmResponse' && Object.hasOwn(options, 'panelOwner') &&
+          !window.isDestroyed() && !this.canDeliverPanelStream(options.panelOwner, window)) {
+        windowStates[type] = { skipped: 'not current panel owner' };
+        return;
+      }
       if (!window.isDestroyed()) {
         window.webContents.send(channel, data);
         windowStates[type] = {
@@ -1914,6 +2004,11 @@ class WindowManager {
     });
     
     this.windows.clear();
+
+    if (this._displayChangeTimer) {
+      clearTimeout(this._displayChangeTimer);
+      this._displayChangeTimer = null;
+    }
     
     // Clean up all watchers
     if (this.screenWatcher) {
@@ -1979,7 +2074,7 @@ class WindowManager {
     this._displayChangeTimer = setTimeout(() => {
       this._displayChangeTimer = null;
       if (this.isScreenBeingShared) return;
-      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
       const signature = this.displaySignature(display);
       if (signature === this._activeDisplaySignature) return;
       this.currentDisplay = display;
@@ -2216,9 +2311,14 @@ class WindowManager {
       return;
     }
     if (targetWindow && !targetWindow.isDestroyed()) {
-      // E9-S-001 fold: if the target is already visible, showing again would
-      // run the hide→showInactive dance (a visible flash mid-share). No-op.
-      if (targetWindow.isVisible()) {
+      // E9-S-001 fold: on macOS, if the target is already visible, showing
+      // again would run the hide→showInactive dance (a visible flash
+      // mid-share), so it stays a no-op there. On Windows there is no hide
+      // dance: an already-visible but COVERED window must instead be
+      // re-fronted in the shared topmost band (moveTop, no activation, no
+      // repaint) — otherwise the summon hotkey is a silent no-op exactly
+      // when the user needs it (window buried under the exam browser).
+      if (targetWindow.isVisible() && process.platform !== 'win32') {
         return;
       }
       this.showOnCurrentDesktop(targetWindow);

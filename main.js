@@ -25,9 +25,11 @@ function sendModifiersFromFlags(flags) {
 
 // ── Root exam mode: cross-platform privilege detection ──
 // macOS/Linux use uid 0; Windows uses the real token integrity level
-// (whoami /groups SIDs) so an elevated Administrator launch actually
-// activates the same guards the Mac root mode has. Detected once, cached,
-// and logged at boot so `cluely status` has honest evidence.
+// (whoami /groups SIDs) so an elevated Administrator or SYSTEM launch
+// actually activates the same guards the Mac root mode has. Detected once,
+// cached, and logged at boot so `cluely status` has honest evidence. The
+// launcher alone cannot assert this: the running app checks its own process
+// token before enabling root mode.
 const { detect: detectPrivilege, rootDataDir } = require("./src/platform/privilege");
 const PRIVILEGE = detectPrivilege();
 const INGESTION_PLAYGROUND = process.argv.includes('--ingestion-playground');
@@ -37,6 +39,8 @@ if (INGESTION_PLAYGROUND) {
   app.setPath('userData', require('./src/playground/profile').resolvePlaygroundProfile({ appData: app.getPath('appData'), override: explicitProfile }));
 }
 
+// Keep elevated state separate from the normal desktop profile. This must
+// happen before ENV_PATH, first-run state, and services read app.userData.
 // Windows root mode: isolate Chromium's userData under a machine-wide root
 // directory (C:\ProgramData\CluelyRoot\userdata) so the elevated instance
 // never clashes with the operator's normal profile singleton locks and its
@@ -49,6 +53,30 @@ if (PRIVILEGE.isRoot && process.platform === "win32") {
     const rootUserData = path.join(rootDataDir(), "userdata");
     fs.mkdirSync(rootUserData, { recursive: true });
     app.setPath("userData", rootUserData);
+    const normalSetup = path.join(normalUserData, "setup-state.json");
+    const rootSetup = path.join(rootUserData, "setup-state.json");
+    const normalSetupExists = fs.existsSync(normalSetup);
+    const rootSetupExists = fs.existsSync(rootSetup);
+    if (!rootSetupExists && normalSetupExists) {
+      // Current setup writes setup-state.json, not the old first-run sentinel.
+      // Carry only a valid completion flag into the isolated elevated profile;
+      // do not copy drafts or change an existing root setup state.
+      try {
+        if (fs.statSync(normalSetup).size <= 4096) {
+          const saved = JSON.parse(fs.readFileSync(normalSetup, "utf8"));
+          if (saved && saved.version === 1 && saved.completed === true &&
+              saved.step === "complete" && saved.draft === "" &&
+              ["text", "screenshot"].includes(saved.inputMode)) {
+            fs.writeFileSync(rootSetup, JSON.stringify({
+              version: 1, completed: true, step: "complete", draft: "", inputMode: "text",
+            }), { flag: "wx", mode: 0o600 });
+          }
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT" && error.code !== "EEXIST" && !(error instanceof SyntaxError)) throw error;
+        // Missing or invalid normal progress is handled by ordinary onboarding.
+      }
+    }
     const normalSentinel = path.join(normalUserData, ".sru-firstrun-completed");
     const rootSentinel = path.join(rootUserData, ".sru-firstrun-completed");
     if (!fs.existsSync(rootSentinel)) {
@@ -70,8 +98,7 @@ if (PRIVILEGE.isRoot && process.platform === "win32") {
       }
     }
   } catch (error) {
-    // Running elevated against the normal user's writable profile would turn
-    // an isolation failure into a privilege-boundary failure. Abort instead.
+    // Never fall back to a writable normal-user profile in an elevated app.
     throw new Error(`Windows elevated profile initialization failed: ${error.message}`);
   }
 }
@@ -138,6 +165,20 @@ if (process.platform === "linux") {
   app.commandLine.appendSwitch("disable-gpu-sandbox");
   // On X11 only; harmless on Wayland. Prevents Chromium from spawning a
   // compositor process that adds another X11 client.
+  app.commandLine.appendSwitch("in-process-gpu");
+}
+
+// SYSTEM-integrity exam mode (Windows): Chromium refuses to run as SYSTEM
+// without --no-sandbox (crbug 638180), and GPU subprocesses are unreliable
+// under a SYSTEM token. Render via CPU exactly like the Linux build; the
+// overlay is light enough that this is imperceptible.
+if (process.platform === "win32" && PRIVILEGE.integrity === "system") {
+  app.commandLine.appendSwitch("no-sandbox");
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("disable-software-rasterizer");
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
   app.commandLine.appendSwitch("in-process-gpu");
 }
 
@@ -240,6 +281,8 @@ class ApplicationController {
     // app was launched as root (scripts/cluely-root-exam.sh on macOS,
     // scripts/cluely.ps1 on Windows), Cluely ITSELF is the kill-immune exam
     // process — full UI, no shield handoff needed.
+    // Root mode uses the actual process token, including Windows High/System
+    // integrity; an environment flag or launcher argument cannot enable it.
     this.isRootMode = PRIVILEGE.isRoot;
     if (this.isRootMode) {
       logger.info("Root exam mode active", { privilege: PRIVILEGE.detail });
@@ -1496,14 +1539,13 @@ class ApplicationController {
     if (this._shieldExamModeTransitioning) {
       return { ok: false, error: "exam-mode transition already in progress" };
     }
-    // Root exam mode: Cluely itself is the kill-immune process (launched via
-    // scripts/cluely-root-exam.sh) — arming the shield would hide the very
-    // UI the root mode exists to keep. Fail with a clear message instead.
+    // In root mode the app remains the answer surface. Arming the shield
+    // would hide that surface, so reject the handoff.
     if (this.isRootMode) {
       return {
         ok: false,
         root: true,
-        error: "Root mode: Cluely is already the root, kill-immune exam app — the shield is not needed. Don't run the shield helper while root mode is active."
+        error: "Root mode: Cluely is already running elevated. The shield is not needed while root mode is active."
       };
     }
     this._shieldExamModeTransitioning = true;
@@ -2508,7 +2550,7 @@ class ApplicationController {
       // disguised root instance behind after the exam — refuse instead.
       if (this.isRootMode) {
         logger.warn("restart-app-for-stealth refused in root exam mode");
-        return { ok: false, error: "Restart is disabled in root exam mode — quit the sudo process manually after the exam." };
+        return { ok: false, error: "Restart is disabled in root exam mode — quit the elevated process after the exam." };
       }
       // Force restart the app to ensure stealth name changes take effect
       const { app } = require("electron");
@@ -2523,6 +2565,7 @@ class ApplicationController {
       windowManager.windows.forEach((win, type) => {
         if (!win.isDestroyed() && win.webContents === webContents) {
           if (type === "chat") windowManager.hideChatWindow();
+          else if (type === 'llmResponse') windowManager.hideLLMResponse();
           else win.hide();
         }
       });
@@ -2731,15 +2774,24 @@ class ApplicationController {
     this._responseSeq = (this._responseSeq || 0) + 1;
     const messageId = `img-${Date.now()}-${this._responseSeq}`;
     requestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 200 ? requestId : messageId;
+    if (captureService.isProcessing) {
+      // The capture service will reject this request. Leave the first
+      // request's loading panel and ownership untouched.
+      const error = 'Capture already in progress';
+      this.broadcastOCRError(error, requestId, messageId);
+      return { success: false, error };
+    }
     windowManager.broadcastToAllWindows("chat-request-started", { requestId, kind: 'capture' });
     const startTime = Date.now();
     const epoch = this.operationEpoch;
     const materialSnapshot = this.materialsManager?.snapshot();
     const current = () => this.operationEpoch === epoch && (!materialSnapshot || this.materialsManager.isCurrent(materialSnapshot));
     const chatHideVersion = windowManager.chatHideVersion;
+    const visibilityHideEpoch = windowManager.getVisibilityHideEpoch();
+    let panelOwner = null;
 
     try {
-      if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
+      if (this.shouldShowAnswerPanel()) panelOwner = windowManager.showLLMLoading();
 
       const capture = await captureService.captureAndProcess(captureOptions);
       if (!current()) return;
@@ -2749,7 +2801,7 @@ class ApplicationController {
       }
 
       if (!capture.imageBuffer || !capture.imageBuffer.length) {
-        windowManager.hideLLMResponse();
+        if (panelOwner != null) windowManager.hideLLMResponse({ owner: panelOwner, explicit: false });
         this.broadcastOCRError("Failed to capture screenshot image", requestId, messageId);
         return;
       }
@@ -2765,7 +2817,7 @@ class ApplicationController {
         requestId,
         skill: this.activeSkill,
         materialSession: this.materialSessionMarker()
-      });
+      }, { panelOwner });
 
       const llmResult = await llmService.processImageWithSkillStream(
         capture.imageBuffer,
@@ -2779,7 +2831,7 @@ class ApplicationController {
             messageId,
             requestId,
             delta
-          });
+          }, { panelOwner });
         }
       );
       if (!current()) return;
@@ -2798,7 +2850,7 @@ class ApplicationController {
 
       this.broadcastTranscriptionLLMResponse(llmResult);
 
-      if (this.shouldShowAnswerPanel()) {
+      if (panelOwner != null && this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
           sources: llmResult.metadata.sources,
@@ -2808,6 +2860,11 @@ class ApplicationController {
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
           isImageAnalysis: true
+        }, {
+          // Preserve a V hide made while capture or the model was in flight.
+          // A later explicit show may still reveal the completed answer.
+          reveal: windowManager.shouldRevealAnswerSince(visibilityHideEpoch),
+          owner: panelOwner
         });
       }
       return { success: true };
@@ -2821,7 +2878,7 @@ class ApplicationController {
       if (this.getAnswerSurface() !== "panel" && windowManager.chatHideVersion === chatHideVersion) {
         windowManager.showWindow("chat");
       }
-      windowManager.hideLLMResponse();
+      if (panelOwner != null) windowManager.hideLLMResponse({ owner: panelOwner, explicit: false });
       this.broadcastOCRError(error.message, requestId, messageId);
       
       sessionManager.addConversationEvent({
@@ -2844,6 +2901,8 @@ class ApplicationController {
     const epoch = this.operationEpoch;
     const materialSnapshot = this.materialsManager?.snapshot();
     const current = () => this.operationEpoch === epoch && (!materialSnapshot || this.materialsManager.isCurrent(materialSnapshot));
+    const visibilityHideEpoch = windowManager.getVisibilityHideEpoch();
+    let panelOwner = null;
     try {
       // Add user input to session memory
       sessionManager.addUserInput(text, 'llm_input');
@@ -2852,13 +2911,14 @@ class ApplicationController {
       const skillsRequiringProgrammingLanguage = ['dsa', 'ood'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
+      if (this.shouldShowAnswerPanel()) panelOwner = windowManager.claimAnswerPanelOwner();
       windowManager.broadcastToAllWindows("transcription-llm-response-start", {
         messageId,
         requestId,
         skill: this.activeSkill,
         materialSession: this.materialSessionMarker()
-      });
-      if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
+      }, { panelOwner });
+      if (panelOwner != null) windowManager.showLLMLoading(panelOwner);
 
       const llmResult = await llmService.processTextWithSkillStream(
         text,
@@ -2871,7 +2931,7 @@ class ApplicationController {
             messageId,
             requestId,
             delta
-          });
+          }, { panelOwner });
         }
       );
       if (!current()) return;
@@ -2901,7 +2961,7 @@ class ApplicationController {
 
       this.broadcastTranscriptionLLMResponse(llmResult);
 
-      if (this.shouldShowAnswerPanel()) {
+      if (panelOwner != null && this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
           sources: llmResult.metadata.sources,
@@ -2910,7 +2970,7 @@ class ApplicationController {
           materialNotice: llmResult.metadata.materialNotice,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
-        });
+        }, { reveal: windowManager.shouldRevealAnswerSince(visibilityHideEpoch), owner: panelOwner });
       }
     } catch (error) {
       if (!current()) return;
@@ -2919,7 +2979,7 @@ class ApplicationController {
         skill: this.activeSkill,
       });
 
-      windowManager.hideLLMResponse();
+      if (panelOwner != null) windowManager.hideLLMResponse({ owner: panelOwner, explicit: false });
       sessionManager.addConversationEvent({
         role: 'system',
         content: `LLM processing failed: ${error.message}`,
@@ -3015,6 +3075,8 @@ class ApplicationController {
     const voiceEpoch = this._voiceEpoch || 0;
     const materialSnapshot = this.materialsManager?.snapshot();
     const current = () => (this._voiceEpoch || 0) === voiceEpoch && (!materialSnapshot || this.materialsManager.isCurrent(materialSnapshot));
+    const visibilityHideEpoch = windowManager.getVisibilityHideEpoch();
+    let panelOwner = null;
     try {
       // Validate input text
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -3047,14 +3109,15 @@ class ApplicationController {
       // the UI never duplicates or interleaves concurrent responses.
       this._responseSeq = (this._responseSeq || 0) + 1;
       messageId = `tr-${Date.now()}-${this._responseSeq}`;
+      if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
+        panelOwner = windowManager.claimAnswerPanelOwner();
+      }
       this.sendToVoiceResponseWindows("transcription-llm-response-start", {
         messageId,
         skill: this.activeSkill,
         materialSession: this.materialSessionMarker()
-      });
-      if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
-        windowManager.showLLMLoading();
-      }
+      }, { panelOwner });
+      if (panelOwner != null) windowManager.showLLMLoading(panelOwner);
       const llmResult = await llmService.processTranscriptionWithIntelligentResponseStream(
         cleanText,
         this.activeSkill,
@@ -3065,7 +3128,7 @@ class ApplicationController {
           this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
             messageId,
             delta
-          });
+          }, { panelOwner });
         }
       );
       if (!current()) return;
@@ -3083,8 +3146,8 @@ class ApplicationController {
         isTranscriptionResponse: true
       });
 
-      this.sendTranscriptionLLMResponseToVoiceTargets(llmResult);
-      if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
+      this.sendTranscriptionLLMResponseToVoiceTargets(llmResult, panelOwner);
+      if (panelOwner != null && this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
           sources: llmResult.metadata.sources,
@@ -3094,7 +3157,7 @@ class ApplicationController {
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
           isTranscriptionResponse: true
-        });
+        }, { reveal: windowManager.shouldRevealAnswerSince(visibilityHideEpoch), owner: panelOwner });
       }
 
       logger.info("Transcription LLM response completed", {
@@ -3130,14 +3193,14 @@ class ApplicationController {
           fallbackReason: error.message
         });
 
-        this.sendTranscriptionLLMResponseToVoiceTargets(fallbackResult);
-        if (this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
+        this.sendTranscriptionLLMResponseToVoiceTargets(fallbackResult, panelOwner);
+        if (panelOwner != null && this.shouldShowVoiceOverlay() && this.shouldShowAnswerPanel()) {
           windowManager.showLLMResponse(fallbackResult.response, {
             skill: this.activeSkill,
             processingTime: fallbackResult.metadata.processingTime,
             usedFallback: true,
             isTranscriptionResponse: true
-          });
+          }, { reveal: windowManager.shouldRevealAnswerSince(visibilityHideEpoch), owner: panelOwner });
         }
         logger.info("Used fallback response for transcription", {
           skill: this.activeSkill,
@@ -3281,20 +3344,22 @@ class ApplicationController {
     return ['overlay', 'both'].includes(this.getVoiceResponseTarget());
   }
 
-  sendToVoiceResponseWindows(channel, data) {
+  sendToVoiceResponseWindows(channel, data, options = {}) {
     const target = this.getVoiceResponseTarget();
     if (target === 'chat' || target === 'both') {
       this.sendToChatWindow(channel, data);
     }
     if (target === 'overlay' || target === 'both') {
       const responseWindow = windowManager.getWindow("llmResponse");
-      if (responseWindow && !responseWindow.isDestroyed()) {
+      if (responseWindow && !responseWindow.isDestroyed() &&
+          (!Object.hasOwn(options, 'panelOwner') ||
+            windowManager.canDeliverPanelStream(options.panelOwner, responseWindow))) {
         responseWindow.webContents.send(channel, data);
       }
     }
   }
 
-  sendTranscriptionLLMResponseToVoiceTargets(llmResult) {
+  sendTranscriptionLLMResponseToVoiceTargets(llmResult, panelOwner = null) {
     const data = {
       response: llmResult.response,
       metadata: llmResult.metadata,
@@ -3304,7 +3369,7 @@ class ApplicationController {
       skill: this.activeSkill,
       isTranscriptionResponse: true
     };
-    this.sendToVoiceResponseWindows("transcription-llm-response", data);
+    this.sendToVoiceResponseWindows("transcription-llm-response", data, { panelOwner });
   }
 
   onWindowAllClosed() {

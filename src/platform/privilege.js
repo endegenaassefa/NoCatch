@@ -26,7 +26,9 @@ const INTEGRITY_LEVELS = [
 function parseWindowsIntegrity(raw) {
   const text = String(raw || "");
   for (const [sid, label] of INTEGRITY_LEVELS) {
-    if (text.includes(`S-1-16-${sid}`)) return label;
+    // Match the complete SID. A prefix such as S-1-16-122880 must not be
+    // mistaken for the High integrity SID S-1-16-12288.
+    if (new RegExp(`\\bS-1-16-${sid}(?![\\d-])`).test(text)) return label;
   }
   return "unknown";
 }

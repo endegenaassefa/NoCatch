@@ -13,6 +13,7 @@ function fixture(){
  const windowManager={
   broadcastToAllWindows:(channel,data)=>events.push({channel,data}),
   getVisibilityHideEpoch:()=>0,shouldRevealAnswerSince:hideEpoch=>hideEpoch===0,hasVisibleWindows:()=>panelVisible,
+  showWindow:()=>{},chatHideVersion:0,
   claimAnswerPanelOwner:()=>++panelOwner,isAnswerPanelOwner:owner=>owner===panelOwner,
   showLLMLoading:owner=>{if(owner==null)owner=++panelOwner;if(owner!==panelOwner)return;panelVisible=true;panels.push('loading');return owner},
   showLLMResponse:(text,_metadata,{owner}={})=>{if(owner!=null&&owner!==panelOwner)return;panelVisible=true;panels.push(text)},

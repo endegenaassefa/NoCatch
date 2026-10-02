@@ -168,7 +168,7 @@ class WindowManager {
   async showMainWindow() {
     const mainWindow = this.windows.get('main');
     if (!mainWindow) return;
-    this.desiredWindowVisibility.set('main', true);
+    this._ensureDesiredVisibility().set('main', true);
     
     // Immediate always-on-top enforcement for main window
     if (process.platform === 'darwin') {
@@ -207,7 +207,7 @@ class WindowManager {
 
   async createMainWindow(options = {}) {
     const { autoShow = true } = options;
-    if (autoShow) this.desiredWindowVisibility.set('main', true);
+    if (autoShow) this._ensureDesiredVisibility().set('main', true);
     if (this.windows.has('main')) {
       return this.windows.get('main');
     }
@@ -1304,7 +1304,7 @@ class WindowManager {
       return;
     }
     if (windowType === 'main' || windowType === 'chat') {
-      this.desiredWindowVisibility.set(windowType, true);
+      this._ensureDesiredVisibility().set(windowType, true);
     }
     if (!targetWindow || targetWindow.isDestroyed()) {
       // A stale destroyed entry must not make an explicit open a no-op.
@@ -1337,7 +1337,7 @@ class WindowManager {
     }
 
     for (const type of ['main', 'chat']) {
-      this.desiredWindowVisibility.set(type, true);
+      this._ensureDesiredVisibility().set(type, true);
       const window = this.windows.get(type);
       if (!window || window.isDestroyed()) this.ensureWindow(type);
     }
@@ -1373,7 +1373,7 @@ class WindowManager {
   hideAllWindowsExcept(keepTypes = []) {
     if (!keepTypes.includes('chat')) this.chatHideVersion += 1;
     for (const type of ['main', 'chat']) {
-      this.desiredWindowVisibility.set(type, keepTypes.includes(type));
+      this._ensureDesiredVisibility().set(type, keepTypes.includes(type));
     }
     this.windows.forEach((window, type) => {
       if (window.isDestroyed()) return;
@@ -1387,8 +1387,15 @@ class WindowManager {
     logger.info('All windows hidden except', { keepTypes });
   }
 
+  _ensureDesiredVisibility() {
+    // Lazy init keeps vm-sandboxed instances (which skip the constructor)
+    // working: intent tracking simply starts empty.
+    if (!this.desiredWindowVisibility) this.desiredWindowVisibility = new Map();
+    return this.desiredWindowVisibility;
+  }
+
   isWindowDesiredVisible(type) {
-    return this.desiredWindowVisibility.get(type) === true;
+    return this._ensureDesiredVisibility().get(type) === true;
   }
 
   recordVisibilityHide() {
@@ -2285,7 +2292,7 @@ class WindowManager {
 
   showChatWindow() {
     if (this.isScreenBeingShared) return;
-    this.desiredWindowVisibility.set('chat', true);
+    this._ensureDesiredVisibility().set('chat', true);
     const chatWindow = this.windows.get('chat');
     if (!chatWindow || chatWindow.isDestroyed()) {
       this.ensureWindow('chat');
@@ -2303,7 +2310,7 @@ class WindowManager {
     // user can always see where their keystrokes are landing.
     if (this.isScreenBeingShared) return;
     if (windowType === 'main' || windowType === 'chat') {
-      this.desiredWindowVisibility.set(windowType, true);
+      this._ensureDesiredVisibility().set(windowType, true);
     }
     const targetWindow = this.windows.get(windowType);
     if ((!targetWindow || targetWindow.isDestroyed()) && (windowType === 'main' || windowType === 'chat')) {
@@ -2328,7 +2335,7 @@ class WindowManager {
 
   hideChatWindow() {
     this.chatHideVersion += 1;
-    this.desiredWindowVisibility.set('chat', false);
+    this._ensureDesiredVisibility().set('chat', false);
     const chatWindow = this.windows.get('chat');
     if (chatWindow && !chatWindow.isDestroyed()) {
       chatWindow.hide();

@@ -32,7 +32,7 @@ function sendModifiersFromFlags(flags) {
 // token before enabling root mode.
 const { detect: detectPrivilege, rootDataDir } = require("./src/platform/privilege");
 const PRIVILEGE = detectPrivilege();
-const INGESTION_PLAYGROUND = process.argv.includes('--ingestion-playground');
+const INGESTION_PLAYGROUND = (process.argv || []).includes('--ingestion-playground');
 if (INGESTION_PLAYGROUND) {
   if (PRIVILEGE.isRoot) throw new Error('Launch the ingestion playground without administrator privileges.');
   const explicitProfile = app.commandLine.getSwitchValue('user-data-dir');
@@ -254,6 +254,10 @@ const { createDirectSetupAnswer } = require('./src/core/setup-direct-answer');
 
 class ApplicationController {
   constructor() {
+    // Module-level flag mirrored onto the instance so vm-sandboxed tests of
+    // this class (which never run the module top level) still get a defined
+    // value; real launches run the constructor and see the true flag.
+    this.ingestionPlayground = INGESTION_PLAYGROUND;
     this.isReady = false;
     this.starting = false;
     // Persisted user preferences: saved to .env on every change and read
@@ -817,7 +821,7 @@ class ApplicationController {
 
     const focusExistingWindows = () => {
       try {
-        if (INGESTION_PLAYGROUND && this.playground) {
+        if (this.ingestionPlayground && this.playground) {
           this.playground.reveal();
           return;
         }
@@ -930,7 +934,7 @@ class ApplicationController {
       const isFirstRun = status.needsOnboarding;
 
       powerMonitor.on("suspend", () => this.cancelVoiceWork());
-      await windowManager.initializeWindows({ showMainWindow: !isFirstRun && !INGESTION_PLAYGROUND });
+      await windowManager.initializeWindows({ showMainWindow: !isFirstRun && !this.ingestionPlayground });
       this.setupGlobalShortcuts();
       this.startShortcutRecovery();
       this.startRootVisibilityDiagnostic();
@@ -983,14 +987,13 @@ class ApplicationController {
         }
       }, 1500);
 
-      if (INGESTION_PLAYGROUND) {
-        const { PlaygroundController } = require('./src/playground/controller');
+      if (this.ingestionPlayground) {  const { PlaygroundController } = require('./src/playground/controller');
         this.playground = new PlaygroundController({ application: this, captureService, showSettings: () => windowManager.showSettings() });
         await this.playground.open();
       }
       // Launch the onboarding wizard if this is the first run.
-      if (!INGESTION_PLAYGROUND && !this.isFirstRun) setTimeout(()=>this.showMaterials().catch(()=>{}),800);
-      if (!INGESTION_PLAYGROUND && this.isFirstRun) {
+      if (!this.ingestionPlayground && !this.isFirstRun) setTimeout(()=>this.showMaterials().catch(()=>{}),800);
+      if (!this.ingestionPlayground && this.isFirstRun) {
         // Defer slightly so all windows finish loading before we pop
         // the wizard on top of them.
         setTimeout(async () => {
@@ -1808,7 +1811,7 @@ class ApplicationController {
         : this.managedSession.status().account?.providerCapabilities?.[options.provider]?.vision;
       return vision ? this.materialsManager.sourceImages(sources,options) : [];
     },managedSession:this.managedSession,getAIMode:()=>this.getAIMode(),answerDirect:createMaterialsDirectAnswer({llmService})};
-    if (INGESTION_PLAYGROUND) Object.assign(answerDependencies, {
+    if (this.ingestionPlayground) Object.assign(answerDependencies, {
       beforeAnswer: () => { if (!this.playground) throw new Error('Start a diagnostic exam before asking NoCatch.'); this.playground.beforeAnswer(); },
       onTrace: event => this.playground?.observe(event),
       onQuestionImage: (id, image) => this.playground?.observeImage(id, image)
@@ -2757,8 +2760,7 @@ class ApplicationController {
   }
 
   async triggerScreenshotOCR(requestId, captureOptions) {
-    if (INGESTION_PLAYGROUND) {
-      try {
+    if (this.ingestionPlayground) {      try {
         if (!this.playground) throw new Error('Start a diagnostic exam before asking NoCatch.');
         this.playground.consumeCaptureAuthorization(captureOptions, requestId);
       } catch (error) {
@@ -2894,7 +2896,7 @@ class ApplicationController {
   }
 
   async processWithLLM(text, sessionHistory, requestId) {
-    if (INGESTION_PLAYGROUND) this.playground?.beforeAnswer();
+    if (this.ingestionPlayground) this.playground?.beforeAnswer();
     this._responseSeq = (this._responseSeq || 0) + 1;
     const messageId = `chat-${Date.now()}-${this._responseSeq}`;
     requestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 200 ? requestId : messageId;

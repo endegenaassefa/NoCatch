@@ -30,6 +30,12 @@ function sendModifiersFromFlags(flags) {
 // and logged at boot so `cluely status` has honest evidence.
 const { detect: detectPrivilege, rootDataDir } = require("./src/platform/privilege");
 const PRIVILEGE = detectPrivilege();
+const INGESTION_PLAYGROUND = process.argv.includes('--ingestion-playground');
+if (INGESTION_PLAYGROUND) {
+  if (PRIVILEGE.isRoot) throw new Error('Launch the ingestion playground without administrator privileges.');
+  const explicitProfile = app.commandLine.getSwitchValue('user-data-dir');
+  app.setPath('userData', require('./src/playground/profile').resolvePlaygroundProfile({ appData: app.getPath('appData'), override: explicitProfile }));
+}
 
 // Windows root mode: isolate Chromium's userData under a machine-wide root
 // directory (C:\ProgramData\CluelyRoot\userdata) so the elevated instance
@@ -83,7 +89,7 @@ function resolveEnvPath() {
     const projectEnv = path.join(process.cwd(), ".env");
     // Prefer a project .env only when it already exists and userData has none
     // (i.e. a developer running from the repo). Otherwise use userData.
-    if (!app.isPackaged && !fs.existsSync(userDataEnv) && fs.existsSync(projectEnv)) {
+    if (!INGESTION_PLAYGROUND && !app.isPackaged && !fs.existsSync(userDataEnv) && fs.existsSync(projectEnv)) {
       return projectEnv;
     }
     return userDataEnv;
@@ -728,6 +734,7 @@ class ApplicationController {
     app.on("activate", () => this.onActivate());
     app.on("before-quit", event => {
       this._quitting = true;
+      this.playground?.dispose();
       if (this._modelShutdownComplete) return;
       event.preventDefault();
       if (this._modelShutdownPromise) return;
@@ -767,6 +774,10 @@ class ApplicationController {
 
     const focusExistingWindows = () => {
       try {
+        if (INGESTION_PLAYGROUND && this.playground) {
+          this.playground.reveal();
+          return;
+        }
         const mainWindow = windowManager.getWindow("main");
         if (mainWindow) {
           if (mainWindow.isMinimized && mainWindow.isMinimized()) {
@@ -876,7 +887,7 @@ class ApplicationController {
       const isFirstRun = status.needsOnboarding;
 
       powerMonitor.on("suspend", () => this.cancelVoiceWork());
-      await windowManager.initializeWindows({ showMainWindow: !isFirstRun });
+      await windowManager.initializeWindows({ showMainWindow: !isFirstRun && !INGESTION_PLAYGROUND });
       this.setupGlobalShortcuts();
       this.startShortcutRecovery();
       this.startRootVisibilityDiagnostic();
@@ -929,9 +940,14 @@ class ApplicationController {
         }
       }, 1500);
 
+      if (INGESTION_PLAYGROUND) {
+        const { PlaygroundController } = require('./src/playground/controller');
+        this.playground = new PlaygroundController({ application: this, captureService, showSettings: () => windowManager.showSettings() });
+        await this.playground.open();
+      }
       // Launch the onboarding wizard if this is the first run.
-      if (!this.isFirstRun) setTimeout(()=>this.showMaterials().catch(()=>{}),800);
-      if (this.isFirstRun) {
+      if (!INGESTION_PLAYGROUND && !this.isFirstRun) setTimeout(()=>this.showMaterials().catch(()=>{}),800);
+      if (!INGESTION_PLAYGROUND && this.isFirstRun) {
         // Defer slightly so all windows finish loading before we pop
         // the wizard on top of them.
         setTimeout(async () => {
@@ -1735,13 +1751,14 @@ class ApplicationController {
     if(this.materialsManager)return;
     this.materialsManager=new MaterialsManager({userDataPath:app.getPath('userData'),safeStorage:require('electron').safeStorage,owner:this.getMaterialsOwner(),visualAssets:true,
       onStatus:status=>{
+        this.playground?.materialsChanged();
         if(status.state==='active') {
           this._materialSessionId=status.id;
           this._materialSessionCleanup={expiresAt:status.expiresAt,generation:status.generation,owner:this.managedSession.status().account?.subject};
         }
         windowManager.broadcastToAllWindows('materials-status-changed',this.materialsStatus(status));
       },
-      onInvalidate:reason=>this.invalidateMaterialWork(reason)});
+      onInvalidate:reason=>{ this.playground?.materialsChanged(); this.invalidateMaterialWork(reason); }});
     this.setupService.materialsManager=this.materialsManager;
     const answerDependencies = {materials:this.materialsManager,readSourceImages:(sources,options)=>{
       const vision = this.getAIMode()==='direct'
@@ -1749,6 +1766,11 @@ class ApplicationController {
         : this.managedSession.status().account?.providerCapabilities?.[options.provider]?.vision;
       return vision ? this.materialsManager.sourceImages(sources,options) : [];
     },managedSession:this.managedSession,getAIMode:()=>this.getAIMode(),answerDirect:createMaterialsDirectAnswer({llmService})};
+    if (INGESTION_PLAYGROUND) Object.assign(answerDependencies, {
+      beforeAnswer: () => { if (!this.playground) throw new Error('Start a diagnostic exam before asking NoCatch.'); this.playground.beforeAnswer(); },
+      onTrace: event => this.playground?.observe(event),
+      onQuestionImage: (id, image) => this.playground?.observeImage(id, image)
+    });
     this.answerOrchestrator = require('./src/services/answer-orchestrator').createAnswerOrchestrator(answerDependencies);
     this.setupService.answerOrchestrator = this.answerOrchestrator;
     attachMaterialsSession(llmService,{...answerDependencies,orchestrator:this.answerOrchestrator});
@@ -2680,7 +2702,27 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("skill-updated", { skill: newSkill });
   }
 
-  async triggerScreenshotOCR(requestId) {
+  resetPlaygroundHistory() {
+    this.operationEpoch++;
+    this.answerOrchestrator?.cancelAll();
+    this.managedSession.cancelAll();
+    this.setupService?.invalidate();
+    clearTimeout(this._utteranceTimer); this._utteranceBuffer = ''; this.cancelVoiceWork();
+    sessionManager.clear();
+    windowManager.broadcastToAllWindows('session-cleared');
+    windowManager.hideLLMResponse();
+  }
+
+  async triggerScreenshotOCR(requestId, captureOptions) {
+    if (INGESTION_PLAYGROUND) {
+      try {
+        if (!this.playground) throw new Error('Start a diagnostic exam before asking NoCatch.');
+        this.playground.consumeCaptureAuthorization(captureOptions, requestId);
+      } catch (error) {
+        this.playground?.reportCaptureError(error.message);
+        return { success: false, error: error.message };
+      }
+    }
     if (!this.isReady) {
       logger.warn("Screenshot requested before application ready");
       return { success: false, error: "Screenshot capture is not ready. Please try again." };
@@ -2699,7 +2741,7 @@ class ApplicationController {
     try {
       if (this.shouldShowAnswerPanel()) windowManager.showLLMLoading();
 
-      const capture = await captureService.captureAndProcess();
+      const capture = await captureService.captureAndProcess(captureOptions);
       if (!current()) return;
       // Reveal the selected Chat surface only after capture, so it cannot enter the screenshot.
       if (this.getAnswerSurface() !== "panel" && windowManager.chatHideVersion === chatHideVersion) {
@@ -2768,6 +2810,7 @@ class ApplicationController {
           isImageAnalysis: true
         });
       }
+      return { success: true };
     } catch (error) {
       if (!current()) return;
       logger.error("Screenshot OCR process failed", {
@@ -2789,10 +2832,12 @@ class ApplicationController {
           error: error.message
         }
       });
+      return { success: false, error: error.message };
     }
   }
 
   async processWithLLM(text, sessionHistory, requestId) {
+    if (INGESTION_PLAYGROUND) this.playground?.beforeAnswer();
     this._responseSeq = (this._responseSeq || 0) + 1;
     const messageId = `chat-${Date.now()}-${this._responseSeq}`;
     requestId = typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 200 ? requestId : messageId;

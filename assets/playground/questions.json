@@ -1,0 +1,62 @@
+[
+  {
+    "id": "Q01",
+    "title": "Admission after a reset",
+    "text": "A new Harbor gateway passes two admission probes, fails the next one, and then starts passing again. How many consecutive successes are now required, and what spacing must they have?"
+  },
+  {
+    "id": "Q02",
+    "title": "A warning that persists",
+    "text": "A normal inlet queue has shown amber and has now drained to nine occupied slots. Does the warning clear at that point? Give the first occupancy at which it clears."
+  },
+  {
+    "id": "Q03",
+    "title": "Two deployment policies",
+    "text": "Compare the mapping-cache lifetime in the standard lecture deployment with the offline field-station deployment. Identify the scope of each number."
+  },
+  {
+    "id": "Q04",
+    "title": "Supervised repair renewal",
+    "text": "During a supervised repair, a lantern lease has already been renewed once. May it be renewed again, and how long was the permitted renewal?"
+  },
+  {
+    "id": "Q05",
+    "title": "Lost acknowledgment",
+    "text": "An archive commit succeeds but its response never reaches the buoy. On retry, which identifiers should stay the same or change, and how should the archive avoid a second append within its replay interval?"
+  },
+  {
+    "id": "Q06",
+    "title": "Read after a receipt",
+    "text": "A reader holds a receipt at position 120, but the query replica has applied only through 116. What does Harbor do before it can claim read-your-writes?"
+  },
+  {
+    "id": "Q07",
+    "title": "Late measurement disposition",
+    "text": "A measurement belongs to the Harbor window starting at event-time second 40. The watermark is now 75 and the measurement has just arrived. Can it change the published aggregate, and where does it go?"
+  },
+  {
+    "id": "Q08",
+    "title": "Cost-model comparison",
+    "text": "Under the teaching planner cost model, compare a plan needing nine random page reads with a scan needing twenty sequential page reads. Which is cheaper, and by how many cost units?"
+  },
+  {
+    "id": "Q09",
+    "title": "A narrow report token",
+    "text": "An analyst has an ember token for revision 6 of one report. Before the token expires, can it be used to enumerate all reports or automatically read revision 7? Explain its scope."
+  },
+  {
+    "id": "Q10",
+    "title": "Unverified checkpoint",
+    "text": "A partition has three verified checkpoints and a fourth candidate that has not passed verification. Should the oldest verified checkpoint be deleted now?"
+  },
+  {
+    "id": "Q11",
+    "title": "North Quay recovery",
+    "text": "At North Quay, a recovery drill encounters a checksum mismatch. Which checkpoint label and waiting interval does its station-specific procedure require before journal replay?"
+  },
+  {
+    "id": "Q12",
+    "title": "Read the routing sketch",
+    "text": "In the recovery lecture routing sketch, which buffer receives the dashed amber arrow? If the available evidence does not show the figure, state that limitation."
+  }
+]

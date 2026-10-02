@@ -10,12 +10,15 @@ const { resolveProvider } = require('../src/core/ai-providers');
 function launch({ argv = process.argv.slice(2), environment = process.env, start = spawn } = {}) {
   const { values } = parseArgs({ args: argv, options: {
     check: { type: 'boolean', default: false },
-    profile: { type: 'string', default: 'NoCatch-Clean-Slate-Exam' },
+    profile: { type: 'string' },
+    playground: { type: 'boolean', default: false },
     'model-dir': { type: 'string' }
   } });
+  values.profile ||= values.playground ? 'NoCatch-Ingestion-Playground' : 'NoCatch-Clean-Slate-Exam';
+  if (values.playground && values.profile !== 'NoCatch-Ingestion-Playground') throw new Error('The playground uses its dedicated NoCatch-Ingestion-Playground profile.');
   if (!/^[a-zA-Z0-9_-]+$/.test(values.profile)) throw new Error('Use a profile name, not a path.');
   if (!environment.APPDATA || !environment.LOCALAPPDATA) throw new Error('Windows profile directories are unavailable.');
-  const executable = path.join(environment.LOCALAPPDATA, 'Programs', 'screen-reader-util', 'screen-reader-util.exe');
+  const executable = path.join(environment.LOCALAPPDATA, 'Programs', values.playground ? 'screen-reader-util-playground' : 'screen-reader-util', 'screen-reader-util.exe');
   const profile = path.join(environment.APPDATA, values.profile);
   const originalConfig = path.join(environment.APPDATA, 'screen-reader-util', '.env');
   for (const file of [executable, path.join(path.dirname(executable), 'resources/speech-runtime/windows-x64/python.exe'),
@@ -52,7 +55,7 @@ function launch({ argv = process.argv.slice(2), environment = process.env, start
       if (selectedRoute.baseUrl === normalRoute) env[keyName] = normal[keyName];
     }
   }
-  if (!env[`${provider.toUpperCase()}_API_KEY`]) throw new Error('Configure the selected provider key in the app Settings first.');
+  if (!values.playground && !env[`${provider.toUpperCase()}_API_KEY`]) throw new Error('Configure the selected provider key in the app Settings first.');
   Object.assign(env, { AI_MODE: 'direct', LLM_PROVIDER: provider, WHISPER_CAPTURE_MODE: 'manual' });
   if (values['model-dir']) Object.assign(env, {
     SPEECH_PROVIDER: 'whisper', WHISPER_PYTHON: '', WHISPER_COMMAND: 'whisper',
@@ -60,7 +63,7 @@ function launch({ argv = process.argv.slice(2), environment = process.env, start
     WHISPER_LANGUAGE: 'en', WHISPER_DEVICE: 'cpu', WHISPER_RESPONSE_TARGET: 'chat'
   });
   fs.mkdirSync(profile, { recursive: true });
-  const child = start(executable, [`--user-data-dir=${profile}`], { cwd: profile, env, detached: true, stdio: 'ignore', windowsHide: true });
+  const child = start(executable, [`--user-data-dir=${profile}`, ...(values.playground ? ['--ingestion-playground'] : [])], { cwd: profile, env, detached: true, stdio: 'ignore', windowsHide: true });
   child.on('error', error => { console.error(`NoCatch launch failed: ${error.message}`); process.exitCode = 1; });
   child.unref();
   return { executable, profile, provider };

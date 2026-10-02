@@ -1,0 +1,87 @@
+{
+  "course": "Harbor Systems 241",
+  "original": true,
+  "files": [
+    {
+      "filename": "01-harbor-foundations.pptx",
+      "bytes": 50431,
+      "sha256": "2e9d2d08ea931cbefeff1ea55ec1178867af4dd72f6daa8bf58798d0117d2721",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "02-queues-and-backpressure.pptx",
+      "bytes": 50229,
+      "sha256": "8047e931da5f91411b15d57a0e790ef412b66356f9ab66f835f0e8a56cad74e3",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "03-cache-coherence.pptx",
+      "bytes": 50225,
+      "sha256": "562b1317bccba1afcc84f42614cb1e9ac98b243f21360b0b256f94bd1c87a86b",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "04-leases-and-ownership.pptx",
+      "bytes": 50188,
+      "sha256": "55a95a431d99c1754f17e7392098b31dc76235fde8e04e12b350b4ff66e034d3",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "05-transactions-and-retry.pptx",
+      "bytes": 50230,
+      "sha256": "1211e22ddb921ae4383ad3382b2812354f882c931c95fa22cb79419d7c6eab33",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "06-replication-and-read.pptx",
+      "bytes": 50161,
+      "sha256": "70a64ea14846e2f82b4237f29ec627ca94eddee1f21f9a8da1dc74804a111c36",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "07-streams-and-windows.pptx",
+      "bytes": 50157,
+      "sha256": "5e6f63d51a472e800ff0c98f4a9bfb304bddd677adebc30e7d7ad6641b796789",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "08-indexes-and-plans.pptx",
+      "bytes": 50114,
+      "sha256": "6ad37c5c675554951667afdea001384e9dfe59a953778ff151072c200aea1b60",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "09-security-and-audit.pptx",
+      "bytes": 50190,
+      "sha256": "783cab699ddf7e32be20e5adafeebc551f5b8f4599c86305a48c8364901f087e",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "10-recovery-and-diagnostics.pptx",
+      "bytes": 60265,
+      "sha256": "5fbb637532e80af8d7d773e1ef84095c73ce9c8c6d2f57d3932921aa48f6c69f",
+      "pages": 8,
+      "kind": "slide"
+    },
+    {
+      "filename": "11-harbor-field-chapter.pdf",
+      "bytes": 40576,
+      "sha256": "7895422add618c47eda4fb97223e0ac0261732401b86b1a4a55b018a2b5888b4",
+      "pages": 24,
+      "kind": "page"
+    }
+  ],
+  "aggregatePages": 104,
+  "questionCount": 12,
+  "oracleSeparate": true,
+  "totalBytes": 552766
+}

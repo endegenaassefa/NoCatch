@@ -38,10 +38,21 @@ function hasUnsupportedCitation(text, sources) {
   return false;
 }
 
-function createAnswerOrchestrator({ materials, answerDirect, managedSession, readSourceImages, getAIMode = () => 'managed' }) {
+function createAnswerOrchestrator({ materials, answerDirect, managedSession, readSourceImages, getAIMode = () => 'managed', onTrace, onQuestionImage, beforeAnswer }) {
   const requests = new Set();
   const answer = async (input, { signal, onDelta = () => {}, onUsage = () => {} } = {}) => {
     validateQuestion(input);
+    // Optional playground policy runs before any retrieval or provider work.
+    await beforeAnswer?.();
+    const traceId = require('node:crypto').randomUUID(), started = Date.now();
+    const observe = (callback, ...args) => {
+      try { callback?.(...args)?.catch?.(() => {}); } catch { /* Observation cannot change an answer. */ }
+    };
+    const trace = (event, fields = {}) => {
+      if (typeof onTrace !== 'function') return;
+      // Copy only explicit fields; never expose keys, history or arbitrary input properties.
+      observe(onTrace, JSON.parse(JSON.stringify({ event, requestId: traceId, elapsedMs: Math.max(0, Date.now() - started), ...fields })));
+    };
     const status = materials?.status(), active = status?.state === 'active';
     const snapshot = active ? materials.snapshot() : null;
     const controller = new AbortController(); requests.add(controller);
@@ -65,6 +76,8 @@ function createAnswerOrchestrator({ materials, answerDirect, managedSession, rea
     };
     try {
       check();
+      trace('request:start', { text: input.text, hasImage: Boolean(input.image), materialSession: snapshot });
+      if (input.image) observe(onQuestionImage, traceId, { mimeType: input.image.mimeType, data: input.image.data });
       const history = historyWithin(input.history), payload = { ...input, history, skill: input.skill || 'general' };
       let context, materialStatus = 'none';
       if (active) {
@@ -73,10 +86,13 @@ function createAnswerOrchestrator({ materials, answerDirect, managedSession, rea
         // A large collection needs a searchable question before evidence can
         // be selected. Small full-context sessions answer images in one call.
         if (input.image && status.preparation?.strategy !== 'full-context') {
+          trace('transcription:start');
           const transcribed = await dispatch({ ...payload, text: 'Transcribe the question, answer choices and essential diagram labels from this screenshot. Return only the transcription; do not solve it.', history: [], materialContext: marker }, () => {});
           question = String(transcribed.text || '');
           if (!question.trim() || question.length > 16000) throw fail('IMAGE_TRANSCRIPTION_FAILED', 'The screenshot question could not be read. Try a smaller, clearer capture.');
+          trace('transcription:end', { text: question });
         }
+        trace('retrieval:start');
         try {
           const result = await wait(materials.retrieveAsync(question, { history, maxChars: LIMITS.maxContextChars, signal: combined }));
           check();
@@ -90,6 +106,7 @@ function createAnswerOrchestrator({ materials, answerDirect, managedSession, rea
           if (['CANCELLED', 'MATERIAL_EXPIRED', 'material_expired', 'ABORT_ERR'].includes(error.code)) throw cancelled();
           materialStatus = 'failed'; context = { ...marker, status: materialStatus };
         }
+        trace('retrieval:end', { status: materialStatus, strategy: context.strategy, sources: context.sources });
         if (readSourceImages && context.sources.length) {
           try {
             const images = await wait(readSourceImages(context.sources, { signal: combined, provider: input.provider }));
@@ -105,14 +122,24 @@ function createAnswerOrchestrator({ materials, answerDirect, managedSession, rea
         }
         payload.materialContext = context;
       }
-      const result = await dispatch(payload);
+      trace('answer:start');
+      let firstToken = false;
+      const result = await dispatch(payload, delta => {
+        if (!firstToken && typeof delta === 'string' && delta.trim()) { firstToken = true; trace('answer:first-token'); }
+        onDelta(delta);
+      });
       if (typeof result.text !== 'string' || !result.text.trim()) throw fail('EMPTY_ANSWER', 'The model returned no answer. Try again.');
       const warning = active && hasUnsupportedCitation(result.text, context.sources) ? ' Some source citations could not be verified.' : '';
       const searchNotice = active && context.strategy === 'lexical-fallback' ? ' Semantic search is unavailable; text matching was used.' : '';
-      return { ...result, materialStatus, materialNotice: notices[materialStatus] + searchNotice + warning,
+      const response = { ...result, materialStatus, materialNotice: notices[materialStatus] + searchNotice + warning,
         ...(active ? { materialSession: { sessionId: snapshot.sessionId, generation: snapshot.generation, expiresAt: snapshot.expiresAt },
           sources: citations(result.text, context.sources), retrievedSources: context.sources, strategy: context.strategy } : { sources: [], retrievedSources: [] }) };
-    } finally { clearTimeout(timer); clearInterval(poll); requests.delete(controller); controller.abort(); }
+      trace('answer:end', { text: response.text, sources: response.sources, materialStatus: response.materialStatus, materialNotice: response.materialNotice, strategy: response.strategy });
+      return response;
+    } catch (error) {
+      trace('request:error', { code: typeof error.code === 'string' ? error.code.slice(0, 80) : 'REQUEST_FAILED', message: 'The answer request did not complete.' });
+      throw error;
+    } finally { clearTimeout(timer); clearInterval(poll); requests.delete(controller); controller.abort(); trace('request:end'); }
   };
   answer.cancelAll = () => { for (const controller of requests) controller.abort(); };
   return answer;

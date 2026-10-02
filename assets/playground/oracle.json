@@ -1,0 +1,241 @@
+{
+  "course": "Harbor Systems 241",
+  "scope": "Independent synthetic course assessment; never ingest or send oracle to models",
+  "questions": [
+    {
+      "id": "Q01",
+      "expected": "Three consecutive successful probes, seven seconds between probe starts; the failure resets the count.",
+      "rubric": [
+        "States three consecutive successes after the failure",
+        "States seven-second spacing",
+        "Does not treat the first two successes as retained"
+      ],
+      "sources": [
+        {
+          "filename": "01-harbor-foundations.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "three successful probes, each separated by seven seconds"
+        }
+      ]
+    },
+    {
+      "id": "Q02",
+      "expected": "No. Amber remains at nine; it clears below nine, first at eight occupied slots.",
+      "rubric": [
+        "Retains amber at nine",
+        "Names eight as first clearing occupancy"
+      ],
+      "sources": [
+        {
+          "filename": "02-queues-and-backpressure.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "amber warning remains until occupancy falls below nine"
+        }
+      ]
+    },
+    {
+      "id": "Q03",
+      "expected": "Standard lecture: 45 seconds. Offline field station: 120 seconds. Both require refresh at their boundary; the field exception is scoped.",
+      "rubric": [
+        "45 seconds tied to standard lecture",
+        "120 seconds tied to offline field chapter",
+        "Does not collapse the policies into a universal value"
+      ],
+      "sources": [
+        {
+          "filename": "03-cache-coherence.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "forty-five seconds"
+        },
+        {
+          "filename": "11-harbor-field-chapter.pdf",
+          "page": 9,
+          "kind": "page",
+          "excerpt": "one hundred twenty seconds"
+        }
+      ],
+      "category": "source-disagreement"
+    },
+    {
+      "id": "Q04",
+      "expected": "No second renewal. Exactly one renewal is allowed, lasting eleven seconds.",
+      "rubric": [
+        "Rejects second renewal",
+        "States eleven seconds"
+      ],
+      "sources": [
+        {
+          "filename": "04-leases-and-ownership.pptx",
+          "slide": 4,
+          "kind": "slide",
+          "excerpt": "Lantern leases allow exactly one renewal, and that renewal lasts eleven seconds."
+        }
+      ],
+      "category": "speaker-notes-only"
+    },
+    {
+      "id": "Q05",
+      "expected": "Keep the observation identifier; assign a new attempt identifier. Within six hours return the original commit receipt for the repeated observation identifier instead of appending again.",
+      "rubric": [
+        "Observation identifier preserved",
+        "New attempt identifier",
+        "Original commit receipt and no duplicate append",
+        "Six-hour replay interval"
+      ],
+      "sources": [
+        {
+          "filename": "01-harbor-foundations.pptx",
+          "slide": 2,
+          "kind": "slide",
+          "excerpt": "Retries keep the observation identifier and allocate a new attempt identifier"
+        },
+        {
+          "filename": "05-transactions-and-retry.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "six hours"
+        }
+      ],
+      "category": "cross-document"
+    },
+    {
+      "id": "Q06",
+      "expected": "Require watermark at least 120, wait up to four seconds, then route to the partition leader if still behind; unavailable if leader cannot answer.",
+      "rubric": [
+        "Requires at least receipt watermark 120",
+        "Wait bounded at four seconds",
+        "Leader fallback and unavailable if it cannot answer"
+      ],
+      "sources": [
+        {
+          "filename": "06-replication-and-read.pptx",
+          "slide": 2,
+          "kind": "slide",
+          "excerpt": "watermark of at least 120"
+        },
+        {
+          "filename": "06-replication-and-read.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "waits for up to four seconds"
+        }
+      ]
+    },
+    {
+      "id": "Q07",
+      "expected": "The window ends at 60 and its correction boundary is 74. At watermark 75 it cannot change the published aggregate and goes to the late ledger.",
+      "rubric": [
+        "Derives window end 60",
+        "Derives boundary 74",
+        "Late ledger, no rewrite at 75"
+      ],
+      "sources": [
+        {
+          "filename": "07-streams-and-windows.pptx",
+          "slide": 2,
+          "kind": "slide",
+          "excerpt": "windows of twenty seconds"
+        },
+        {
+          "filename": "07-streams-and-windows.pptx",
+          "slide": 4,
+          "kind": "slide",
+          "excerpt": "end plus fourteen seconds"
+        }
+      ],
+      "category": "derived"
+    },
+    {
+      "id": "Q08",
+      "expected": "Random plan costs 36 units; sequential scan costs 20. The scan is cheaper by 16 units under this model.",
+      "rubric": [
+        "Computes 9 \u00d7 4 = 36",
+        "Computes 20 \u00d7 1 = 20",
+        "Selects scan with difference 16",
+        "Scopes conclusion to teaching model"
+      ],
+      "sources": [
+        {
+          "filename": "08-indexes-and-plans.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "one unit to a sequential page read and four units to a random page read"
+        }
+      ],
+      "category": "derived"
+    },
+    {
+      "id": "Q09",
+      "expected": "Neither action is allowed. It reads one named report revision for ninety seconds and cannot enumerate or automatically read a newer revision.",
+      "rubric": [
+        "Rejects enumeration",
+        "Rejects automatic revision 7",
+        "One named revision and ninety seconds"
+      ],
+      "sources": [
+        {
+          "filename": "09-security-and-audit.pptx",
+          "slide": 2,
+          "kind": "slide",
+          "excerpt": "one named report revision for ninety seconds"
+        }
+      ]
+    },
+    {
+      "id": "Q10",
+      "expected": "No. Keep the three verified checkpoints until the new candidate passes verification; an unverified candidate does not displace one.",
+      "rubric": [
+        "Rejects deletion before verification",
+        "Explains latest three verified checkpoints"
+      ],
+      "sources": [
+        {
+          "filename": "10-recovery-and-diagnostics.pptx",
+          "slide": 3,
+          "kind": "slide",
+          "excerpt": "An unverified new checkpoint does not displace a verified one."
+        }
+      ]
+    },
+    {
+      "id": "Q11",
+      "expected": "Select checkpoint glacier-27 and wait seventeen seconds before replaying the journal. Stop if that checkpoint is unavailable.",
+      "rubric": [
+        "Exact label glacier-27",
+        "Seventeen seconds before replay",
+        "Station-specific scope"
+      ],
+      "sources": [
+        {
+          "filename": "11-harbor-field-chapter.pdf",
+          "page": 23,
+          "kind": "page",
+          "excerpt": "checkpoint label glacier-27 and wait seventeen seconds"
+        }
+      ],
+      "category": "late-chapter"
+    },
+    {
+      "id": "Q12",
+      "expected": "The dashed amber arrow points to Pine buffer. With text-only evidence, explicitly state the figure is unavailable and do not guess.",
+      "rubric": [
+        "With original figure: Pine buffer",
+        "With text-only excerpts: admits unavailable visual relationship; no unsupported guess",
+        "Does not claim text extraction recovered the arrow"
+      ],
+      "sources": [
+        {
+          "filename": "10-recovery-and-diagnostics.pptx",
+          "slide": 7,
+          "kind": "slide",
+          "excerpt": "Embedded routing image: dashed amber edge points to Pine buffer."
+        }
+      ],
+      "category": "visual-only",
+      "textOnlyExpected": "Insufficient visual evidence; cannot determine arrow target from extracted text alone."
+    }
+  ]
+}

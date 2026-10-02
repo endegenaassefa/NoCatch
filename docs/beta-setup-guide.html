@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCluely — Setup Guide</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; background:#f4f6fb; color:#1a2233; margin:0; padding:0 12px 60px; }
+  .page { max-width: 760px; margin: 0 auto; }
+  header { background:#101830; color:#fff; padding: 28px 22px 22px; border-radius: 0 0 18px 18px; text-align:center; }
+  header h1 { margin:0 0 6px; font-size:30px; }
+  header p { margin:0; opacity:.85; }
+  .need { background:#fff8e6; border:2px solid #f0c94a; border-radius:14px; padding:16px 18px; margin:22px 0; }
+  .need b { color:#8a6400; }
+  .step { background:#fff; border-radius:14px; padding:20px 22px; margin:16px 0; box-shadow:0 2px 8px rgba(16,24,48,.08); }
+  .step h2 { margin:0 0 10px; font-size:21px; display:flex; align-items:center; gap:12px; }
+  .num { background:#2563eb; color:#fff; border-radius:50%; width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; font-size:19px; flex:none; }
+  .step p, .step li { line-height:1.6; font-size:16px; }
+  .step ul { padding-left:22px; }
+  kbd, .btn { background:#eef2ff; border:1px solid #b7c4f2; border-radius:7px; padding:1px 9px; font-family:inherit; font-size:15px; white-space:nowrap; }
+  .btn { background:#2563eb; color:#fff; border:none; padding:2px 12px; }
+  .warn { background:#ffe9e9; border-left:5px solid #d64545; padding:10px 14px; border-radius:8px; margin:10px 0; }
+  .ok { background:#e9f7ec; border-left:5px solid #2e9e52; padding:10px 14px; border-radius:8px; margin:10px 0; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; background:#fff; border-radius:10px; overflow:hidden; }
+  th { background:#101830; color:#fff; text-align:left; padding:10px 12px; }
+  td { padding:10px 12px; border-bottom:1px solid #e3e8f5; vertical-align:top; }
+  .small { font-size:14px; color:#556; }
+  .final { background:#e9f7ec; border:2px solid #2e9e52; border-radius:14px; padding:16px 18px; margin:22px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <h1>OpenCluely</h1>
+  <p>Setup Guide — follow the steps in order. It takes about 10 minutes.</p>
+</header>
+
+<div class="need">
+  <b>Before you start, make sure you have:</b><br>
+  • A computer with <b>Windows 10 or Windows 11</b><br>
+  • About <b>3 GB of free space</b> on the C: drive<br>
+  • <b>Internet</b> (needed for setup and for asking questions)
+</div>
+
+<div class="step">
+  <h2><span class="num">1</span> Open the ZIP file</h2>
+  <ul>
+    <li>Find the file you downloaded, for example <b>OpenCluely-Beta-Setup.zip</b>. It's usually in your <b>Downloads</b> folder.</li>
+    <li><b>Right-click</b> it and choose <span class="btn">Extract All…</span></li>
+    <li>Click <span class="btn">Extract</span> in the window that appears.</li>
+    <li>A new folder opens with two files inside: a <b>setup program</b> and this <b>guide</b>.</li>
+  </ul>
+</div>
+
+<div class="step">
+  <h2><span class="num">2</span> Double-click the setup program</h2>
+  <ul>
+    <li>Double-click <b>OpenCluely-Setup-1.1.0-beta-x64.exe</b>.</li>
+    <li>A blue window may appear that says <b>“Windows protected your PC”</b>. This is normal — the app is a test version and doesn't have a paid signature yet.</li>
+    <li>On that blue window, click <span class="btn">More info</span>, then click <span class="btn">Run anyway</span>.</li>
+    <li>If you see a different warning (for example from your antivirus), always choose <b>Allow</b>, <b>Run anyway</b>, or <b>More info → Run anyway</b>.</li>
+  </ul>
+  <div class="warn"><b>Only do this because you got the file from someone you trust.</b> Never click “Run anyway” on a program from a stranger.</div>
+</div>
+
+<div class="step">
+  <h2><span class="num">3</span> Wait for it to install</h2>
+  <ul>
+    <li>A progress bar appears. Wait <b>1–3 minutes</b> — it is unpacking about 2 GB of files.</li>
+    <li>When it finishes, <b>OpenCluely opens by itself</b>.</li>
+    <li>You'll also see new icons on your Desktop: <b>OpenCluely</b>, <b>OpenCluely (Admin)</b>, <b>OpenCluely Exam Mode</b>, and <b>OpenCluely Stop</b>. That's normal.</li>
+  </ul>
+  <div class="ok">If the app didn't open by itself, double-click the <b>OpenCluely</b> icon on your Desktop.</div>
+</div>
+
+<div class="step">
+  <h2><span class="num">4</span> Get your AI key (one time only)</h2>
+  <p>The app answers questions using <b>DeepSeek</b>, an AI service. You need your own key — like a password that lets the app talk to the AI for you.</p>
+  <ul>
+    <li>Open your web browser and go to: <b>platform.deepseek.com</b></li>
+    <li>Click <span class="btn">Sign up</span> and make an account (you can sign up with Google).</li>
+    <li>Click <b>Top up</b> and add a small amount — <b>$5 is plenty</b>. (Answers cost a tiny fraction of a cent each, so $5 covers hundreds of questions.)</li>
+    <li>On the left, click <b>API Keys</b>, then click <span class="btn">Create new API key</span>.</li>
+    <li>Give it any name, click <b>Create</b>, then click <span class="btn">Copy</span>.</li>
+    <li>Your key starts with <b>sk-</b>. Keep it secret, like a password.</li>
+  </ul>
+</div>
+
+<div class="step">
+  <h2><span class="num">5</span> Put the key into OpenCluely</h2>
+  <ul>
+    <li>In the OpenCluely window, click the <b>Settings</b> gear icon.</li>
+    <li>Find the box called <b>“LLM Provider”</b> and choose <b>DeepSeek</b>.</li>
+    <li>Find the box called <b>“DeepSeek API Key”</b>, click it, and paste your key (right-click → Paste, or press Ctrl+V).</li>
+    <li>The app saves it automatically — you can close Settings.</li>
+  </ul>
+  <div class="ok">If a welcome window appeared when the app first opened, you can also paste the key there. Same key.</div>
+</div>
+
+<div class="step">
+  <h2><span class="num">6</span> Try it with your own files</h2>
+  <ul>
+    <li>Click the <span class="btn">Add files</span> button in the app.</li>
+    <li>Pick one or more <b>PDF</b> or <b>PowerPoint (.pptx)</b> files from your computer.</li>
+    <li>Wait a few seconds while it reads them.</li>
+    <li>Type a question about your files into the <b>chat box</b> and press <b>Enter</b>.</li>
+    <li>The answer appears — and it shows you the exact pages it used.</li>
+  </ul>
+</div>
+
+<div class="step">
+  <h2><span class="num">7</span> Exam mode (only if your school uses LockDown Browser)</h2>
+  <ul>
+    <li>Press the <b>Windows key</b> on your keyboard and type: <b>OpenCluely Exam Mode</b>, then press <b>Enter</b>.</li>
+    <li>Windows asks <b>“Do you want to allow this app to make changes to your device?”</b> — click <span class="btn">Yes</span>.</li>
+    <li>A protected Cluely window appears on top. During the exam:</li>
+    <li><b>Ctrl+Shift+S</b> = read the question on your screen and answer it.</li>
+    <li><b>Ctrl+Shift+V</b> = bring the Cluely window back to the front if the exam browser covers it.</li>
+    <li>When you're done: double-click <b>OpenCluely Stop</b> and click <b>Yes</b>. (Or just restart the computer — that always turns it off.)</li>
+  </ul>
+  <div class="warn">If the “Yes” box asks for a <b>password</b>: that's the computer's <b>administrator password</b>. Ask whoever owns the computer. Without it, you can still use Steps 1–6 normally — only exam mode needs it.</div>
+</div>
+
+<h2 style="text-align:center; margin-top:34px;">If something goes wrong</h2>
+<table>
+  <tr><th>You see this</th><th>Do this</th></tr>
+  <tr><td>“Windows protected your PC”</td><td>More info → Run anyway (Step 2)</td></tr>
+  <tr><td>Antivirus warning about the setup file</td><td>Choose Allow / Run anyway — it's the unsigned beta</td></tr>
+  <tr><td>App didn't open after installing</td><td>Double-click the OpenCluely Desktop icon</td></tr>
+  <tr><td>“Configure the selected provider in Settings first”</td><td>You skipped Step 5 — paste your DeepSeek key</td></tr>
+  <tr><td>Answers complain about balance or payment</td><td>Add a little credit at platform.deepseek.com (Step 4)</td></tr>
+  <tr><td>“Not enough space” during install</td><td>You need ~3 GB free — empty the Recycle Bin and try again</td></tr>
+  <tr><td>Ctrl+Shift+S did nothing</td><td>Click once on the Cluely window first, then press it again</td></tr>
+  <tr><td>Exam mode asks for a password</td><td>It needs the computer's admin password (Step 7 note)</td></tr>
+  <tr><td>You want to remove the app</td><td>Windows Settings → Apps → find <b>screen-reader-util</b> → Uninstall</td></tr>
+  <tr><td>Anything else looks broken</td><td>Take a screenshot and send it to the person who gave you this ZIP</td></tr>
+</table>
+
+<div class="final">
+  <b>Privacy:</b> your files stay on <i>your</i> computer. When you ask a question, only the question and a few matching lines from your file are sent to DeepSeek to write the answer.
+</div>
+
+<p class="small" style="text-align:center;">OpenCluely 1.1.0-beta — this is a test version, so a few rough edges are normal. Report them, don't fix them yourself 🙂</p>
+
+</div>
+</body>
+</html>

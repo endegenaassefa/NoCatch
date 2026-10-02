@@ -211,6 +211,7 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "shortcutName": "OpenCluely",
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
       "artifactName": "OpenCluely-Setup-${version}-${arch}.${ext}"

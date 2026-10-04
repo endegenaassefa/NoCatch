@@ -33,3 +33,4 @@ managed-config.json
 docs/depthengine/instance/state.sqlite3
 exam-scan/baseline/
 __pycache__/
+node_modules

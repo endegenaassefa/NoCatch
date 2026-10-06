@@ -38,7 +38,7 @@ See [BRANCHES.md](BRANCHES.md) for the purpose and original name of every publis
 
 The attached-navbar change passed **22 module checks** and **59 browser checks**, including chat visibility, retained drafts, movement geometry, stale callbacks, narrow layouts and a constrained-height menu. Five existing asynchronous chat-preservation checks also passed. Portable regression scripts and their coverage are in [tests/attached-navbar](tests/attached-navbar/README.md).
 
-Isolated Windows checks exercised toolbar startup, chat attachment, pointer drag locking, menu expansion and restoration, and native group movement through the production handler. **Physical keyboard hold/release remains unverified**: synthetic key input did not reach the shortcut handler, and the manual trial was not completed. Native checks used one display at 125% scaling; no monitor hotplug, microphone, provider or restricted-browser compatibility claim is made.
+Isolated Windows checks exercised toolbar startup, chat attachment, pointer drag locking, menu expansion and restoration, and native group movement through the production handler. The user reported that both panels moved and stopped during a manual keyboard trial. The recorder did not capture that movement, and the trial preceded the final repairs, so **physical keyboard timing remains unverified for the final source**. Native checks used one display at 125% scaling; no monitor hotplug, microphone, provider or restricted-browser compatibility claim is made.
 
 This repository publishes source. No new installer or binary release accompanies this branch.
 

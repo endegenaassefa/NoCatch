@@ -38,6 +38,7 @@ class MainWindowUI {
         try {
             this.setupElements();
             this.setupEventListeners();
+            this.setupExamLayout();
             
             // Load current skill from settings
             await this.loadCurrentSkill();
@@ -130,7 +131,7 @@ class MainWindowUI {
 
     applyMicVisibility() {
         if (this.micButton) {
-            if (this.speechAvailable) {
+            if (this.speechAvailable || this.isRecording) {
                 this.micButton.style.display = '';
             } else {
                 this.micButton.style.display = 'none';
@@ -157,6 +158,8 @@ class MainWindowUI {
             });
             
             // Remove both classes first
+            this.statusDot.title = this.isInteractive ? 'Controls enabled' : 'Click-through · press Alt+A to use controls';
+            this.statusDot.setAttribute('aria-label', this.statusDot.title);
             this.statusDot.classList.remove('interactive', 'non-interactive');
             
             // Add the appropriate class
@@ -242,6 +245,106 @@ class MainWindowUI {
         }
     }
 
+    setupExamLayout() {
+        const api = window.electronAPI;
+        const byId = id => document.getElementById(id);
+        const setup = byId('toolbarPanelSetup');
+        const movement = byId('toolbarMovementKeys');
+        const display = byId('toolbarDisplay');
+        const status = byId('toolbarPanelStatus');
+        const lock = byId('toolbarLayoutStatus');
+        let dirty = false, revisions = 0;
+        const fill = (select, entries, value) => {
+            const signature = JSON.stringify(entries);
+            if (select.dataset.options !== signature) {
+                const previous = select.value;
+                select.replaceChildren(...entries.map(([key, label]) => new Option(label, key)));
+                select.dataset.options = signature;
+                if (dirty && entries.some(([key]) => String(key) === previous)) select.value = previous;
+            }
+            if (!dirty) select.value = String(value ?? '');
+        };
+        const apply = state => {
+            const previous = this.examState;
+            this.examState = state;
+            document.documentElement.style.setProperty("--exam-bar-height", `${state.compactHeight || 34}px`);
+            document.documentElement.style.setProperty("--exam-menu-top", `${state.menuTop ?? (state.compactHeight || 34) + 8}px`);
+            document.documentElement.classList.toggle('exam-layout', Boolean(state.enabled));
+            setup.hidden = !state.supported;
+            lock.hidden = !state.enabled;
+            byId('toolbarExamToggle').hidden = !state.supported;
+            byId('toolbarExamToggle').textContent = state.enabled ? 'Return to normal layout' : 'Use Exam layout';
+            byId('openChatButton').setAttribute('aria-expanded', String(Boolean(state.chatOpen && state.coreVisible)));
+            if (state.chatOpen && state.coreVisible) this.chatNotice = '';
+            this.updateChatNotice();
+            const message = state.enabled ? state.error || (state.saveError ? 'Position could not be saved. Controls remain available.' : '') : '';
+            status.textContent = message;
+            status.hidden = !message;
+            const unavailable = state.movement !== 'ready';
+            lock.classList.toggle('movement-unavailable', unavailable || Boolean(message));
+            lock.title = message || (unavailable ? 'Movement unavailable · More → Panel setup to retry' : `Position locked · ${state.modifier}+arrows to move`);
+            lock.setAttribute('aria-label', `${lock.title}. Open Panel setup`);
+            byId('toolbarMovementHint').textContent = `${state.modifier}+arrows moves the toolbar and open chat. Tap for a small step; hold to keep moving.`;
+            fill(movement, (state.modifiers || []).map(key => [key, `${key}+arrows`]), state.modifier);
+            fill(display, (state.displays || []).map(item => [item.id, item.label]), state.displayId);
+            if (state.enabled && state.menuMaxHeight) this.shortcutsPopover.style.maxHeight = `${state.menuMaxHeight}px`;
+            if (previous?.enabled !== state.enabled || previous?.menuMaxHeight !== state.menuMaxHeight || previous?.compactHeight !== state.compactHeight || previous?.menuTop !== state.menuTop) this.resizeWindowToContent();
+        };
+        api.onExamLayoutChanged?.(state => { revisions++; apply(state); });
+        const revision = revisions;
+        api.getExamLayout?.().then(state => { if (revision === revisions) apply(state); }).catch(() => {
+            status.textContent = 'Panel setup unavailable. Reopen NoCatch to retry.';
+            status.hidden = false;
+        });
+        api.onToolbarMenuClose?.(() => this.hideShortcutsPopover());
+        api.onChatPanelHidden?.(() => this.hideShortcutsPopover());
+        const configure = async (extra = {}) => {
+            const feedback = byId('toolbarSetupStatus');
+            feedback.textContent = 'Saving…';
+            try {
+                const result = await api.configureExamLayout({ modifier: movement.value, displayId: Number(display.value), ...extra });
+                if (!result.success) throw new Error(result.error);
+                dirty = false;
+                apply(result.state);
+                feedback.textContent = result.state.error || (result.state.saveError ? 'Could not save position. Current setup remains usable.' : 'Setup saved.');
+            } catch (error) { feedback.textContent = error.message; }
+            this.resizeWindowToContent();
+        };
+        movement.addEventListener('change', () => { dirty = true; });
+        display.addEventListener('change', () => { dirty = true; });
+        setup.addEventListener('toggle', () => this.resizeWindowToContent());
+        byId('toolbarSaveSetup').addEventListener('click', () => configure());
+        byId('toolbarResetPosition').addEventListener('click', () => configure({ resetPosition: true }));
+        lock.addEventListener('click', () => { this.showShortcutsPopover(); setup.open = true; movement.focus(); });
+        byId('toolbarExamToggle').addEventListener('click', async () => {
+            try {
+                const result = await api.setExamLayout(!this.examState?.enabled);
+                if (!result.success) throw new Error(result.error);
+                apply(result.state);
+                this.hideShortcutsPopover();
+            } catch (error) { status.textContent = error.message; status.hidden = false; }
+        });
+        const notice = text => {
+            if (this.examState?.enabled && !(this.examState.chatOpen && this.examState.coreVisible)) {
+                this.chatNotice = text;
+                this.updateChatNotice();
+            }
+        };
+        api.onLlmResponse?.(() => notice('Chat ready'));
+        api.onTranscriptionLlmResponse?.(() => notice('Chat ready'));
+        api.onLlmError?.(() => notice('Chat error'));
+        api.onOcrError?.(() => notice('Chat error'));
+        api.onSpeechError?.(() => notice('Chat error'));
+    }
+
+    updateChatNotice() {
+        const button = document.getElementById('openChatButton');
+        const label = button?.querySelector('span');
+        if (label) label.textContent = this.chatNotice || 'Chat';
+        button?.setAttribute('aria-label', `${this.chatNotice || 'Chat'} · Ctrl+Shift+C`);
+        button?.classList.toggle('chat-ready', Boolean(this.chatNotice));
+    }
+
     resizeWindowToContent() {
         // Wait for DOM to fully render
         setTimeout(() => {
@@ -254,8 +357,8 @@ class MainWindowUI {
                 // If shortcuts popover is visible, extend height to fit it
                 if (this.shortcutsPopover && this.shortcutsPopover.classList.contains('is-open')) {
                     const popRect = this.shortcutsPopover.getBoundingClientRect();
-                    // popover is positioned below the bar (top:36px), add that plus its height and a small margin
-                    height = Math.max(height, Math.ceil(36 + popRect.height + 8));
+                    // Include the complete preference panel below the compact bar.
+                    height = Math.max(height, Math.ceil(popRect.bottom + 8));
                 }
                 
                 logger.debug('Resizing window to content', {
@@ -264,7 +367,7 @@ class MainWindowUI {
                     component: 'MainWindowUI'
                 });
                 
-                window.electronAPI.resizeWindow(width, height);
+                window.electronAPI.resizeWindow(width, height, this.examState?.menuRevision);
             }
         }, 100);
     }
@@ -278,9 +381,9 @@ class MainWindowUI {
     this.shortcutsPopover = document.getElementById('shortcutsPopover');
     this.captureIndicator = document.getElementById('captureIndicator'); // Optional
 
-        // NEW: Screenshot button is the first .command-item without id
+        // Prefer the named capture action; retain the legacy fallback for older fixtures.
         const commandItems = document.querySelectorAll('.command-item');
-        this.screenshotButton = commandItems && commandItems[0];
+        this.screenshotButton = document.getElementById('captureButton') || (commandItems && commandItems[0]);
 
     if (!this.statusDot || !this.skillIndicator || !this.micButton || !this.screenshotButton) {
             throw new Error('Required UI elements not found');
@@ -293,22 +396,21 @@ class MainWindowUI {
             }
         });
 
-        // Skill indicator click handler CYCLES through skills (previously
-        // hardcoded to always reset to 'dsa' — R2 audit finding).
-        this.skillIndicator.addEventListener('click', () => {
+        // Ordinary actions stay visible; less frequent preferences live in More.
+        for (const [id, method] of [['openChatButton','switchToChat'], ['openMaterialsButton','showMaterials'], ['openSettingsButton','showSettings']]) {
+            document.getElementById(id)?.addEventListener('click', async () => {
+                if (!this.isInteractive) return;
+                try { await window.electronAPI[method](); this.hideShortcutsPopover(); }
+                catch (error) { this.showNotification(error.message || 'Please try again.', 'error'); }
+            });
+        }
+        this.toolbarSkillSelect = document.getElementById('toolbarSkillSelect');
+        this.toolbarSkillSelect?.addEventListener('change', async event => {
             if (!this.isInteractive) return;
-            const skillOrder = ['dsa', 'ood', 'mcq', 'system-design', 'behavioral', 'programming'];
-            const current = (this.currentSkill || 'dsa');
-            const currentIndex = skillOrder.indexOf(current);
-            const newSkill = skillOrder[(currentIndex + 1) % skillOrder.length];
-            if (window.electronAPI && window.electronAPI.updateActiveSkill) {
-                window.electronAPI.updateActiveSkill(newSkill).then(() => {
-                    this.handleSkillActivated(newSkill);
-                });
-            } else {
-                this.handleSkillActivated(newSkill);
-            }
+            try { await window.electronAPI.updateActiveSkill(event.target.value); this.handleSkillActivated(event.target.value); }
+            catch (error) { this.toolbarSkillSelect.value = this.currentSkill; this.showNotification(error.message, 'error'); }
         });
+        this.shortcutsPopover?.querySelector('.shortcut-details')?.addEventListener('toggle', () => this.resizeWindowToContent());
 
         // Check for required elements (settingsIndicator is optional)
         if (this.settingsIndicator) {
@@ -367,14 +469,8 @@ class MainWindowUI {
                 if (window.electronAPI && window.electronAPI.saveSettings) {
                     window.electronAPI.saveSettings({ codingLanguage: lang });
                 }
-                // Resize for any width change
-                setTimeout(() => {
-                    const commandTab = document.querySelector('.command-tab');
-                    if (commandTab && window.electronAPI && window.electronAPI.resizeWindow) {
-                        const rect = commandTab.getBoundingClientRect();
-                        window.electronAPI.resizeWindow(Math.ceil(rect.width), Math.ceil(rect.height));
-                    }
-                }, 50);
+                // Keep the open preferences panel inside the native window.
+                this.resizeWindowToContent();
             });
         }
 
@@ -393,24 +489,6 @@ class MainWindowUI {
                 e.stopPropagation();
                 this.toggleShortcutsPopover();
             });
-
-            // Hover to show
-            this.infoButton.addEventListener('mouseenter', () => {
-                if (!this.isInteractive) return;
-                this.showShortcutsPopover();
-            });
-            // Queue hide when leaving the button
-            this.infoButton.addEventListener('mouseleave', () => this.queueHideShortcutsPopover());
-
-            // Keep open when hovering popover
-            this.shortcutsPopover.addEventListener('mouseenter', () => {
-                if (this._popoverHideTimeout) {
-                    clearTimeout(this._popoverHideTimeout);
-                    this._popoverHideTimeout = null;
-                }
-            });
-            // Hide after a small delay when leaving popover
-            this.shortcutsPopover.addEventListener('mouseleave', () => this.queueHideShortcutsPopover());
 
             // Close on outside click
             document.addEventListener('click', (e) => {
@@ -665,6 +743,10 @@ class MainWindowUI {
         this.isRecording = true;
         if (this.micButton) {
             this.micButton.classList.add('recording');
+            this.micButton.setAttribute('aria-label', 'Stop voice input');
+            this.micButton.title = 'Stop voice input';
+            this.micButton.querySelector('.voice-stop')?.removeAttribute('hidden');
+            this.applyMicVisibility();
         }
         logger.debug('Recording started', { component: 'MainWindowUI' });
     }
@@ -673,6 +755,10 @@ class MainWindowUI {
         this.isRecording = false;
         if (this.micButton) {
             this.micButton.classList.remove('recording');
+            this.micButton.setAttribute('aria-label', 'Start voice input');
+            this.micButton.title = 'Start voice input';
+            this.micButton.querySelector('.voice-stop')?.setAttribute('hidden', '');
+            this.applyMicVisibility();
         }
         logger.debug('Recording stopped', { component: 'MainWindowUI' });
     }
@@ -701,6 +787,7 @@ class MainWindowUI {
             return;
         }
         
+        if (this.toolbarSkillSelect) this.toolbarSkillSelect.value = this.currentSkill;
         const skillName = skillNames[this.currentSkill] || this.currentSkill.toUpperCase();
         const skillSpan = this.skillIndicator.querySelector('span');
         
@@ -720,7 +807,7 @@ class MainWindowUI {
             this.skillIndicator.title = tooltip;
             
             // Add visual feedback for skill change
-            this.animateSkillChange();
+            // Preference changes do not move the interface.
             
             logger.info('Skill indicator updated successfully', {
                 component: 'MainWindowUI',
@@ -1154,13 +1241,14 @@ class MainWindowUI {
         if (!window.electronAPI?.getShortcutStatus) return;
         try {
             const status = await window.electronAPI.getShortcutStatus();
-            if (this.shortcutsPopover) this.shortcutsPopover.style.maxHeight = `${Math.max(160, Math.min(600, window.screen.availHeight - 100))}px`;
+            if (this.shortcutsPopover && !this.examState?.enabled) this.shortcutsPopover.style.maxHeight = `${Math.max(160, Math.min(600, window.screen.availHeight - 100))}px`;
             const modifier = status.platform === 'darwin' ? 'Cmd' : 'Ctrl';
             const captureInstructions = document.getElementById('captureModeShortcuts');
             if (captureInstructions) captureInstructions.hidden = !(status.platform === 'darwin' &&
                 status.shortcuts?.some(shortcut => shortcut.id === 'keystroke-capture' && shortcut.supported));
             const label = document.getElementById('captureShortcutLabel');
             if (label) label.textContent = `${modifier}+Shift+S`;
+            if (this.screenshotButton) this.screenshotButton.title = `Capture your screen (${modifier}+Shift+S)`;
             const body = this.shortcutsPopover?.querySelector('.shortcuts-table tbody');
             if (!body || !Array.isArray(status.shortcuts)) return;
             body.replaceChildren();
@@ -1210,6 +1298,8 @@ class MainWindowUI {
             clearTimeout(this._popoverHideTimeout);
             this._popoverHideTimeout = null;
         }
+    this.shortcutsPopover.inert = false;
+    this.infoButton?.setAttribute('aria-expanded', 'true');
     this.shortcutsPopover.classList.add('is-open');
         this.refreshShortcutStatus();
         // Resize main window to fit popover
@@ -1217,8 +1307,12 @@ class MainWindowUI {
     }
 
     hideShortcutsPopover() {
-        if (!this.shortcutsPopover) return;
+        if (!this.shortcutsPopover || !this.shortcutsPopover.classList.contains('is-open')) return;
+    if (this.shortcutsPopover.contains(document.activeElement)) this.infoButton?.focus();
+    this.shortcutsPopover.inert = true;
+    this.infoButton?.setAttribute('aria-expanded', 'false');
     this.shortcutsPopover.classList.remove('is-open');
+    for (const details of this.shortcutsPopover.querySelectorAll('details[open]')) details.open = false;
     // resize back to compact after transition
     setTimeout(() => this.resizeWindowToContent(), 130);
     }

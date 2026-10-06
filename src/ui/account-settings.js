@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const managed = settings?.managed || {};
     const signing = busy === 'auth' || managed.signingIn;
     $('managedAccountStatus').textContent = settings?.aiMode === 'direct'
-      ? 'Using your own AI provider keys. You can change this in Advanced Settings.'
+      ? 'Using your own provider keys. Change providers in AI connection.'
       : !managed.configured ? 'Online sign-in is not configured in this build. Install a configured release to use your OpenCluely account.'
       : signing ? 'Finish signing in in your browser, then return here.'
       : managed.authenticated ? `Signed in${managed.persistence === 'session_only' ? ' for this session only. Sign in again after restarting.' : '. Sign-in is saved securely on this device.'}`

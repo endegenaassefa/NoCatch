@@ -1,6 +1,6 @@
 {
   "name": "screen-reader-util",
-  "version": "1.1.0-beta",
+  "version": "1.1.0-beta.1",
   "description": "Personal desktop reading assistant",
   "main": "main.js",
   "scripts": {
@@ -23,7 +23,7 @@
   "author": {
     "name": "screen-reader-util contributors"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
     "@google/genai": "^2.9.0",
@@ -54,7 +54,7 @@
     "afterPack": "scripts/verify-package.js",
     "publish": {
       "provider": "github",
-      "owner": "rodriguezzfabricio",
+      "owner": "endegenaassefa",
       "repo": "NoCatch",
       "releaseType": "draft"
     },

@@ -84,6 +84,7 @@ function startupFixture({ platform = 'win32', integrity = 'high', isRoot = true,
       if (id === 'electron') return { app };
       if (id === './src/capture-routing') return {};
       if (id === './src/platform/privilege') return privilege;
+      if (id === './src/platform/windows-instance') return { currentSessionId: () => 7 };
       if (id === 'dotenv') return { config({ path: envPath }) { events.push(['dotenv', envPath]); } };
       throw new Error(`unexpected startup dependency: ${id}`);
     },

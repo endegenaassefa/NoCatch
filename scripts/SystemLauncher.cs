@@ -1,8 +1,8 @@
 // SystemLauncher.cs — launch a process at SYSTEM integrity on the interactive
-// desktop (WinSta0\Default of the active console session).
+// desktop (WinSta0\Default of the invoking session).
 //
 // Meant to run AS a temporary Windows service (LocalSystem): it duplicates its
-// own primary token, stamps it with the console session id, builds a Unicode
+// own primary token, stamps it with the invoking session id, builds a Unicode
 // environment block (guaranteeing SystemRoot), and CreateProcessAsUser's the
 // target. It then writes a result file and exits (SCM reports 1053 because no
 // StartServiceCtrlDispatcher is called — the caller must poll the result file,
@@ -11,19 +11,20 @@
 // Parameters JSON (UTF-8): {
 //   "exe": "<full path>", "args": "<argument string>",
 //   "env": { "K": "V", ... },          // overlay onto the SYSTEM environment
-//   "stdout": "<file>", "stderr": "<file>",  // optional console redirects
+//   "session": "<invoking Windows session ID>",
 //   "result": "<file>",                // written: ok|pid=NNN|session=N
 //   "cwd": "<dir>"                     // optional
 // }
 //
 // Build (Windows ships the compiler):
-//   %WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe /platform:x64 /target:exe /optimize+ /out:SystemLauncher.exe SystemLauncher.cs
+//   %WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe /platform:x64 /target:exe /optimize+ /r:System.Web.Extensions.dll /out:SystemLauncher.exe SystemLauncher.cs
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Web.Script.Serialization;
 
 public static class SystemLauncher
 {
@@ -32,11 +33,6 @@ public static class SystemLauncher
     const int SECURITY_IMPERSONATION = 2;
     const int TokenSessionId = 12;
     const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
-    const uint STARTF_USESTDHANDLES = 0x00000100;
-    const uint GENERIC_WRITE = 0x40000000;
-    const uint FILE_SHARE_READ = 0x1;
-    const uint OPEN_ALWAYS = 4;
-    const uint FILE_ATTRIBUTE_NORMAL = 0x80;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct STARTUPINFO
@@ -58,59 +54,30 @@ public static class SystemLauncher
     }
 
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
-    [DllImport("kernel32.dll")] static extern int WTSGetActiveConsoleSessionId();
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attrs, int level, int type, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int cls, ref int info, int len);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool CreateProcessAsUser(IntPtr token, string app, StringBuilder cmdLine, IntPtr procAttrs, IntPtr threadAttrs, bool inherit, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sec, uint creation, uint flags, IntPtr template);
 
-    static string JsonString(string json, string key)
+    static string JsonString(Dictionary<string, object> values, string key)
     {
-        // Minimal extraction for our flat, well-formed params object.
-        int i = json.IndexOf("\"" + key + "\"");
-        if (i < 0) return null;
-        i = json.IndexOf(':', i);
-        if (i < 0) return null;
-        while (i < json.Length && (json[i] == ':' || json[i] == ' ' || json[i] == '\t' || json[i] == '\r' || json[i] == '\n')) i++;
-        if (i >= json.Length) return null;
-        if (json[i] == '"')
-        {
-            i++;
-            var sb = new StringBuilder();
-            for (; i < json.Length; i++)
-            {
-                char c = json[i];
-                if (c == '\\' && i + 1 < json.Length) { sb.Append(json[++i]); continue; }
-                if (c == '"') return sb.ToString();
-                sb.Append(c);
-            }
-            return sb.ToString();
-        }
-        return null;
+        object value;
+        return values.TryGetValue(key, out value) ? value as string : null;
     }
 
-    static Dictionary<string, string> JsonEnv(string json)
+    static Dictionary<string, string> JsonEnv(Dictionary<string, object> values)
     {
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        int i = json.IndexOf("\"env\"");
-        if (i < 0) return env;
-        i = json.IndexOf('{', i);
-        if (i < 0) return env;
-        int end = json.IndexOf('}', i);
-        if (end < 0) return env;
-        string body = json.Substring(i + 1, end - i - 1);
-        // Flat "K":"V",... pairs.
-        foreach (var pair in body.Split(','))
-        {
-            var bits = pair.Split(new[] { ':' }, 2);
-            if (bits.Length != 2) continue;
-            string k = bits[0].Trim().Trim('"');
-            string v = bits[1].Trim().Trim('"');
-            if (k.Length > 0) env[k] = v;
+        object raw;
+        if (!values.TryGetValue("env", out raw)) return env;
+        var entries = raw as Dictionary<string, object>;
+        if (entries == null) throw new Exception("Invalid environment object.");
+        foreach (var entry in entries) {
+            if (!(entry.Value is string) || entry.Key.IndexOfAny(new char[] {'=', '\0'}) >= 0 ||
+                ((string)entry.Value).IndexOf('\0') >= 0) throw new Exception("Invalid environment entry.");
+            env[entry.Key] = (string)entry.Value;
         }
         return env;
     }
@@ -133,11 +100,9 @@ public static class SystemLauncher
             WriteResult(Environment.ExpandEnvironmentVariables(@"%TEMP%\SystemLauncher-error.txt"), "error|missing params");
             return 1;
         }
-        string json = File.ReadAllText(paramsPath, Encoding.UTF8);
+        var json = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(paramsPath, Encoding.UTF8));
         string exe = JsonString(json, "exe");
         string argString = JsonString(json, "args") ?? "";
-        string stdoutPath = JsonString(json, "stdout");
-        string stderrPath = JsonString(json, "stderr");
         string resultPath = JsonString(json, "result") ?? @"C:\ProgramData\CluelyRoot\system-launch-result.txt";
         string cwd = JsonString(json, "cwd");
         var envOverlay = JsonEnv(json);
@@ -157,10 +122,11 @@ public static class SystemLauncher
 
             try
             {
-                // 2. Stamp the console session so the child lands on the
+                // 2. Stamp the invoking session so the child lands on the
                 //    user's desktop instead of session 0.
-                int session = WTSGetActiveConsoleSessionId();
-                if (session < 1) throw new Exception("No active console session (id=" + session + ")");
+                int session;
+                if (!int.TryParse(JsonString(json, "session"), out session) || session < 1)
+                    throw new Exception("The invoking Windows session is required.");
                 if (!SetTokenInformation(primary, TokenSessionId, ref session, 4))
                     throw new Exception("SetTokenInformation failed: " + Marshal.GetLastWin32Error());
 
@@ -182,31 +148,19 @@ public static class SystemLauncher
                 {
                     Marshal.Copy(envBytes, 0, envPtr, envBytes.Length);
 
-                    // 4. STARTUPINFO: interactive desktop, optional console
-                    //    redirects so the app's boot log is observable.
+                    // Handles cannot be inherited from service session 0 into
+                    // another Windows session. Readiness is verified through
+                    // the app's session pipe; do not supply invalid std handles.
                     var si = new STARTUPINFO();
                     si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
                     si.lpDesktop = @"winsta0\default";
                     si.dwFlags = 0;
-                    IntPtr hOut = IntPtr.Zero, hErr = IntPtr.Zero;
-                    if (!string.IsNullOrEmpty(stdoutPath))
-                    {
-                        hOut = CreateFile(stdoutPath, GENERIC_WRITE, FILE_SHARE_READ, IntPtr.Zero, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
-                        if (hOut != new IntPtr(-1)) { si.hStdOutput = hOut; si.dwFlags |= (int)STARTF_USESTDHANDLES; }
-                    }
-                    if (!string.IsNullOrEmpty(stderrPath))
-                    {
-                        hErr = CreateFile(stderrPath, GENERIC_WRITE, FILE_SHARE_READ, IntPtr.Zero, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
-                        if (hErr != new IntPtr(-1)) { si.hStdError = hErr; si.dwFlags |= (int)STARTF_USESTDHANDLES; }
-                    }
 
                     var cmdLine = new StringBuilder("\"" + exe + "\" " + argString, 32768);
                     var pi = new PROCESS_INFORMATION();
                     bool ok = CreateProcessAsUser(primary, exe, cmdLine, IntPtr.Zero, IntPtr.Zero, false,
                         CREATE_UNICODE_ENVIRONMENT, envPtr, cwd, ref si, out pi);
                     int err = Marshal.GetLastWin32Error();
-                    if (hOut != IntPtr.Zero) CloseHandle(hOut);
-                    if (hErr != IntPtr.Zero) CloseHandle(hErr);
                     if (!ok) throw new Exception("CreateProcessAsUser failed: " + err);
 
                     CloseHandle(pi.hThread);

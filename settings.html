@@ -280,8 +280,9 @@
         button:focus-visible, select:focus-visible, summary:focus-visible { outline:2px solid white; outline-offset:3px; }
         @media (max-width:480px) { .settings-content { padding:14px; } .settings-item { flex-direction:column; align-items:stretch; gap:8px; } .input-field { width:100%; max-width:100%; } }
     </style>
+<link rel="stylesheet" href="src/ui/workspace.css">
 </head>
-<body>
+<body class="settings-page">
     <div class="settings-container">
         <div class="settings-header">
             <div class="header-title">
@@ -300,300 +301,286 @@
             </div>
         </div>
         
-        <div class="settings-content">
-            <section class="settings-section" aria-labelledby="accountHeading">
-                <h2 class="settings-section-title" id="accountHeading">Your account</h2>
-                <div class="settings-section-content">
-                    <p id="managedAccountStatus">Checking your account…</p>
-                    <p id="accountMessage" class="settings-note" role="status" aria-live="polite"></p>
-                    <div class="account-actions">
-                        <button class="btn" id="accountSignIn" disabled>Sign in</button>
-                        <button class="btn" id="accountSignOut" hidden>Sign out</button>
-                        <button class="btn" id="resumeSetup">Resume setup</button>
-                        <button class="btn" id="accountRecheck">Check again</button>
-                    </div>
-                    <p class="settings-note">Sign-out stops requests and removes saved sign-in on this device. It does not delete server records. The pilot service retains answers and events for 24 hours by default; already-issued access tokens may remain valid until expiry.</p>
-                </div>
-            </section>
-            <details id="advancedSettings">
-                <summary>Advanced Settings</summary>
-                <section class="settings-section" aria-labelledby="aiModeLabel">
-                    <div class="settings-section-content">
-                        <label id="aiModeLabel" for="aiMode">AI connection</label>
-                        <select class="input-field" id="aiMode" disabled>
-                            <option value="managed">OpenCluely account</option>
-                            <option value="direct">My own provider keys</option>
-                        </select>
-                        <p class="settings-note">Managed AI uses your OpenCluely account. Direct AI uses the keys below. Voice is optional and has its own configuration; a packaged local speech runtime is not included yet.</p>
-                    </div>
-                </section>
+<div class="settings-content"><p class="settings-autosave">Changes save automatically.</p><details class="settings-group-panel"><summary>AI connection</summary><section class="settings-section">
+<div class="settings-section-content">
+<label for="aiMode" id="aiModeLabel">AI connection</label>
+<select class="input-field" disabled="" id="aiMode">
+<option value="managed">OpenCluely account</option>
+<option value="direct">My own provider keys</option>
+</select>
+<p class="settings-note">Managed AI uses your OpenCluely account. Direct AI uses the keys below. Voice is optional and has its own configuration; a packaged local speech runtime is not included yet.</p>
+</div>
+</section><div class="settings-section">
 
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-code"></i>
-                    Language & Skills
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Coding Language</div>
-                            <div class="settings-item-description">Select your preferred programming language</div>
-                        </div>
-                        <select class="input-field" id="codingLanguage">
-                            <option value="cpp">C++</option>
-                            <option value="c">C</option>
-                            <option value="python">Python</option>
-                            <option value="java">Java</option>
-                            <option value="javascript">JavaScript</option>
-                        </select>
-                    </div>
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Active Skill</div>
-                            <div class="settings-item-description">Choose your current focus area</div>
-                        </div>
-                        <select class="input-field" id="activeSkill">
-                            <option value="dsa">Data Structures & Algorithms</option>
-                            <option value="ood">Object-Oriented Design</option>
-                            <option value="mcq">Multiple Choice</option>
-                            <option value="system-design">System Design</option>
-                            <option value="behavioral">Behavioral / HR</option>
-                            <option value="programming">Programming</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-icons"></i>
-                    App Icon
-                </div>
-                <div class="settings-section-content">
-                    <div class="icon-grid" id="iconGrid">
-                        <div class="icon-option" data-icon="terminal">
-                            <img src="./assets/icons/terminal.png" alt="Terminal">
-                            <div>Terminal</div>
-                        </div>
-                        <div class="icon-option" data-icon="activity">
-                            <img src="./assets/icons/activity.png" alt="Activity">
-                            <div>Activity</div>
-                        </div>
-                        <div class="icon-option" data-icon="settings">
-                            <img src="./assets/icons/settings.png" alt="Settings">
-                            <div>Settings</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-microphone"></i>
-                    Speech Recognition
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Speech Provider</div>
-                            <div class="settings-item-description">Choose Azure Speech or a local OpenAI Whisper CLI</div>
-                        </div>
-                        <select class="input-field" id="speechProvider">
-                            <option value="azure">Azure Speech</option>
-                            <option value="whisper">Local Whisper</option>
-                        </select>
-                    </div>
-
-                    <!-- Azure fields (shown only when Azure is selected) -->
-                    <div id="azureFields" class="settings-group">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Azure Speech Key</div>
-                                <div class="settings-item-description">Your Azure Cognitive Services API key</div>
-                            </div>
-                            <input type="password" class="input-field" id="azureKey" placeholder="Enter your Azure key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Azure Region</div>
-                                <div class="settings-item-description">Your Azure service region</div>
-                            </div>
-                            <input type="text" class="input-field" id="azureRegion" placeholder="e.g. eastus">
-                        </div>
-                    </div>
-
-                    <datalist id="whisperModelOptions">
-                        <option value="tiny.en"><option value="tiny"><option value="base.en"><option value="base">
-                        <option value="small.en"><option value="small"><option value="medium.en"><option value="medium">
-                        <option value="large-v1"><option value="large-v2"><option value="large-v3"><option value="large">
-                        <option value="large-v3-turbo"><option value="turbo">
-                    </datalist>
-                    <!-- Whisper fields (shown only when Whisper is selected) -->
-                    <div id="whisperFields" class="settings-group">
-                        <div class="settings-item" id="whisperModelSetup">
-                            <div class="settings-stack">
-                                <div class="settings-item-label">Prepare local voice</div>
-                                <div class="settings-item-description">Download your selected model once. Audio is transcribed on this computer.</div>
-                                <div id="whisperModelSize" class="settings-item-description"></div>
-                                <div id="whisperModelStatus" role="status" aria-live="polite">Checking the speech engine…</div>
-                                <progress id="whisperModelProgress" max="100" value="0" hidden aria-label="Voice model download" style="width:100%"></progress>
-                                <div style="display:flex;flex-wrap:wrap;gap:8px">
-                                    <button class="btn" id="prepareWhisperModelButton" disabled>Prepare model</button>
-                                    <button class="btn" id="cancelWhisperModelButton" hidden>Cancel</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="settings-item">
-                            <div class="settings-stack">
-                                <div>
-                                    <div class="settings-item-label">Whisper Command</div>
-                                    <div class="settings-item-description">Advanced: leave as whisper to use the included Windows engine, or enter your custom runtime command.</div>
-                                </div>
-                                <input type="text" class="input-field" id="whisperCommand" placeholder="whisper" style="max-width: 100%;">
-                            </div>
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Whisper Model</div>
-                                <div class="settings-item-description">Choose a model before preparing voice. The default is small.</div>
-                            </div>
-                            <input type="text" class="input-field" id="whisperModel" placeholder="small" list="whisperModelOptions">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Whisper Language</div>
-                                <div class="settings-item-description">Language code or auto-detection for local transcription</div>
-                            </div>
-                            <input type="text" class="input-field" id="whisperLanguage" placeholder="auto">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Compute Device</div>
-                                <div class="settings-item-description">The included Windows engine uses CPU. CUDA requires a custom runtime.</div>
-                            </div>
-                            <select class="input-field" id="whisperDevice">
-                                <option value="auto">Auto</option>
-                                <option value="cpu">CPU</option>
-                                <option value="cuda">CUDA</option>
-                            </select>
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Capture Mode</div>
-                                <div class="settings-item-description">Manual records until you press stop; VAD detects natural pauses</div>
-                            </div>
-                            <select class="input-field" id="whisperCaptureMode">
-                                <option value="vad">Automatic (VAD)</option>
-                                <option value="manual">Manual start/stop</option>
-                            </select>
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Voice Response Target</div>
-                                <div class="settings-item-description">Choose where answers generated from speech are displayed</div>
-                            </div>
-                            <select class="input-field" id="whisperResponseTarget">
-                                <option value="both">Chat and overlay</option>
-                                <option value="chat">Chat only</option>
-                                <option value="overlay">Overlay only</option>
-                            </select>
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Whisper Segment Length</div>
-                                <div class="settings-item-description">Chunk size in milliseconds for local transcription</div>
-                            </div>
-                            <input type="number" class="input-field" id="whisperSegmentMs" placeholder="4000" min="2000" step="500">
-                        </div>
-                        <div class="settings-note">
-                            Local Whisper runs on this machine and needs a Whisper CLI installed. These settings apply immediately for the current app session and are also written back to <code>.env</code> so they persist across restarts.
-                        </div>
-                    </div>
-
-                    <div id="azureFieldsNote" class="settings-note">
-                        Azure credentials apply immediately and are also written back to <code>.env</code> so they persist across restarts.
-                    </div>
-                </div>
-            </div>
-            
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-robot"></i>
-                    AI Model Settings
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">AI Provider</div>
-                            <div class="settings-item-description">Which LLM provider generates the answers</div>
-                        </div>
-                        <select class="input-field" id="llmProvider">
-                            <option value="gemini">Google Gemini</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="qwen">Qwen (Model Studio, Together, OpenRouter)</option>
-                        </select>
-                    </div>
-                    <div id="geminiFields">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Google API Key</div>
-                                <div class="settings-item-description">Your Google API key for Gemini models</div>
-                            </div>
-                            <input type="password" class="input-field" id="geminiKey" placeholder="Enter your Google API key">
-                        </div>
-                    </div>
-                    <div id="deepseekFields" style="display:none;">
-                        <div class="settings-item"><div><div class="settings-item-label">DeepSeek model</div><div class="settings-item-description">deepseek-flash supports screenshots. deepseek-v4-pro supports text only.</div></div><input class="input-field" id="deepseekModel" placeholder="deepseek-flash"></div>
-                        <div class="settings-item"><div class="settings-item-label">DeepSeek endpoint</div><input class="input-field" id="deepseekBaseUrl" placeholder="https://api.deepseek.com"></div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">DeepSeek API Key</div>
-                                <div class="settings-item-description">Your DeepSeek API key (sk-…) from platform.deepseek.com</div>
-                            </div>
-                            <input type="password" class="input-field" id="deepseekKey" placeholder="Enter your DeepSeek API key">
-                        </div>
-                    </div>
-                    <div id="qwenFields" style="display:none;">
-                        <div class="settings-item"><div><div class="settings-item-label">Qwen API Key</div><div class="settings-item-description">Use the key for this endpoint: regional Model Studio, Together, or OpenRouter.</div></div><input type="password" class="input-field" id="qwenKey" placeholder="Enter the endpoint's API key"></div>
-                        <div class="settings-item"><div><div class="settings-item-label">Qwen model</div><div class="settings-item-description">Model Studio: qwen3.8-flash. Together: Qwen/Qwen3.8-Flash (vision unverified). OpenRouter: qwen/qwen3.8-flash.</div></div><input class="input-field" id="qwenModel" placeholder="qwen3.8-flash"></div>
-                        <div class="settings-item"><div><div class="settings-item-label">Endpoint preset</div><div class="settings-item-description">Workspace regions require a matching regional key and workspace ID.</div></div><select class="input-field" id="qwenPreset"><option value="custom">Keep current endpoint</option><option value="virginia">Model Studio Virginia</option><option value="ap-southeast-1">Model Studio Singapore workspace</option><option value="cn-beijing">Model Studio Beijing workspace</option><option value="cn-hongkong">Model Studio Hong Kong workspace</option><option value="ap-northeast-1">Model Studio Tokyo workspace</option><option value="together">Together</option><option value="openrouter">OpenRouter</option></select></div>
-                        <div class="settings-item"><div class="settings-item-label">Workspace ID</div><input class="input-field" id="qwenWorkspace" placeholder="Workspace ID for workspace regions"></div>
-                        <div class="settings-item"><div><div class="settings-item-label">Qwen endpoint</div><div class="settings-item-description">HTTPS compatible-mode/v1 on an approved Model Studio host, or the fixed Together/OpenRouter endpoint. dashscope-intl is a legacy host.</div></div><input class="input-field" id="qwenBaseUrl"></div>
-                    </div>
-                    <div class="settings-note">
+<div class="settings-section-content">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">AI Provider</div>
+<div class="settings-item-description">Which LLM provider generates the answers</div>
+</div>
+<select aria-label="AI Provider" class="input-field" id="llmProvider">
+<option value="gemini">Google Gemini</option>
+<option value="deepseek">DeepSeek</option>
+<option value="qwen">Qwen (Model Studio, Together, OpenRouter)</option>
+</select>
+</div>
+<div id="geminiFields">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Google API Key</div>
+<div class="settings-item-description">Your Google API key for Gemini models</div>
+</div>
+<input aria-label="Google API Key" class="input-field" id="geminiKey" placeholder="Enter your Google API key" type="password"/>
+</div>
+</div>
+<div id="deepseekFields" style="display:none;">
+<div class="settings-item"><div><div class="settings-item-label">DeepSeek model</div><div class="settings-item-description">deepseek-flash supports screenshots. deepseek-v4-pro supports text only.</div></div><input aria-label="DeepSeek model" class="input-field" id="deepseekModel" placeholder="deepseek-flash"/></div>
+<div class="settings-item"><div class="settings-item-label">DeepSeek endpoint</div><input aria-label="DeepSeek endpoint" class="input-field" id="deepseekBaseUrl" placeholder="https://api.deepseek.com"/></div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">DeepSeek API Key</div>
+<div class="settings-item-description">Your DeepSeek API key (sk-…) from platform.deepseek.com</div>
+</div>
+<input aria-label="DeepSeek API Key" class="input-field" id="deepseekKey" placeholder="Enter your DeepSeek API key" type="password"/>
+</div>
+</div>
+<div id="qwenFields" style="display:none;">
+<div class="settings-item"><div><div class="settings-item-label">Qwen API Key</div><div class="settings-item-description">Use the key for this endpoint: regional Model Studio, Together, or OpenRouter.</div></div><input aria-label="Qwen API Key" class="input-field" id="qwenKey" placeholder="Enter the endpoint's API key" type="password"/></div>
+<div class="settings-item"><div><div class="settings-item-label">Qwen model</div><div class="settings-item-description">Model Studio: qwen3.8-flash. Together: Qwen/Qwen3.8-Flash (vision unverified). OpenRouter: qwen/qwen3.8-flash.</div></div><input aria-label="Qwen model" class="input-field" id="qwenModel" placeholder="qwen3.8-flash"/></div>
+<div class="settings-item"><div><div class="settings-item-label">Endpoint preset</div><div class="settings-item-description">Workspace regions require a matching regional key and workspace ID.</div></div><select aria-label="Endpoint preset" class="input-field" id="qwenPreset"><option value="custom">Keep current endpoint</option><option value="virginia">Model Studio Virginia</option><option value="ap-southeast-1">Model Studio Singapore workspace</option><option value="cn-beijing">Model Studio Beijing workspace</option><option value="cn-hongkong">Model Studio Hong Kong workspace</option><option value="ap-northeast-1">Model Studio Tokyo workspace</option><option value="together">Together</option><option value="openrouter">OpenRouter</option></select></div>
+<div class="settings-item"><div class="settings-item-label">Workspace ID</div><input aria-label="Workspace ID" class="input-field" id="qwenWorkspace" placeholder="Workspace ID for workspace regions"/></div>
+<div class="settings-item"><div><div class="settings-item-label">Qwen endpoint</div><div class="settings-item-description">HTTPS compatible-mode/v1 on an approved Model Studio host, or the fixed Together/OpenRouter endpoint. dashscope-intl is a legacy host.</div></div><input aria-label="Qwen endpoint" class="input-field" id="qwenBaseUrl"/></div>
+</div>
+<div class="settings-note">
                         Keys apply immediately and are also written back to <code>.env</code> so they persist across restarts.
                     </div>
-                </div>
-            </div>
-            
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-shield-alt"></i>
-                    Cluely Shield (Exam Mode)
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Shield Status</div>
-                            <div class="settings-item-description" id="shieldStatus">Checking…</div>
+</div>
+</div></details><details class="settings-group-panel"><summary>Answer style</summary><div class="settings-section">
+
+<div class="settings-section-content">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Coding Language</div>
+<div class="settings-item-description">Select your preferred programming language</div>
+</div>
+<select aria-label="Coding Language" class="input-field" id="codingLanguage">
+<option value="cpp">C++</option>
+<option value="c">C</option>
+<option value="python">Python</option>
+<option value="java">Java</option>
+<option value="javascript">JavaScript</option>
+</select>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Active Skill</div>
+<div class="settings-item-description">Choose your current focus area</div>
+</div>
+<select aria-label="Active Skill" class="input-field" id="activeSkill">
+<option value="dsa">Data Structures &amp; Algorithms</option>
+<option value="ood">Object-Oriented Design</option>
+<option value="mcq">Multiple Choice</option>
+<option value="system-design">System Design</option>
+<option value="behavioral">Behavioral / HR</option>
+<option value="programming">Programming</option>
+</select>
+</div>
+</div>
+</div></details><details class="settings-group-panel"><summary>Voice input</summary><div class="settings-section">
+
+<div class="settings-section-content">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Speech Provider</div>
+<div class="settings-item-description">Choose Azure Speech or a local OpenAI Whisper CLI</div>
+</div>
+<select aria-label="Speech Provider" class="input-field" id="speechProvider">
+<option value="azure">Azure Speech</option>
+<option value="whisper">Local Whisper</option>
+</select>
+</div>
+<!-- Azure fields (shown only when Azure is selected) -->
+<div class="settings-group" id="azureFields">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Azure Speech Key</div>
+<div class="settings-item-description">Your Azure Cognitive Services API key</div>
+</div>
+<input aria-label="Azure Speech Key" class="input-field" id="azureKey" placeholder="Enter your Azure key" type="password"/>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Azure Region</div>
+<div class="settings-item-description">Your Azure service region</div>
+</div>
+<input aria-label="Azure Region" class="input-field" id="azureRegion" placeholder="e.g. eastus" type="text"/>
+</div>
+</div>
+<datalist id="whisperModelOptions">
+<option value="tiny.en"><option value="tiny"><option value="base.en"><option value="base">
+<option value="small.en"><option value="small"><option value="medium.en"><option value="medium">
+<option value="large-v1"><option value="large-v2"><option value="large-v3"><option value="large">
+<option value="large-v3-turbo"><option value="turbo">
+</option></option></option></option></option></option></option></option></option></option></option></option></option></option></datalist>
+<!-- Whisper fields (shown only when Whisper is selected) -->
+<div class="settings-group" id="whisperFields">
+<div class="settings-item" id="whisperModelSetup">
+<div class="settings-stack">
+<div class="settings-item-label">Prepare local voice</div>
+<div class="settings-item-description">Download your selected model once. Audio is transcribed on this computer.</div>
+<div class="settings-item-description" id="whisperModelSize"></div>
+<div aria-live="polite" id="whisperModelStatus" role="status">Checking the speech engine…</div>
+<progress aria-label="Voice model download" hidden="" id="whisperModelProgress" max="100" style="width:100%" value="0"></progress>
+<div style="display:flex;flex-wrap:wrap;gap:8px">
+<button class="btn" disabled="" id="prepareWhisperModelButton">Prepare model</button>
+<button class="btn" hidden="" id="cancelWhisperModelButton">Cancel</button>
+</div>
+</div>
+</div>
+<div class="settings-item">
+<div class="settings-stack">
+<div>
+<div class="settings-item-label">Whisper Command</div>
+<div class="settings-item-description">Advanced: leave as whisper to use the included Windows engine, or enter your custom runtime command.</div>
+</div>
+<input aria-label="Whisper Command" class="input-field" id="whisperCommand" placeholder="whisper" style="max-width: 100%;" type="text"/>
+</div>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Whisper Model</div>
+<div class="settings-item-description">Choose a model before preparing voice. The default is small.</div>
+</div>
+<input aria-label="Whisper Model" class="input-field" id="whisperModel" list="whisperModelOptions" placeholder="small" type="text"/>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Whisper Language</div>
+<div class="settings-item-description">Language code or auto-detection for local transcription</div>
+</div>
+<input aria-label="Whisper Language" class="input-field" id="whisperLanguage" placeholder="auto" type="text"/>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Compute Device</div>
+<div class="settings-item-description">The included Windows engine uses CPU. CUDA requires a custom runtime.</div>
+</div>
+<select aria-label="Compute Device" class="input-field" id="whisperDevice">
+<option value="auto">Auto</option>
+<option value="cpu">CPU</option>
+<option value="cuda">CUDA</option>
+</select>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Capture Mode</div>
+<div class="settings-item-description">Manual records until you press stop; VAD detects natural pauses</div>
+</div>
+<select aria-label="Capture Mode" class="input-field" id="whisperCaptureMode">
+<option value="vad">Automatic (VAD)</option>
+<option value="manual">Manual start/stop</option>
+</select>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Voice Response Target</div>
+<div class="settings-item-description">Choose where answers generated from speech are displayed</div>
+</div>
+<select aria-label="Voice Response Target" class="input-field" id="whisperResponseTarget">
+<option value="both">Chat and overlay</option>
+<option value="chat">Chat only</option>
+<option value="overlay">Overlay only</option>
+</select>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Whisper Segment Length</div>
+<div class="settings-item-description">Chunk size in milliseconds for local transcription</div>
+</div>
+<input aria-label="Whisper Segment Length" class="input-field" id="whisperSegmentMs" min="2000" placeholder="4000" step="500" type="number"/>
+</div>
+<div class="settings-note">
+                            Local Whisper runs on this machine and needs a Whisper CLI installed. These settings apply immediately for the current app session and are also written back to <code>.env</code> so they persist across restarts.
                         </div>
-                        <button class="btn" id="shieldCheckButton">Check</button>
+</div>
+<div class="settings-note" id="azureFieldsNote">
+                        Azure credentials apply immediately and are also written back to <code>.env</code> so they persist across restarts.
                     </div>
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Show helper's own backup window</div>
-                            <div class="settings-item-description">Off (recommended): the shield has no custom UI — answers appear in the Cluely chat window, which stays visible with chat history, question types, typing and mic. On: the root helper also draws its own small unkillable window, which keeps showing answers even if Cluely gets killed mid-exam.</div>
-                        </div>
-                        <input type="checkbox" id="shieldShowWindowCheckbox" class="settings-checkbox">
-                    </div>
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Enter Exam Mode</div>
-                            <div class="settings-item-description">Push your DeepSeek config to the root shield helper and switch to exam mode — the chat stays on top as your surface while the overlay and settings hide; press ⌃⌥⇧E (or the chat's 🛡️ button) to restore. The helper then captures and answers on its own (⌘⇧Space), unkillable by LockDown Browser.</div>
-                        </div>
-                        <button class="btn btn-quit" id="shieldExamModeButton">Enter Exam Mode</button>
-                    </div>
-                    <div class="settings-note">
+</div>
+</div></details><details class="settings-group-panel"><summary>Account</summary><section class="settings-section">
+
+<div class="settings-section-content">
+<p id="managedAccountStatus">Checking your account…</p>
+<p aria-live="polite" class="settings-note" id="accountMessage" role="status"></p>
+<div class="account-actions">
+<button class="btn" disabled="" id="accountSignIn">Sign in</button>
+<button class="btn" hidden="" id="accountSignOut">Sign out</button>
+<button class="btn" id="resumeSetup">Resume setup</button>
+<button class="btn" id="accountRecheck">Check again</button>
+</div>
+<details class="setting-help"><summary>Sign-out &amp; privacy</summary><p class="settings-note">Sign-out stops requests and removes saved sign-in on this device. It does not delete server records. The pilot service retains answers and events for 24 hours by default; already-issued access tokens may remain valid until expiry.</p></details>
+</div>
+</section></details><details class="settings-group-panel"><summary>Appearance &amp; shortcuts</summary><div class="settings-section">
+
+<div class="settings-section-content">
+<div class="icon-grid" id="iconGrid">
+<button aria-pressed="false" class="icon-option" data-icon="terminal" type="button">
+<img alt="Terminal" src="./assets/icons/terminal.png"/>
+<span>Terminal</span>
+</button>
+<button aria-pressed="false" class="icon-option" data-icon="activity" type="button">
+<img alt="Activity" src="./assets/icons/activity.png"/>
+<span>Activity</span>
+</button>
+<button aria-pressed="false" class="icon-option" data-icon="settings" type="button">
+<img alt="Settings" src="./assets/icons/settings.png"/>
+<span>Settings</span>
+</button>
+</div>
+</div>
+</div><div class="settings-section">
+
+<div class="settings-section-content">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Window Gap</div>
+<div class="settings-item-description">Gap between bound windows (in pixels)</div>
+</div>
+<input aria-label="Window Gap" class="input-field" id="windowGap" max="100" min="0" placeholder="20" type="number"/>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Keystroke Capture Hotkey</div>
+<div class="settings-item-description">Global hotkey that toggles focusless typing (macOS). Default: Cmd/Ctrl+Shift+Space</div>
+</div>
+<input aria-label="Keystroke Capture Hotkey" class="input-field" id="captureHotkey" placeholder="CommandOrControl+Shift+Space" type="text"/>
+</div>
+</div>
+</div></details><details class="settings-group-panel"><summary>Exam mode</summary><div class="settings-section">
+
+<div class="settings-section-content">
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Shield Status</div>
+<div class="settings-item-description" id="shieldStatus">Checking…</div>
+</div>
+<button class="btn" id="shieldCheckButton">Check</button>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Show helper's own backup window</div>
+<div class="settings-item-description">Off (recommended): the shield has no custom UI — answers appear in the Cluely chat window, which stays visible with chat history, question types, typing and mic. On: the root helper also draws its own small unkillable window, which keeps showing answers even if Cluely gets killed mid-exam.</div>
+</div>
+<input aria-label="Show helper's own backup window" class="settings-checkbox" id="shieldShowWindowCheckbox" type="checkbox"/>
+</div>
+<div class="settings-item">
+<div>
+<div class="settings-item-label">Enter Exam Mode</div>
+<div class="settings-item-description">Push your DeepSeek config to the root shield helper and switch to exam mode — the chat stays on top as your surface while the overlay and settings hide; press ⌃⌥⇧E (or the chat's 🛡️ button) to restore. The helper then captures and answers on its own (⌘⇧Space), unkillable by LockDown Browser.</div>
+</div>
+<button class="btn btn-quit" id="shieldExamModeButton">Enter Exam Mode</button>
+</div>
+<div class="settings-note">
                         Requires the shield helper to be running as root. Run
                         <code>sudo bash scripts/install-shield.sh</code> once first —
                         it seeds the shared secret token that locks the helper's socket, so
@@ -603,33 +590,8 @@
                         The same action is also bound to the ⌃⌥⇧E shortcut —
                         it toggles exam mode armed ↔ restored.
                     </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-window-maximize"></i>
-                    Window Settings
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Window Gap</div>
-                            <div class="settings-item-description">Gap between bound windows (in pixels)</div>
-                        </div>
-                        <input type="number" class="input-field" id="windowGap" placeholder="20" min="0" max="100">
-                    </div>
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Keystroke Capture Hotkey</div>
-                            <div class="settings-item-description">Global hotkey that toggles focusless typing (macOS). Default: Cmd/Ctrl+Shift+Space</div>
-                        </div>
-                        <input type="text" class="input-field" id="captureHotkey" placeholder="CommandOrControl+Shift+Space">
-                    </div>
-                </div>
-            </div>
-            </details>
-        </div>
+</div>
+</div></details></div>
     </div>
 
     <script src="./src/ui/settings-window.js"></script>

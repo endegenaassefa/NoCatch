@@ -63,7 +63,7 @@ function launch({ argv = process.argv.slice(2), environment = process.env, start
     WHISPER_LANGUAGE: 'en', WHISPER_DEVICE: 'cpu', WHISPER_RESPONSE_TARGET: 'chat'
   });
   fs.mkdirSync(profile, { recursive: true });
-  const child = start(executable, [`--user-data-dir=${profile}`, ...(values.playground ? ['--ingestion-playground'] : [])], { cwd: profile, env, detached: true, stdio: 'ignore', windowsHide: true });
+  const child = start(executable, [`--user-data-dir=${profile}`, ...(values.playground ? ['--ingestion-playground'] : ['--cluely-qa-instance'])], { cwd: profile, env, detached: true, stdio: 'ignore', windowsHide: true });
   child.on('error', error => { console.error(`NoCatch launch failed: ${error.message}`); process.exitCode = 1; });
   child.unref();
   return { executable, profile, provider };

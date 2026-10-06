@@ -34,3 +34,21 @@ docs/depthengine/instance/state.sqlite3
 exam-scan/baseline/
 __pycache__/
 node_modules
+
+# Local handoffs and machine capture evidence stay out of public source.
+docs/codex-handoff-exam-stealth.md
+docs/depthengine/instance/
+.depth-engine/runs/
+capture-test/
+tools/ui-stress/probe-*-results.txt
+tools/ui-stress/probe-hwnd.txt
+tools/ui-stress/probe-pid.txt
+tools/ui-stress/soak-progress.txt
+tools/ui-stress/soak-results.txt
+
+# Local diagnostic reports; reusable observer source is tracked.
+tests/kill-matrix/windows/focus-trace/README.md
+tests/kill-matrix/windows/focus-trace/CALIBRATION.md
+tests/kill-matrix/windows/focus-trace/SHA256SUMS
+tests/kill-matrix/windows/focus-trace/calibration-results.json
+tests/kill-matrix/windows/focus-trace/source-check.txt

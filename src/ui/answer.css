@@ -1,0 +1,101 @@
+/* Original OpenCluely typography, with bounded code and table scroll areas. */
+.answer-content { min-width: 0; overflow-wrap: anywhere; }
+.chat-page .message.assistant .message-text.answer-content { white-space: normal; }
+.answer-content > :first-child { margin-top: 0; }
+.answer-content > :last-child { margin-bottom: 0; }
+.answer-content p { margin: 8px 0; }
+.answer-content strong { font-weight: 600; }
+.answer-content pre {
+  position: relative;
+  max-width: 100%;
+  overflow: auto !important;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 4;
+}
+.answer-content pre[data-language]::before {
+  content: attr(data-language);
+  display: block;
+  margin-bottom: 7px;
+  color: rgba(255,255,255,.6);
+  font: 10px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.answer-content pre code { white-space: pre; overflow-wrap: normal; word-break: normal; }
+.answer-plain-text { white-space: pre-wrap; }
+.answer-table { max-width: 100%; overflow: auto; margin: 10px 0; overscroll-behavior-x: contain; }
+.chat-page .message.assistant .answer-table { overflow: auto !important; }
+.answer-table table { width: 100%; border-collapse: collapse; font-size: inherit; line-height: 1.5; }
+.answer-table th, .answer-table td {
+  padding: 7px 10px;
+  min-width: 70px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(255,255,255,.15);
+}
+.answer-table th { font-weight: 600; background: rgba(255,255,255,.06); }
+.answer-content a { color: inherit; text-underline-offset: 3px; }
+.answer-content a:not([href]) { text-decoration: none; }
+.answer-content .math { white-space: normal; }
+.answer-content pre:focus-visible, .answer-table:focus-visible {
+  outline: 2px solid rgba(255,255,255,.8);
+  outline-offset: -2px;
+}
+.source-reference {
+  appearance: none;
+  display: inline;
+  background: transparent;
+  border: 0;
+  padding: 1px 2px;
+  color: rgba(255,255,255,.85);
+  font: inherit;
+  font-size: .85em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.source-reference:hover { color: #fff; }
+.source-unverified { color: #fbbf24; font-size: .9em; }
+.message .material-source-links, .full-content-inner > .material-source-links {
+  background: transparent;
+  padding: 9px 0 0;
+  margin-top: 10px;
+  max-height: none;
+  border-top: 1px solid rgba(255,255,255,.12);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.material-source-links .source-notice { flex-basis: 100%; }
+.material-source-links .source-list { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.material-source-links .source-list button {
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.material-source-links .source-list button:hover { color: #fff; }
+
+/* Recovery and source progress use the same restrained message vocabulary. */
+.answer-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  color: #f5b7b1;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.answer-retry {
+  flex-shrink: 0;
+  background: rgba(255,255,255,.1);
+  color: rgba(255,255,255,.95);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 4px;
+  padding: 4px 9px;
+  font: inherit;
+  cursor: pointer;
+}
+.answer-retry:disabled { opacity: .6; cursor: default; }
+.source-pending { color: rgba(255,255,255,.6); font-size: .85em; }

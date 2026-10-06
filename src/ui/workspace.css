@@ -1,0 +1,898 @@
+/* Shared desktop chrome. Surface-specific rendering and IPC remain in their controllers. */
+:root{
+  --workspace-bg:rgba(0,0,0,.2);
+  --workspace-surface:rgba(255,255,255,.1);
+  --workspace-line:rgba(255,255,255,.15);
+  --workspace-text:rgba(255,255,255,.95);
+  --workspace-muted:rgba(255,255,255,.6);
+  --workspace-accent:rgba(255,255,255,.9);
+  --workspace-glass:linear-gradient(135deg,rgba(0,0,0,.3) 0%,rgba(20,20,20,.4) 100%);
+  --workspace-popover:linear-gradient(135deg,rgba(20,20,20,.7) 0%,rgba(10,10,10,.6) 100%);
+  --workspace-font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  color-scheme:dark
+}
+*{
+  box-sizing:border-box
+}
+body{
+  font-family:var(--workspace-font)
+}
+[hidden]{
+  display:none!important
+}
+button,select,textarea,input{
+  font-family:inherit
+}
+button,summary,select,input,textarea{
+  -webkit-app-region:no-drag
+}
+button:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{
+  outline:2px solid var(--workspace-accent)!important;
+  outline-offset:2px
+}
+.sr-only{
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0
+}
+.workspace-button{
+  border:1px solid var(--workspace-line);
+  border-radius:6px;
+  background:var(--workspace-surface);
+  color:var(--workspace-text);
+  font:inherit;
+  padding:8px 12px;
+  cursor:pointer
+}
+/* The overlay keeps its original small footprint, with actions readable at a glance. */
+.toolbar-page .command-tab{
+  width:max-content;
+  max-width:100%;
+  height:34px;
+  padding:3px 7px;
+  gap:3px;
+  justify-content:flex-start;
+  background:linear-gradient(135deg,rgba(0,0,0,.4) 0%,rgba(20,20,20,.5) 100%);
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:8px;
+  backdrop-filter:blur(20px);
+  color:var(--workspace-text)
+}
+.toolbar-page .command-item{
+  height:26px;
+  min-height:26px;
+  gap:6px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:3px 8px;
+  margin:0;
+  background:transparent;
+  border:0;
+  border-radius:4px;
+  color:var(--workspace-text);
+  font:500 11px/1.2 var(--workspace-font);
+  cursor:pointer;
+  white-space:nowrap
+}
+.toolbar-page .command-item:hover{
+  background:rgba(255,255,255,.1)
+}
+.toolbar-page .capture-action{
+  background:rgba(255,255,255,.15);
+  color:var(--workspace-text)
+}
+.toolbar-page .capture-action:hover{
+  background:rgba(255,255,255,.25)
+}
+.toolbar-page .command-item i{
+  font-size:11px;
+  color:inherit
+}
+.toolbar-page .command-tab .status-dot{
+  width:6px;
+  height:6px;
+  margin:0 5px;
+  flex:none;
+  box-shadow:none
+}
+.toolbar-page .shortcuts-popover{
+  left:0;
+  top:40px;
+  width:360px;
+  max-width:calc(100vw - 4px);
+  padding:16px;
+  background:var(--workspace-popover);
+  backdrop-filter:blur(18px);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;
+  box-shadow:0 12px 30px #0005;
+  color:var(--workspace-text)
+}
+.toolbar-page .shortcuts-popover:not(.is-open){
+  display:none
+}
+.toolbar-page .toolbar-preferences{
+  display:grid;
+  grid-template-columns:90px minmax(0,1fr);
+  gap:12px;
+  align-items:center;
+  font-size:12px
+}
+.toolbar-page .toolbar-preferences label{
+  color:var(--workspace-muted)
+}
+.toolbar-page .toolbar-preferences select{
+  width:100%;
+  min-width:0;
+  padding:7px;
+  background:var(--workspace-surface);
+  border:1px solid var(--workspace-line);
+  border-radius:5px;
+  color:var(--workspace-text);
+  font:inherit
+}
+.toolbar-page .toolbar-preferences button{
+  grid-column:1/-1;
+  text-align:left;
+  font-size:12px
+}
+.toolbar-page .shortcut-details{
+  font-size:12px;
+  border-top:1px solid var(--workspace-line);
+  margin-top:16px;
+  padding-top:10px
+}
+.toolbar-page summary{
+  padding:6px 0;
+  cursor:pointer;
+  color:var(--workspace-muted)
+}
+.toolbar-page .shortcuts-footer{
+  font-size:10px;
+  line-height:1.5;
+  margin-top:12px;
+  color:var(--workspace-muted)
+}
+.toolbar-page .shortcuts-title{
+  margin-top:10px;
+  font-size:12px
+}
+/* Chat keeps the conversation and question composer in fixed, predictable places. */
+.chat-page .chat-container{
+  background:var(--workspace-glass);
+  border-color:rgba(255,255,255,.1);
+  box-shadow:0 4px 25px rgba(0,0,0,.15);
+  color:var(--workspace-text);
+  overflow:hidden
+}
+.chat-page .chat-header{
+  position:relative;
+  z-index:2;
+  min-height:40px;
+  padding:4px 12px;
+  gap:12px;
+  background:rgba(0,0,0,.2);
+  backdrop-filter:blur(10px);
+  border-color:rgba(255,255,255,.08)
+}
+.chat-page .header-title{
+  font-size:14px;
+  white-space:nowrap;
+  font-weight:600;
+  text-shadow:0 1px 2px rgba(0,0,0,.3);
+  gap:8px
+}
+.header-divider{
+  font-weight:400;
+  color:rgba(255,255,255,.4)
+}
+.chat-menu{
+  position:relative;
+  font-size:12px;
+  -webkit-app-region:no-drag
+}
+.chat-menu>summary{
+  cursor:pointer;
+  list-style:none;
+  color:var(--workspace-muted);
+  padding:7px 8px;
+  border-radius:5px
+}
+.chat-menu>summary::-webkit-details-marker{
+  display:none
+}
+.chat-menu>summary:hover{
+  background:var(--workspace-surface)
+}
+.chat-menu-panel{
+  position:absolute;
+  right:0;
+  top:32px;
+  z-index:30;
+  width:244px;
+  max-width:calc(100vw - 28px);
+  max-height:calc(100vh - 58px);
+  overflow:auto;
+  padding:5px;
+  /* A menu needs a steady reading surface over live conversation text. */
+  background:linear-gradient(135deg,rgba(20,20,20,.96) 0%,rgba(10,10,10,.96) 100%);
+  backdrop-filter:blur(18px);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:8px;
+  box-shadow:0 12px 30px #0006
+}
+.chat-menu-panel button{
+  display:block;
+  text-align:left;
+  width:100%;
+  padding:9px 10px;
+  min-height:36px;
+  background:transparent;
+  color:var(--workspace-text);
+  border:0;
+  border-radius:4px;
+  font-size:12px;
+  cursor:pointer
+}
+.chat-menu-panel button:hover{
+  background:rgba(255,255,255,.1)
+}
+.chat-menu-panel button.active{
+  color:var(--workspace-accent)
+}
+.chat-page .conversation{
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  -webkit-app-region:no-drag
+}
+.chat-page .chat-messages{
+  flex:1;
+  min-height:0;
+  padding:14px;
+  overflow:auto
+}
+/* Only the fixed scrollport excludes window dragging. Inherited exclusions on
+   scrolled messages can extend outside the viewport and cover the header. */
+.chat-page .chat-messages *{
+  -webkit-app-region:initial
+}
+.chat-empty{
+  position:absolute;
+  inset:0;
+  display:flex;
+  justify-content:center;
+  flex-direction:column;
+  padding:20px;
+  pointer-events:none
+}
+.chat-empty h1{
+  font-size:17px;
+  line-height:1.25;
+  letter-spacing:-.01em;
+  font-weight:500;
+  margin:0 0 10px;
+  max-width:20ch;
+  color:var(--workspace-text)
+}
+.chat-empty p{
+  font-size:13px;
+  line-height:1.6;
+  color:var(--workspace-muted);
+  max-width:30ch;
+  margin:0
+}
+.conversation:has(#chatMessages:not(:empty)) .chat-empty{
+  display:none
+}
+.chat-page .chat-input{
+  padding:8px 12px 10px;
+  background:rgba(0,0,0,.2);
+  backdrop-filter:blur(10px);
+  border:0;
+  border-top:1px solid rgba(255,255,255,.08);
+  flex-shrink:0;
+  -webkit-app-region:no-drag
+}
+.composer-tools{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px;
+  margin:5px 0 0
+}
+.composer-tool{
+  font-size:12px;
+  line-height:1.3;
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-height:28px;
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:6px;
+  color:var(--workspace-muted);
+  padding:4px 7px;
+  cursor:pointer
+}
+.composer-tool:hover{
+  background:var(--workspace-surface);
+  color:var(--workspace-text)
+}
+.composer-tool.has-materials{
+  color:var(--workspace-accent)
+}
+#material-summary{
+  font-size:11px;
+  color:var(--workspace-muted)
+}
+#material-summary:empty{
+  display:none
+}
+.chat-page .input-container{
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:8px;
+  padding:7px 10px;
+  gap:8px;
+  align-items:flex-end
+}
+.chat-page .input-container:focus-within{
+  border-color:rgba(255,255,255,.65)
+}
+.chat-page #messageInput:focus-visible{outline:none!important}
+.chat-page #messageInput{
+  background:transparent;
+  border:0;
+  padding:4px 0;
+  min-height:32px;
+  color:var(--workspace-text);
+  font:13px/1.4 monospace;
+  box-shadow:none;
+  min-width:0
+}
+.chat-page #messageInput::placeholder{
+  color:var(--workspace-muted)
+}
+.chat-page .send-button,.chat-page .mic-button{
+  height:32px;
+  width:32px;
+  min-width:32px;
+  border-radius:7px;
+  margin-bottom:0;
+  box-shadow:none
+}
+.chat-page .send-button{
+  background:rgba(255,255,255,.15);
+  color:rgba(255,255,255,.9)
+}
+.chat-page .mic-button{
+  background:rgba(255,255,255,.15);
+  color:var(--workspace-text)
+}
+.chat-page .mic-button.recording{
+  background:rgba(255,71,87,.8)
+}
+.composer-footer{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin:4px 3px 0;
+  font-size:11px;
+  color:var(--workspace-muted)
+}
+.chat-page .skill-select{
+  max-width:190px;
+  min-width:0;
+  font:inherit;
+  background:transparent;
+  color:var(--workspace-muted);
+  border:0;
+  padding:4px 2px
+}
+.chat-page option{
+  background:#202020;
+  color:var(--workspace-text)
+}
+.input-hint{
+  margin-left:auto;
+  white-space:nowrap;
+  font-size:10px
+}
+#speechStatus{
+  font-size:12px;
+  line-height:1.5;
+  color:var(--workspace-muted);
+  padding:8px 3px 0
+}
+#speechStatus:empty{
+  display:none
+}
+.chat-page .exam-banner{
+  font-size:11px;
+  line-height:1.5;
+  padding:8px 18px;
+  border:0;
+  border-bottom:1px solid #5e4d34;
+  background:#302b22;
+  color:#eac790
+}
+.chat-page .message{
+  box-shadow:none;
+  text-shadow:0 1px 2px rgba(0,0,0,.2);
+  border-radius:8px
+}
+.chat-page .message-text{
+  font-size:13px;
+  line-height:1.4;
+  text-shadow:0 1px 2px rgba(0,0,0,.2)
+}
+.chat-page .message.user{
+  background:rgba(255,152,0,.1);
+  border-color:#ff9800
+}
+.chat-page .message.assistant{
+  background:rgba(156,39,176,.1);
+  border-color:#9c27b0;
+  padding-inline:16px
+}
+.chat-page .message-time{
+  display:block;
+  margin:6px 0 0;
+  color:rgba(255,255,255,.6);
+  font-size:10px;
+  font-weight:400;
+  line-height:1.2;
+  text-align:right
+}
+.chat-page .message[data-answer-state="loading"] .message-time,
+.chat-page .message[data-answer-state="streaming"] .message-time{display:none}
+.chat-page .composer-footer:has(#panelMovementHint[hidden]){display:none}
+.chat-page .interim-overlay{
+  background:var(--workspace-surface)
+}
+.exam-layout .chat-container,.exam-layout .chat-header{
+  -webkit-app-region:no-drag;
+  cursor:default
+}
+.exam-layout .composer-footer .input-hint{
+  display:none
+}
+.chat-menu .menu-field{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+  margin:8px 10px 12px;
+  color:var(--workspace-muted);
+  font-size:11px
+}
+.chat-page .menu-field select{
+  width:100%;
+  max-width:none;
+  min-height:32px;
+  padding:5px 8px;
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:5px;
+  color:var(--workspace-text);
+  font-size:12px
+}
+#panelSetup>summary{
+  padding:10px;
+  cursor:pointer;
+  color:var(--workspace-text)
+}
+#panelSetup[open]{
+  border-block:1px solid var(--workspace-line);
+  margin-block:4px
+}
+.menu-help{
+  margin:8px 10px;
+  font-size:12px;
+  line-height:1.5;
+  color:var(--workspace-muted)
+}
+.menu-help:empty{display:none}
+.panel-status{
+  flex-shrink:0;
+  padding:8px 12px;
+  font-size:12px;
+  line-height:1.5;
+  color:#eac790;
+  background:#302b22;
+  overflow-wrap:anywhere
+}
+.panel-too-small .conversation,.panel-too-small .chat-input{display:none}
+.panel-too-small .panel-status{overflow:auto;flex-shrink:1}
+.movement-unavailable{color:#eac790}
+.jump-to-latest{
+  position:static;
+  margin-left:auto;
+  min-height:28px;
+  flex-shrink:0;
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:5px;
+  background:rgba(255,255,255,.08);
+  color:var(--workspace-text);
+  padding:4px 8px;
+  font-size:11px;
+  cursor:pointer
+}
+.chat-page .message-text{min-width:0;overflow-wrap:anywhere}
+.chat-page .message-text pre{max-width:100%;overflow:auto!important;white-space:pre;overflow-wrap:normal;word-break:normal}
+.chat-page .message-text pre code{white-space:pre;overflow-wrap:normal;word-break:normal}
+.chat-page .composer-footer{min-height:18px;line-height:1.5;flex-wrap:wrap}
+@media(max-height:450px){
+  .chat-page #messageInput{max-height:88px!important}
+}
+/* Settings are a short index of named groups, each with its original live controls. */
+.settings-page .settings-container{
+  background:var(--workspace-glass);
+  border:1px solid rgba(255,255,255,.1);
+  color:var(--workspace-text);
+  box-shadow:0 4px 25px rgba(0,0,0,.15)
+}
+.settings-page .settings-header{
+  padding:14px 20px;
+  background:rgba(0,0,0,.2);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(255,255,255,.08)
+}
+.settings-page .settings-header .header-title{
+  font-size:14px;
+  text-shadow:0 1px 2px rgba(0,0,0,.3)
+}
+.settings-page .btn{
+  font-size:12px;
+  min-height:32px;
+  box-shadow:none;
+  background:rgba(255,255,255,.15);
+  border:1px solid var(--workspace-line);
+  color:var(--workspace-text);
+  border-radius:6px
+}
+.settings-page .btn-quit{
+  background:transparent;
+  color:var(--workspace-muted);
+  border-color:transparent
+}
+.settings-page .settings-content{
+  padding:6px 20px 22px
+}
+.settings-autosave{
+  font-size:11px;
+  color:var(--workspace-muted);
+  margin:12px 0 8px
+}
+.settings-group-panel{
+  border-bottom:1px solid var(--workspace-line);
+  -webkit-app-region:no-drag
+}
+.settings-group-panel>summary{
+  padding:17px 0;
+  font-size:13px;
+  cursor:pointer;
+  color:var(--workspace-text);
+  list-style:none;
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
+.settings-group-panel>summary::-webkit-details-marker{
+  display:none
+}
+.settings-group-panel>summary::after{
+  content:'+';
+  font-size:17px;
+  color:var(--workspace-muted)
+}
+.settings-group-panel[open]>summary::after{
+  content:'−'
+}
+.settings-page .settings-section{
+  margin:0;
+  padding:0 0 16px;
+  border:0;
+  background:transparent
+}
+.settings-page .settings-section-content{
+  padding:0;
+  background:transparent;
+  border:0
+}
+.settings-page .settings-item{
+  gap:10px;
+  align-items:flex-start;
+  padding:12px 0;
+  border-color:var(--workspace-line);
+  flex-wrap:wrap
+}
+.settings-page .settings-item>div{
+  flex:1;
+  min-width:150px
+}
+.settings-page .settings-item-label{
+  font-size:12px;
+  color:var(--workspace-text)
+}
+.settings-page .settings-item-description,.settings-page .settings-note{
+  font-size:11px;
+  line-height:1.6;
+  color:var(--workspace-muted)
+}
+.settings-page .settings-item-description:empty{
+  display:none
+}
+.settings-page .input-field{
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.15);
+  color:var(--workspace-text);
+  font-size:12px;
+  max-width:100%;
+  min-height:35px;
+  border-radius:5px
+}
+.settings-page .settings-item>.input-field{
+  flex:1 1 145px;
+  min-width:0
+}
+@media(max-width:480px){
+  .settings-page .settings-item>.input-field{
+    flex:0 0 auto
+  }
+}
+.settings-page .settings-note{
+  margin-top:10px;
+  overflow-wrap:anywhere
+}
+.settings-page .settings-note code{
+  overflow-wrap:anywhere
+}
+.settings-page .account-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px
+}
+.settings-page #managedAccountStatus{
+  font-size:12px;
+  line-height:1.6;
+  margin:0 0 10px
+}
+.settings-page #accountMessage:empty{
+  display:none
+}
+.settings-page .setting-help summary{
+  font-size:11px;
+  color:var(--workspace-muted);
+  cursor:pointer;
+  padding:12px 0
+}
+.settings-page .icon-option{
+  font-size:11px;
+  background:transparent
+}
+.settings-page .icon-option.selected{
+  border-color:var(--workspace-accent)
+}
+.onboarding-page{
+  --bg:#0a0a0a;
+  --surface:#161616;
+  --field:#121212;
+  --border:#2a2a2a;
+  --text:#fff;
+  --muted:#a0a0a0;
+  --accent:#fff;
+  --accent-hover:#e0e0e0
+}
+.onboarding-materials{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:6px 0 16px;
+  flex-wrap:wrap
+}
+.onboarding-materials .text-button{
+  padding-left:0;
+  color:var(--accent)
+}
+.response-page .main-container{
+  background:transparent;
+  border-color:rgba(255,255,255,.1)
+}
+.response-page .window-header{
+  background:linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,.04));
+  border-color:rgba(255,255,255,.12)
+}
+.response-page{font-family:initial}
+.response-page .window-title{
+  font-size:12px;
+  color:#e5e7eb
+}
+/* Shared source previews keep their Close action visible with long documents. */
+.material-source-links{
+  padding:8px 16px;
+  color:var(--workspace-muted,rgba(255,255,255,.6));
+  background:transparent;
+  font:12px/1.5 var(--workspace-font);
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  max-height:100px;
+  overflow:auto;
+  flex:none;
+  -webkit-app-region:no-drag
+}
+.material-source-links button{
+  background:transparent;
+  color:var(--workspace-accent,rgba(255,255,255,.9));
+  border:1px solid var(--workspace-line,rgba(255,255,255,.15));
+  border-radius:5px;
+  padding:4px 8px;
+  font:inherit;
+  cursor:pointer;
+  text-align:left;
+  overflow-wrap:anywhere
+}
+.material-source-dialog{
+  background:var(--workspace-popover);
+  backdrop-filter:blur(18px);
+  color:var(--workspace-text);
+  border:1px solid var(--workspace-line);
+  border-radius:12px;
+  max-width:90vw;
+  max-height:85vh;
+  width:540px;
+  padding:20px;
+  -webkit-app-region:no-drag
+}
+.material-source-dialog[open]{
+  display:flex;
+  flex-direction:column;
+  overflow:hidden
+}
+.material-source-dialog::backdrop{
+  background:#000a
+}
+.material-source-dialog h2{
+  font:600 14px/1.5 var(--workspace-font);
+  overflow-wrap:anywhere;
+  margin:0 0 14px;
+  flex:none
+}
+.material-source-body{
+  min-height:0;
+  overflow:auto
+}
+.material-source-body pre{
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  font:13px/1.6 var(--workspace-font)
+}
+.material-source-dialog>button{
+  flex:none;
+  align-self:flex-end;
+  margin-top:12px;
+  padding:8px 12px;
+  background:rgba(255,255,255,.15);
+  color:var(--workspace-text);
+  border:1px solid var(--workspace-line);
+  border-radius:6px;
+  font:12px var(--workspace-font);
+  cursor:pointer
+}
+@media(max-width:420px){
+  .chat-page .chat-header{
+    padding-inline:14px
+  }
+  .chat-page .chat-input{
+    padding-inline:12px
+  }
+  .chat-empty{
+    padding:22px
+  }
+  .chat-empty h1{
+    font-size:17px
+  }
+  .composer-footer{
+    gap:4px
+  }
+  .input-hint{
+    font-size:9px
+  }
+  .settings-page .settings-header{
+    padding:12px 16px
+  }
+  .settings-page .settings-content{
+    padding-inline:16px
+  }
+  .settings-page .header-actions{
+    gap:4px
+  }
+  .toolbar-page .command-item{
+    padding-inline:6px
+  }
+  .toolbar-page .command-tab{
+    gap:1px
+  }
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation:none!important;
+    transition:none!important;
+    scroll-behavior:auto!important
+  }
+}
+.toolbar-page .command-item span{
+  color:inherit
+}
+.toolbar-page .command-item{
+  flex-shrink:0
+}
+.toolbar-page #infoButton{
+  width:auto;
+  padding:3px 8px;
+  border-radius:4px;
+  margin-left:4px
+}
+.toolbar-page #skillIndicator{
+  color:var(--workspace-muted)
+}
+
+/* Attached Exam chrome: main is the handle; chat retains reading controls. */
+.exam-layout .toolbar-page .command-tab{
+  width:100%;height:var(--exam-bar-height,34px);min-width:0;padding:0 7px;gap:2px;
+  justify-content:space-between;-webkit-app-region:no-drag;cursor:default
+}
+.exam-layout .toolbar-page .command-item{
+  font-size:12px;font-weight:400;padding:3px 5px;gap:4px;height:28px;min-height:28px;flex-shrink:0
+}
+.exam-layout .toolbar-page .command-item i{font-size:13px}
+.exam-layout .toolbar-page #infoButton{padding:3px 5px;margin-left:0}
+.exam-layout .toolbar-page .capture-action{background:transparent}
+.exam-layout .toolbar-page .capture-action:hover,
+.exam-layout .toolbar-page #openChatButton[aria-expanded="true"]{background:rgba(255,255,255,.12)}
+.exam-layout .toolbar-page #statusDot{display:none}
+.exam-layout .toolbar-page .layout-lock{opacity:.75;padding:3px;min-width:20px}
+.exam-layout .toolbar-page .layout-lock.movement-unavailable{opacity:1}
+.exam-layout .toolbar-page .shortcuts-popover{
+  left:auto;right:0;top:var(--exam-menu-top,calc(var(--exam-bar-height,34px) + 8px));width:300px;padding:12px;background:#25262b;
+  border:1px solid rgba(255,255,255,.2);border-radius:8px;overflow:auto;
+  transition:none
+}
+.toolbar-page #toolbarPanelSetup{margin-top:12px;border-top:1px solid var(--workspace-line);font-size:12px}
+.toolbar-page #toolbarPanelSetup .menu-field{display:grid;gap:5px;margin:10px 0;color:var(--workspace-muted)}
+.toolbar-page #toolbarPanelSetup select{width:100%;min-width:0;padding:7px;background:#36373c;color:#f5f5f5;border:1px solid #56575c;border-radius:5px}
+.toolbar-page #toolbarPanelSetup .workspace-button{width:100%;text-align:left;margin:4px 0;font-size:12px}
+.toolbar-page #toolbarExamToggle{width:100%;margin-top:12px;text-align:left;font-size:12px}
+.toolbar-page .menu-help{margin:8px 0;font-size:11px}
+.toolbar-page .chat-ready{background:rgba(255,255,255,.12)}
+.toolbar-page .recording .voice-stop{display:inline}
+.collapse-chat{display:none}
+.exam-layout .chat-page .collapse-chat{display:block;border:0;background:transparent;color:rgba(255,255,255,.8);font-size:20px;padding:0 6px;cursor:pointer}
+.exam-layout .chat-page .chat-menu,
+.exam-layout .chat-page #chatCaptureBtn,
+.exam-layout .chat-page #chat-materials,
+.exam-layout .chat-page .input-container .mic-button,
+.exam-layout .chat-page .header-divider,
+.exam-layout .chat-page #chatModeLabel{display:none}
+.exam-layout .chat-page .composer-tools:not(:has(.jump-to-latest:not([hidden]))){display:none}
+.exam-layout .chat-page .chat-header{min-height:38px;padding:9px 14px}
+@media(max-width:370px){
+  .exam-layout .toolbar-page .command-tab{padding:0 3px;gap:0}
+  .exam-layout .toolbar-page .command-item{padding:3px 2px;gap:3px;font-size:11px}
+  .exam-layout .toolbar-page #infoButton{padding:3px 2px}
+}
+@media(max-width:310px){
+  .exam-layout .toolbar-page .command-item span:not(.voice-stop){display:none}
+  .exam-layout .toolbar-page #infoButton span{display:inline}
+  .exam-layout .toolbar-page .command-tab{overflow-x:auto;justify-content:flex-start}
+}

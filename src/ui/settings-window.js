@@ -118,8 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
             iconOptions.forEach(option => {
                 if (option.dataset.icon === selectedIcon) {
                     option.classList.add('selected');
+                    option.setAttribute('aria-pressed', 'true');
                 } else {
                     option.classList.remove('selected');
+                    option.setAttribute('aria-pressed', 'false');
                 }
             });
         }
@@ -315,7 +317,10 @@ document.addEventListener('DOMContentLoaded', () => {
         iconGrid.innerHTML = '';
 
         icons.forEach(icon => {
-            const iconElement = document.createElement('div');
+            const iconElement = document.createElement('button');
+            iconElement.type = 'button';
+            iconElement.setAttribute('aria-pressed', 'false');
+            iconElement.setAttribute('aria-label', `Use ${icon.name} app icon`);
             iconElement.className = 'icon-option';
             iconElement.dataset.icon = icon.key;
             
@@ -353,7 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 tryNextPath();
             };
             
-            const label = document.createElement('div');
+            const label = document.createElement('span');
             label.textContent = icon.name;
             
             iconElement.appendChild(img);
@@ -364,10 +369,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Remove selection from all icons
                 iconGrid.querySelectorAll('.icon-option').forEach(opt => {
                     opt.classList.remove('selected');
+                    opt.setAttribute('aria-pressed','false');
                 });
                 
                 // Add selection to clicked icon
                 iconElement.classList.add('selected');
+                iconElement.setAttribute('aria-pressed','true');
                 
                 // Save the selection - this should trigger the app icon change
                 window.api.send('save-settings', { selectedIcon: icon.key });

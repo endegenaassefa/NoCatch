@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>Chat</title>
+    <script>document.documentElement.classList.toggle('exam-layout', !!window.electronAPI?.initialExamLayout);</script>
     <link href="./src/styles/common.css" rel="stylesheet" />
     <!-- PrismJS theme for syntax highlighting -->
     <link rel="stylesheet" href="./node_modules/prismjs/themes/prism-tomorrow.min.css" />
@@ -699,65 +700,71 @@
         }
       }
     </style>
-  </head>
-  <body>
+  <link rel="stylesheet" href="src/ui/workspace.css">
+  <link rel="stylesheet" href="src/ui/answer.css">
+</head>
+  <body class="chat-page">
     <div class="chat-container" id="chatContainer">
       <div class="chat-header">
-        <div class="header-title">
-          <i class="fas fa-microphone"></i>
-          Live Transcription & Chat
-          <div class="recording-indicator" id="recordingIndicator"></div>
-        </div>
-        <div class="header-actions">
-          <select class="skill-select" id="chatSkillSelect" title="Question type">
-            <option value="dsa">DSA</option>
-          </select>
-          <button class="icon-button" id="chatCaptureBtn" title="Take a picture — answer lands in this chat (Ctrl/Cmd+Shift+S)">
-            <span aria-hidden="true">📷</span>
-          </button>
-          <button class="icon-button" id="chatExamBtn" title="Arm exam mode — shield captures, answers land in this chat">
-            <span aria-hidden="true">🛡️</span>
-          </button>
-          <button class="icon-button" id="clearHistoryBtn" title="Clear chat history">
-            <i class="fas fa-trash"></i>
-          </button>
-        </div>
+        <div class="header-title">NoCatch <span class="header-divider">·</span> <span id="chatModeLabel">Chat</span><div class="recording-indicator" id="recordingIndicator"></div></div>
+        <button id="collapseChatButton" class="collapse-chat" aria-label="Collapse chat" title="Collapse chat · Ctrl+Shift+C">−</button>
+        <details class="chat-menu"><summary aria-label="More chat options">More <span aria-hidden="true">⌄</span></summary><div class="chat-menu-panel">
+          <label class="menu-field" for="chatSkillSelect">Answer style<select class="skill-select" id="chatSkillSelect"><option value="dsa">Data structures &amp; algorithms</option></select></label>
+          <label class="menu-field" for="chatLanguageSelect">Code language<select id="chatLanguageSelect"><option value="cpp">C++</option><option value="c">C</option><option value="python">Python</option><option value="java">Java</option><option value="javascript">JavaScript</option></select></label>
+          <details id="panelSetup" hidden><summary>Panel setup</summary><div class="panel-setup-fields">
+            <label class="menu-field" for="panelMovementKeys">Move with<select id="panelMovementKeys"></select></label>
+            <label class="menu-field" for="panelDisplay">Display<select id="panelDisplay"></select></label>
+            <p class="menu-help">Tap an arrow for a small step. Hold to keep moving. Configure before your session.</p>
+            <button id="savePanelSetup" data-keep-open>Save setup / retry</button>
+            <button id="resetPanelPosition" data-keep-open>Reset position</button>
+            <p id="panelSetupStatus" class="menu-help" role="status"></p>
+          </div></details>
+          <button id="chat-settings">Settings</button>
+          <button id="chatExamBtn" title="Toggle exam mode">Exam mode</button>
+          <button id="clearHistoryBtn" title="Clear chat history">Clear chat</button>
+        </div></details>
       </div>
-
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 16px;font-size:12px;color:#d0d8e8;background:#151923"><span id="material-summary">Materials optional</span><button id="chat-materials" class="icon-button" style="width:auto;font:inherit;padding:4px 8px">Materials</button></div>
-      <div id="speechStatus" role="status" aria-live="polite" style="padding: 4px 16px; font-size: 12px; color: #a9b6cc; min-height: 24px;">Microphone idle</div>
-      <div class="exam-banner" id="examModeBanner">
-        🛡️ Exam mode armed — the shield captures and answers land in this chat. Mic, question types and typing keep working. Click 🛡️ or press ⌃⌥⇧E to restore.
-      </div>
+      <div class="exam-banner" id="examModeBanner">Exam mode is active. Open More → Exam mode to restore.</div>
+      <div id="panelStatus" class="panel-status" role="status" hidden></div>
 
       <!-- Interim Text Overlay -->
       <div class="interim-overlay" id="interimOverlay"></div>
 
-      <div class="chat-messages" id="chatMessages"></div>
+      <div class="conversation"><div class="chat-messages" id="chatMessages" aria-label="Conversation"></div><div class="chat-empty" role="status"><h1 id="chatEmptyTitle">Ask a question</h1><p id="chatEmptyHint">Type below or capture your screen.</p></div></div>
 
       <div class="chat-input">
         <div class="input-container">
           <textarea
             class="input-field"
-            placeholder="Type a message… (Shift+Enter for newline)"
+            placeholder="Ask a question…" aria-label="Your question" aria-describedby="questionKeys"
             id="messageInput"
             rows="1"
           ></textarea>
-          <button class="mic-button" id="micButton">
+          <button class="mic-button" id="micButton" aria-label="Start voice input" title="Start voice input">
             <i class="fas fa-microphone"></i>
           </button>
-          <button class="send-button" id="sendButton">
+          <button class="send-button" id="sendButton" aria-label="Send question" title="Send question">
             <i class="fas fa-paper-plane"></i>
           </button>
         </div>
+        <div class="composer-tools">
+          <button class="composer-tool" id="chatCaptureBtn" title="Capture your screen (Ctrl/Cmd+Shift+S)"><i class="fas fa-camera" aria-hidden="true"></i> Capture</button>
+          <button class="composer-tool" id="chat-materials"><i class="fas fa-book-open" aria-hidden="true"></i> <span id="materials-label">Add materials</span><span id="material-summary"></span></button>
+          <button id="jumpToLatest" class="jump-to-latest" hidden>Latest ↓</button>
+        </div>
+        <div class="composer-footer"><span id="panelMovementHint" hidden>Drag locked · Ctrl+Shift+arrows</span></div>
+        <span id="questionKeys" class="sr-only">Enter to send. Shift+Enter for a new line.</span>
+        <div id="speechStatus" role="status" aria-live="polite"></div>
       </div>
     </div>
-    <script src="lib/markdown.js"></script>
+    <script src="src/ui/chat-layout.js"></script>
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
     <script src="lib/mathrender.js"></script>
     <script src="lib/sanitize.js"></script>
     <!-- PrismJS core and autoloader for language components -->
     <script src="./node_modules/prismjs/prism.min.js"></script>
     <script src="./node_modules/prismjs/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="src/ui/answer-renderer.js"></script>
     
     <script>
       // Configure Prism autoloader
@@ -768,6 +775,72 @@
       const whysperAPI = window.electronAPI;
 
       const chatMessages = document.getElementById('chatMessages');
+      const jumpToLatest = document.getElementById('jumpToLatest');
+      let followingConversation = true;
+      let answerToRead = null;
+      function followConversation() {
+        if (followingConversation) {
+          const bottom = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
+          const opening = answerToRead?.isConnected
+            ? Math.max(0, answerToRead.getBoundingClientRect().top - chatMessages.getBoundingClientRect().top + chatMessages.scrollTop - 14)
+            : bottom;
+          chatMessages.scrollTop = Math.min(bottom, opening);
+          // Once the answer fills the panel, keep its opening in view. The
+          // reader can scroll or explicitly choose Latest to follow its end.
+          if (bottom - opening > 32) {
+            followingConversation = false;
+            answerToRead = null;
+          }
+        }
+        jumpToLatest.hidden = chatMessages.scrollHeight - chatMessages.clientHeight - chatMessages.scrollTop < 32;
+      }
+      function beginReadingAnswer(bubble) {
+        if (followingConversation) answerToRead = bubble;
+      }
+      chatMessages.addEventListener('scroll', () => {
+        followingConversation = chatMessages.scrollHeight - chatMessages.clientHeight - chatMessages.scrollTop < 32;
+        if (followingConversation) jumpToLatest.hidden = true;
+      }, { passive: true });
+      jumpToLatest.addEventListener('click', () => { answerToRead = null; followingConversation = true; followConversation(); });
+      new ResizeObserver(() => { if (followingConversation) followConversation(); }).observe(chatMessages);
+      function readingAnchor() {
+        if (followingConversation) return null;
+        const viewport = chatMessages.getBoundingClientRect();
+        const row = [...chatMessages.children].find(el => el.getBoundingClientRect().bottom > viewport.top + 8);
+        const range = document.caretRangeFromPoint?.(viewport.left + 20, viewport.top + 12);
+        const node = range?.startContainer;
+        const quote = node?.nodeType === Node.TEXT_NODE
+          ? node.textContent.slice(range.startOffset).match(/[\p{L}\p{N}][\p{L}\p{N} ,.'()\-]{7,47}/u)?.[0] : null;
+        return { row, node, offset: range?.startOffset, quote,
+          lineTop: range?.getBoundingClientRect().top - viewport.top,
+          rowTop: row?.getBoundingClientRect().top - viewport.top,
+          scrollTop: chatMessages.scrollTop };
+      }
+      function restoreReadingAnchor(anchor) {
+        if (!anchor) { followConversation(); return; }
+        const viewport = chatMessages.getBoundingClientRect();
+        let node = anchor.node?.isConnected ? anchor.node : null;
+        let offset = anchor.offset;
+        if (!node && anchor.row?.isConnected && anchor.quote) {
+          const walker = document.createTreeWalker(anchor.row, NodeFilter.SHOW_TEXT);
+          for (let candidate = walker.nextNode(); candidate; candidate = walker.nextNode()) {
+            const at = candidate.textContent.indexOf(anchor.quote);
+            if (at >= 0) { node = candidate; offset = at; break; }
+          }
+        }
+        if (node && chatMessages.contains(node)) {
+          const range = document.createRange();
+          range.setStart(node, Math.min(offset || 0, node.textContent.length));
+          range.collapse(true);
+          chatMessages.scrollTop += range.getBoundingClientRect().top - viewport.top - anchor.lineTop;
+        } else if (anchor.row?.isConnected) {
+          chatMessages.scrollTop += anchor.row.getBoundingClientRect().top - viewport.top - anchor.rowTop;
+        } else {
+          chatMessages.scrollTop = anchor.scrollTop;
+        }
+        followingConversation = false;
+        jumpToLatest.hidden = false;
+      }
       const recordingIndicator = document.getElementById('recordingIndicator');
       const speechStatus = document.getElementById('speechStatus');
       const messageInput = document.getElementById('messageInput');
@@ -825,10 +898,38 @@
       let materialPrivacy=true, materialSeen=false, materialStatusResolved=false;
       function protectMaterials(data){if(data?.materialSession||data?.metadata?.materialSession){materialSeen=true;materialPrivacy=true;try{localStorage.removeItem(CHAT_HISTORY_KEY);}catch{}}}
       document.getElementById('chat-materials').onclick=()=>whysperAPI.showMaterials();
+      let currentMaterialStatus = null;
+      function updateMaterialLabel(status) {
+        if (status) currentMaterialStatus = status;
+        status = currentMaterialStatus;
+        const active = status?.state === 'active' && status.expiresAt > Date.now();
+        const draft = status?.state === 'draft';
+        document.getElementById('materials-label').textContent = active ? 'Materials' : draft ? 'Prepare materials' : 'Add materials';
+        const documents = status?.documents || [];
+        const ready = documents.filter(d => ['ready', 'partial'].includes(d.state)).length;
+        const failed = status?.preparation?.state === 'failed' || documents.some(d => ['failed', 'error'].includes(d.state));
+        const preparing = status?.preparation?.state === 'preparing' || documents.some(d => !['ready', 'partial', 'failed', 'error', 'canceled'].includes(d.state));
+        const available = active && status?.preparation?.state === 'ready';
+        document.getElementById('material-summary').textContent = active || draft ? failed ? '· needs attention' : preparing ? '· preparing' : available ? `· ${ready}` : draft ? '' : '· not prepared' : '';
+        document.getElementById('chat-materials').title = available ? `${ready} materials available · ${Math.max(0, Math.ceil((status.expiresAt - Date.now()) / 60000))} minutes remaining` : 'Open materials to prepare files or resolve an issue';
+        document.getElementById('chat-materials').classList.toggle('has-materials',active);
+      }
       whysperAPI.onMaterialsStatus?.(status=>{
         if(['draft','active'].includes(status.state)){materialSeen=true;materialPrivacy=true;try{localStorage.removeItem(CHAT_HISTORY_KEY);}catch{}}
-        document.getElementById('material-summary').textContent=status.state==='active'?`${status.documents.filter(d=>['ready','partial'].includes(d.state)).length} files · ${Math.max(0,Math.ceil((status.expiresAt-Date.now())/60000))} min left`:'Materials optional';
+        updateMaterialLabel(status);
       });
+      const materialLabelTimer = setInterval(() => updateMaterialLabel(), 1000);
+      window.addEventListener('pagehide', () => clearInterval(materialLabelTimer), { once: true });
+      document.getElementById('chat-settings').onclick = () => whysperAPI.showSettings();
+      const chatMenu = document.querySelector('.chat-menu');
+      document.addEventListener('click', event => {
+        if (!chatMenu.contains(event.target) || event.target.closest('.chat-menu-panel button:not([data-keep-open])')) {
+          const restoreFocus=chatMenu.contains(document.activeElement);
+          chatMenu.open=false;
+          if (restoreFocus) chatMenu.querySelector('summary').focus();
+        }
+      });
+      document.addEventListener('keydown', event => { if (event.key==='Escape' && chatMenu.open) {chatMenu.open=false;chatMenu.querySelector('summary').focus();} });
       whysperAPI.onMaterialsInvalidated?.(()=>{materialSeen=true;materialPrivacy=true;clearChatHistory(true);document.getElementById('messageInput').value='';});
       const recentResponseHashes = new Set();
       const RECENT_HASH_LIMIT = 50;
@@ -888,7 +989,13 @@
         chatHistory = [];
         saveHistory();
         // Clear DOM
+        window.MaterialSourceLinks?.clear();
         if (chatMessages) chatMessages.innerHTML = '';
+        answerToRead = null;
+        followingConversation = true;
+        jumpToLatest.hidden = true;
+        document.getElementById('chatEmptyTitle').textContent = 'Chat cleared';
+        document.getElementById('chatEmptyHint').textContent = 'Ask another question below or capture your screen.';
       }
 
       function applyMicVisibility() {
@@ -923,10 +1030,7 @@
           protectMaterials(data);
           const request = pendingResponse(data);
           if (responseId(data) && !request) return;
-          if (request) finishPendingResponse(request);
-          if (data && data.response) {
-            renderAssistantResponse(data.response, responseId(data));
-          }
+          completeResponse(data, request);
         });
       }
 
@@ -957,9 +1061,9 @@
 
       // ── Unified header menu: question type, capture, exam mode ──────────
       const CHAT_SKILLS = [
-        { id: 'dsa', label: 'DSA' },
-        { id: 'mcq', label: 'MCQ' },
-        { id: 'ood', label: 'OOD' },
+        { id: 'dsa', label: 'Data structures' },
+        { id: 'mcq', label: 'Multiple choice' },
+        { id: 'ood', label: 'Object design' },
         { id: 'system-design', label: 'System Design' },
         { id: 'behavioral', label: 'Behavioral' },
         { id: 'programming', label: 'Programming' }
@@ -1062,6 +1166,7 @@
       }
 
       async function toggleExamMode() {
+        if (window.ChatLayout?.supported) return window.ChatLayout.toggle();
         if (!whysperAPI || !whysperAPI.shieldExamMode) return;
         if (rootMode) {
           addMessage('🛡️ Root mode: Cluely is already running elevated — the shield is not needed.', 'system', true);
@@ -1093,7 +1198,9 @@
         if (whysperAPI && whysperAPI.getExamModeState) {
           whysperAPI.getExamModeState()
             .then(s => {
-              if (s && s.root) {
+              if (s?.platform === 'win32') {
+                if (s.layout) window.ChatLayout?.apply(s.layout);
+              } else if (s && s.root) {
                 setRootModeUi(s);
               } else {
                 setExamModeUi(!!(s && s.active));
@@ -1131,18 +1238,55 @@
         whysperAPI.onShieldAnswer((event, data) => {
           if (data && data.text) {
             try { hideThinkingIndicator(); } catch (_) {}
-            renderAssistantResponse(data.text);
+            const bubble = renderAssistantResponse(data.text);
+            if (bubble) window.MaterialSourceLinks?.render(data, bubble);
           }
         });
       }
 
       // Initialize availability and history
       if(whysperAPI.getMaterialsStatus){whysperAPI.getMaterialsStatus().then(reply=>{
-        const status=reply.status||reply;materialStatusResolved=true;
+        const status=reply.status||reply;updateMaterialLabel(status);materialStatusResolved=true;
         if(reply.success===false||!status.state||['draft','active'].includes(status.state))materialSeen=true;
         materialPrivacy=materialSeen;if(materialPrivacy)localStorage.removeItem(CHAT_HISTORY_KEY);else if(!chatHistory.length)loadHistory();
       }).catch(()=>{materialSeen=true;materialPrivacy=true;});}else{materialPrivacy=false;loadHistory();}
       initSpeechAvailability();
+
+      // Every message uses the same reading order: content, sources, then time.
+      function createMessageShell(type) {
+        const message = document.createElement('div');
+        message.className = `message ${type}`;
+        const content = document.createElement('div');
+        content.className = 'message-text';
+        const now = new Date();
+        const time = document.createElement('time');
+        time.className = 'message-time';
+        time.dateTime = now.toISOString();
+        time.title = now.toLocaleString();
+        time.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        message.append(content, time);
+        return message;
+      }
+      function createPendingAnswer() {
+        const message = createMessageShell('assistant thinking');
+        message.dataset.answerState = 'loading';
+        message.setAttribute('aria-busy', 'true');
+        const text = message.querySelector('.message-text');
+        text.classList.add('thinking-dots');
+        text.setAttribute('role', 'status');
+        text.setAttribute('aria-label', 'Thinking');
+        text.innerHTML = '<span class="dot" aria-hidden="true">•</span><span class="dot" aria-hidden="true">•</span><span class="dot" aria-hidden="true">•</span>';
+        return message;
+      }
+      function settleAnswer(bubble, state = 'complete') {
+        bubble.classList.remove('thinking');
+        bubble.dataset.answerState = state;
+        bubble.setAttribute('aria-busy', 'false');
+        const text = bubble.querySelector('.message-text');
+        text.classList.remove('thinking-dots');
+        text.removeAttribute('role');
+        text.removeAttribute('aria-label');
+      }
 
       // Basic message function with markdown support for assistant messages
       function addMessage(text, type = 'user', skipPersist = false) {
@@ -1151,62 +1295,25 @@
           return;
         }
 
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
+        const messageDiv = createMessageShell(type);
+        const textDiv = messageDiv.querySelector('.message-text');
 
-        const timeDiv = document.createElement('div');
-        timeDiv.className = 'message-time';
-        timeDiv.textContent = new Date().toLocaleTimeString();
-
-        const textDiv = document.createElement('div');
-        textDiv.className = 'message-text';
-        
         // Format assistant messages as markdown
         if (type === 'assistant') {
-          textDiv.innerHTML = formatMarkdown(text);
-          if (window.renderMathInElement) window.renderMathInElement(textDiv);
+          window.AnswerRenderer.render(textDiv, text);
         } else {
           textDiv.textContent = text;
         }
 
-        messageDiv.appendChild(timeDiv);
-        messageDiv.appendChild(textDiv);
-
         chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (type === 'assistant' && !skipPersist) beginReadingAnswer(messageDiv);
+        followConversation();
 
         if (!skipPersist) {
           chatHistory.push({ kind: 'message', type, text });
           saveHistory();
         }
         return messageDiv;
-      }
-
-      // Markdown formatter using markdown.js library
-      function formatMarkdown(text) {
-        if (!text) return '';
-        
-        try {
-          let html;
-          if (typeof markdown !== 'undefined' && markdown.toHTML) {
-            html = markdown.toHTML(text);
-          } else {
-            console.warn('Markdown library not loaded, falling back to basic formatting');
-            html = text
-              .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-              .replace(/\*(.+?)\*/g, '<em>$1</em>')
-              .replace(/`(.+?)`/g, '<code>$1</code>')
-              .replace(/\n/g, '<br>');
-          }
-          // Scrub script/event-handler/javascript: constructs before the
-          // output hits innerHTML — in root exam mode this renderer runs
-          // unsandboxed as root and LLM output is untrusted input.
-          if (window.sanitizeHtml) html = window.sanitizeHtml(html);
-          return html;
-        } catch (error) {
-          console.error('Markdown parsing failed:', error);
-          return text.replace(/\n/g, '<br>');
-        }
       }
 
       // Own the delay so completion, errors and clearing can cancel it.
@@ -1225,27 +1332,15 @@
         else thinkingTimer = timer;
       }
 
-      // Show thinking indicator
+      // Pending work and streamed text share one answer location.
       function showThinkingIndicator(request = null) {
-        if (request ? request.thinkingIndicator : document.getElementById('thinking-indicator')) return;
-        const thinkingDiv = document.createElement('div');
-        thinkingDiv.className = 'message assistant thinking';
+        if (request ? request.thinkingIndicator || request.streamingBubble : document.getElementById('thinking-indicator')) return;
+        const thinkingDiv = createPendingAnswer();
         thinkingDiv.id = request ? `thinking-${request.id}` : 'thinking-indicator';
         if (request) request.thinkingIndicator = thinkingDiv;
-
-        const timeDiv = document.createElement('div');
-        timeDiv.className = 'message-time';
-        timeDiv.textContent = new Date().toLocaleTimeString();
-
-        const textDiv = document.createElement('div');
-        textDiv.className = 'message-text thinking-dots';
-        textDiv.innerHTML = '<span class="dot">•</span><span class="dot">•</span><span class="dot">•</span>';
-
-        thinkingDiv.appendChild(timeDiv);
-        thinkingDiv.appendChild(textDiv);
-
         chatMessages.appendChild(thinkingDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        beginReadingAnswer(thinkingDiv);
+        followConversation();
       }
 
       // Hide the indicator and cancel any display that is still scheduled.
@@ -1265,10 +1360,10 @@
         }
       }
 
-      function finishPendingResponse(request) {
+      function finishPendingResponse(request, keepBubble = false) {
         if (!request) return;
         hideThinkingIndicator(request);
-        if (request.streamingBubble) request.streamingBubble.remove();
+        if (request.streamingBubble && !keepBubble) request.streamingBubble.remove();
         if (request.captureStatus) request.captureStatus.remove();
         request.streamingBubble = null;
         request.captureStatus = null;
@@ -1276,11 +1371,72 @@
         retiredRequests.add(request.id);
       }
 
+      function completeResponse(data, request) {
+        const response = typeof data?.response === 'string' ? data.response : '';
+        if (!response.trim()) {
+          if (request) showResponseError('No answer received', null, request);
+          return;
+        }
+        const bubble = request?.streamingBubble || request?.thinkingIndicator;
+        const anchor = readingAnchor();
+        if (request) {
+          // Promote the pending row before cleanup, including non-streaming replies.
+          request.thinkingIndicator = null;
+          finishPendingResponse(request, Boolean(bubble));
+        }
+        const answer = renderAssistantResponse(response, responseId(data), bubble);
+        if (answer) window.MaterialSourceLinks?.render(data, answer);
+        restoreReadingAnchor(anchor);
+      }
+
       function showResponseError(context, error, request) {
         if (!request || request.generation !== chatGeneration || pendingResponses.get(request.id) !== request) return;
-        finishPendingResponse(request);
-        const detail = typeof error === 'string' ? error : error && (error.error || error.message);
-        addMessage(`${context}${detail ? ': ' + detail : '.'} Please try again.`, 'error');
+        const bubble = request.streamingBubble || request.thinkingIndicator;
+        const text = bubble?.querySelector('.message-text');
+        const partial = text?.dataset.streamingText?.trim();
+        const anchor = readingAnchor();
+        request.thinkingIndicator = null;
+        finishPendingResponse(request, Boolean(bubble));
+        const row = bubble || createMessageShell('error');
+        if (!row.isConnected) chatMessages.append(row);
+        const content = row.querySelector('.message-text');
+        settleAnswer(row, 'interrupted');
+        if (partial) {
+          // Keep what was already readable, with an explicit incomplete state.
+          window.AnswerRenderer.render(content, text.dataset.streamingText);
+        } else {
+          row.classList.remove('assistant');
+          row.classList.add('error');
+          content.textContent = context;
+        }
+        const status = document.createElement('div');
+        status.className = 'answer-status';
+        status.setAttribute('role', 'status');
+        const label = document.createElement('span');
+        const detail = typeof error === 'string' ? error : error?.error || error?.message;
+        label.textContent = partial ? 'Answer interrupted — this response is incomplete.'
+          : typeof detail === 'string' && detail.trim() ? detail : 'Please try again.';
+        status.append(label);
+        if (request.question) {
+          const retry = document.createElement('button');
+          retry.className = 'answer-retry';
+          retry.textContent = 'Retry';
+          retry.type = 'button';
+          retry.addEventListener('click', () => {
+            if (!row.isConnected || request.generation !== chatGeneration || retry.disabled) return;
+            retry.disabled = true;
+            retry.textContent = 'Retried';
+            // Retry only the failed question; leave the current draft alone.
+            requestTextAnswer(request.question);
+          });
+          status.append(retry);
+        } else {
+          const help = document.createElement('span');
+          help.textContent = 'Use Capture or ask again below.';
+          status.append(help);
+        }
+        row.insertBefore(status, row.querySelector('.message-time'));
+        restoreReadingAnchor(anchor);
       }
 
       // Minimalist Listening Animation Functions
@@ -1340,6 +1496,7 @@
         }
         if (micButton) {
           micButton.classList.add('recording');
+          micButton.setAttribute('aria-label','Stop voice input'); micButton.title='Stop voice input';
         }
 
         showListeningAnimation();
@@ -1354,10 +1511,11 @@
         }
         if (micButton) {
           micButton.classList.remove('recording');
+          micButton.setAttribute('aria-label','Start voice input'); micButton.title='Start voice input';
         }
 
         hideListeningAnimation();
-        if (speechStatus) speechStatus.textContent = 'Microphone stopped';
+        if (speechStatus) speechStatus.textContent = '';
       }
 
       function handleTranscription(text) {
@@ -1373,23 +1531,6 @@
       }
 
       // Helpers to capture AI response into chat (text + snippets)
-      function extractCodeBlocks(text) {
-        if (!text) return [];
-        const blocks = [];
-        const regex = /(```|~~~)([^\n]*)\n([\s\S]*?)\1/g; // supports ```lang and ~~~lang
-        let match;
-        while ((match = regex.exec(text)) !== null) {
-          const info = (match[2] || '').trim();
-          const langToken = info.split(/\s+/)[0] || 'text';
-          blocks.push({ language: langToken, code: match[3], fullMatch: match[0] });
-        }
-        return blocks;
-      }
-      function stripCodeBlocks(text, blocks) {
-        let result = text || '';
-        blocks.forEach(b => { result = result.replace(b.fullMatch, ''); });
-        return result.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
-      }
       function escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str ?? '';
@@ -1422,10 +1563,10 @@
         textDiv.appendChild(label);
         textDiv.appendChild(pre);
 
-        messageDiv.appendChild(timeDiv);
         messageDiv.appendChild(textDiv);
+        messageDiv.appendChild(timeDiv);
         chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        followConversation();
 
         try { if (window.Prism && Prism.highlightElement) { Prism.highlightElement(codeEl); } } catch (_) {}
 
@@ -1434,7 +1575,7 @@
           saveHistory();
         }
       }
-      function renderAssistantResponse(response, requestId = null) {
+      function renderAssistantResponse(response, requestId = null, existingBubble = null) {
         if (!response || typeof response !== 'string') return;
         // Separate requests can legitimately produce identical answers.
         // Legacy events without an ID retain content-based deduplication.
@@ -1447,14 +1588,20 @@
           recentResponseHashes.delete(first);
         }
 
-        const blocks = extractCodeBlocks(response);
-        const textOnly = stripCodeBlocks(response, blocks);
-        // Add text response first (if any)
-        if (textOnly && textOnly.trim().length) {
-          addMessage(textOnly, 'assistant');
+        // Keep the streamed message in place: concurrent answers retain their
+        // order and formatting never temporarily collapses the scroll area.
+        if (existingBubble?.isConnected) {
+          const textDiv = existingBubble.querySelector('.message-text');
+          settleAnswer(existingBubble);
+          window.AnswerRenderer.render(textDiv, response);
+          delete textDiv.dataset.streamingText;
+          chatHistory.push({ kind: 'message', type: 'assistant', text: response });
+          saveHistory();
+          followConversation();
+          return existingBubble;
         }
-        // Add each code snippet separately
-        blocks.forEach(b => addCodeSnippet(b.language, b.code));
+
+        return addMessage(response, 'assistant');
       }
 
       // Basic IPC Event Listeners - simplified
@@ -1502,40 +1649,31 @@
           handleRecordingStopped();
         });
 
-        whysperAPI.onSessionCleared(() => {
-          addMessage('Session memory has been cleared', 'system');
-        });
-
-        // Streaming answer lifecycle: a plain-text bubble grows as token
-        // chunks arrive (transcription-llm-response-chunk), then the final
-        // event replaces it with the fully formatted markdown render.
+        // Stream and completion share the same ordered Markdown structure.
         function beginStreamingResponse(data) {
           protectMaterials(data);
           const request = beginRequest(responseId(data));
           if (!request || request.streamingBubble) return;
-          // Voice starts carry messageId; retire only their pre-stream indicator.
           if (!data.requestId) hideThinkingIndicator();
           if (request.captureStatus) request.captureStatus.remove();
           request.captureStatus = null;
-          const streamingBubble = document.createElement('div');
-          request.streamingBubble = streamingBubble;
+          clearTimeout(request.thinkingTimer);
+          request.thinkingTimer = null;
+          const bubble = request.thinkingIndicator || createPendingAnswer();
+          request.thinkingIndicator = null;
+          request.streamingBubble = bubble;
           request.messageId = data.messageId;
-          streamingBubble.className = 'message assistant';
-          const timeDiv = document.createElement('div');
-          timeDiv.className = 'message-time';
-          timeDiv.textContent = new Date().toLocaleTimeString();
-          const textDiv = document.createElement('div');
-          textDiv.className = 'message-text';
-          textDiv.dataset.streamingText = '';
-          streamingBubble.appendChild(timeDiv);
-          streamingBubble.appendChild(textDiv);
-          chatMessages.appendChild(streamingBubble);
-          chatMessages.scrollTop = chatMessages.scrollHeight;
-          scheduleThinkingIndicator(request);
+          request.materialStream = Boolean(data.materialSession || data.metadata?.materialSession);
+          bubble.removeAttribute('id');
+          bubble.querySelector('.message-text').dataset.streamingText = '';
+          if (!bubble.isConnected) {
+            chatMessages.appendChild(bubble);
+            beginReadingAnswer(bubble);
+          }
+          followConversation();
         }
 
         function appendStreamingChunk(data) {
-          protectMaterials(data);
           protectMaterials(data);
           const request = pendingResponse(data);
           const streamingBubble = request && request.streamingBubble;
@@ -1544,9 +1682,17 @@
           hideThinkingIndicator(request);
           const textDiv = streamingBubble.querySelector('.message-text');
           if (!textDiv) return;
+          const anchor = readingAnchor();
           textDiv.dataset.streamingText = (textDiv.dataset.streamingText || '') + (delta || '');
-          textDiv.textContent = textDiv.dataset.streamingText;
-          chatMessages.scrollTop = chatMessages.scrollHeight;
+          if (!textDiv.dataset.streamingText.trim()) return;
+          settleAnswer(streamingBubble, 'streaming');
+          streamingBubble.setAttribute('aria-busy', 'true');
+          window.AnswerRenderer.render(textDiv, textDiv.dataset.streamingText, {
+            streaming: true,
+            pendingSources: request.materialStream || Boolean(data.materialSession || data.metadata?.materialSession)
+          });
+          followConversation();
+          restoreReadingAnchor(anchor);
         }
 
         // Replace the temporary stream with one formatted final response.
@@ -1554,10 +1700,7 @@
           protectMaterials(data);
           const request = pendingResponse(data);
           if (responseId(data) && !request) return;
-          if (request) finishPendingResponse(request);
-          if (data && data.response) {
-            renderAssistantResponse(data.response, responseId(data));
-          }
+          completeResponse(data, request);
         });
 
         if (whysperAPI.onTranscriptionLlmResponseStart) {
@@ -1607,12 +1750,12 @@
           if (!box) {
             box = document.createElement('div');
             box.id = 'capture-palette';
-            box.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);background:rgba(17,24,39,0.96);color:#e5e7eb;border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:6px;z-index:9998;max-height:60vh;overflow:auto;min-width:230px;box-shadow:0 10px 30px rgba(0,0,0,0.5);';
+            box.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);background:var(--workspace-popover);backdrop-filter:blur(18px);color:var(--workspace-text);border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:6px;z-index:9998;max-height:60vh;overflow:auto;min-width:230px;box-shadow:0 10px 30px rgba(0,0,0,0.5);';
             document.body.appendChild(box);
           }
           box.innerHTML = PALETTE_ITEMS.map((item, i) => {
             const hl = i === paletteIndex
-              ? 'background:rgba(59,130,246,0.9);color:#fff;'
+              ? 'background:rgba(255,255,255,0.15);color:#fff;'
               : 'background:transparent;color:#e5e7eb;';
             return '<div data-palette-item="' + i + '" style="padding:6px 10px;border-radius:6px;font-size:13px;cursor:default;' + hl + '">' + item.label + '</div>';
           }).join('');
@@ -1705,22 +1848,26 @@
         });
       }
 
-      async function sendMessage() {
-        const text = messageInput.value.trim();
-        if (!text) return;
+      async function requestTextAnswer(text) {
         const request = beginRequest();
+        request.question = text;
+        answerToRead = null;
+        followingConversation = true;
         addMessage(text, 'user');
-        messageInput.value = '';
-        autoGrow(messageInput);
         scheduleThinkingIndicator(request);
         try {
-          if (!whysperAPI || !whysperAPI.sendChatMessage) {
-            throw new Error('Chat is unavailable');
-          }
+          if (!whysperAPI || !whysperAPI.sendChatMessage) throw new Error('Chat is unavailable');
           await whysperAPI.sendChatMessage(text, request.id);
         } catch (error) {
           showResponseError('Could not send your message', error, request);
         }
+      }
+      async function sendMessage() {
+        const text = messageInput.value.trim();
+        if (!text) return;
+        messageInput.value = '';
+        autoGrow(messageInput);
+        await requestTextAnswer(text);
       }
 
       if (sendButton) {

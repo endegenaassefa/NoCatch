@@ -42,7 +42,7 @@ if (INGESTION_PLAYGROUND) {
 // Keep elevated state separate from the normal desktop profile. This must
 // happen before ENV_PATH, first-run state, and services read app.userData.
 // Windows root mode: isolate Chromium's userData under a machine-wide root
-// directory (C:\ProgramData\CluelyRoot\userdata) so the elevated instance
+// directory (C:\ProgramData\CluelyRoot\sessions\<session>\userdata) so the elevated instance
 // never clashes with the operator's normal profile singleton locks and its
 // settings writes stay root-scoped. Mirrors macOS /var/root/.cluely-root.
 // The first-run sentinel is seeded from the normal profile so an operator
@@ -50,7 +50,8 @@ if (INGESTION_PLAYGROUND) {
 if (PRIVILEGE.isRoot && process.platform === "win32") {
   try {
     const normalUserData = path.join(app.getPath("appData"), app.getName());
-    const rootUserData = path.join(rootDataDir(), "userdata");
+    const windowsSessionId = require("./src/platform/windows-instance").currentSessionId();
+    const rootUserData = path.join(rootDataDir(), "sessions", String(windowsSessionId), "userdata");
     fs.mkdirSync(rootUserData, { recursive: true });
     app.setPath("userData", rootUserData);
     const normalSetup = path.join(normalUserData, "setup-state.json");
@@ -189,6 +190,8 @@ app.commandLine.appendSwitch("disable-component-update");
 app.commandLine.appendSwitch("disable-domain-reliability");
 app.commandLine.appendSwitch("no-pings");
 
+// Load services only after the production session has admitted this process.
+function startApplication() {
 const logger = require("./src/core/logger").createServiceLogger("MAIN");
 const config = require("./src/core/config");
 const FirstRunManager = require("./src/core/first-run");
@@ -288,6 +291,12 @@ class ApplicationController {
     // Root mode uses the actual process token, including Windows High/System
     // integrity; an environment flag or launcher argument cannot enable it.
     this.isRootMode = PRIVILEGE.isRoot;
+    // The launcher argument expresses a layout choice, not a privilege claim.
+    // Existing Exam launchers already pass --cluely-root-run; ordinary elevated
+    // launches keep the ordinary layout unless explicitly requested.
+    this.examLayoutIntent = process.platform === 'win32' &&
+      !process.argv.includes('--nocatch-layout=normal') &&
+      (process.argv.includes('--nocatch-layout=exam') || process.argv.some(arg => arg.startsWith('--cluely-root-run=')));
     if (this.isRootMode) {
       logger.info("Root exam mode active", { privilege: PRIVILEGE.detail });
     }
@@ -781,6 +790,7 @@ class ApplicationController {
     app.on("activate", () => this.onActivate());
     app.on("before-quit", event => {
       this._quitting = true;
+      windowManager.examLayout?.dispose();
       this.playground?.dispose();
       if (this._modelShutdownComplete) return;
       event.preventDefault();
@@ -817,38 +827,23 @@ class ApplicationController {
   }
 
   handleSecondInstance() {
-    logger.info("Second instance launch detected; focusing existing windows");
-
-    const focusExistingWindows = () => {
-      try {
-        if (this.ingestionPlayground && this.playground) {
-          this.playground.reveal();
-          return;
-        }
-        const mainWindow = windowManager.getWindow("main");
-        if (mainWindow) {
-          if (mainWindow.isMinimized && mainWindow.isMinimized()) {
-            mainWindow.restore();
-          }
-          windowManager.showAllWindows();
-          windowManager.showOnCurrentDesktop(mainWindow);
-          return;
-        }
-
-        if (this.isReady) {
-          windowManager.showAllWindows();
-        }
-      } catch (error) {
-        logger.error("Failed to focus existing instance", {
-          error: error.message,
-        });
-      }
-    };
-
-    if (app.isReady()) {
-      focusExistingWindows();
+    // Electron ready is earlier than our windows/setup readiness. A second
+    // shortcut during boot must survive that gap instead of losing focus.
+    if (!this.isReady) {
+      this._pendingActivation = true;
+      return;
+    }
+    this._pendingActivation = false;
+    logger.info("Second instance launch detected; focusing existing session");
+    if (this.ingestionPlayground && this.playground) {
+      this.playground.reveal();
+    } else if (this.isFirstRun) {
+      this.showOnboarding().catch(error => logger.error("Could not reveal setup", { error: error.message }));
     } else {
-      app.whenReady().then(focusExistingWindows);
+      const mainWindow = windowManager.getWindow("main");
+      if (mainWindow && mainWindow.isMinimized && mainWindow.isMinimized()) mainWindow.restore();
+      windowManager.showAllWindows();
+      if (mainWindow) windowManager.showOnCurrentDesktop(mainWindow);
     }
   }
 
@@ -934,6 +929,8 @@ class ApplicationController {
       const isFirstRun = status.needsOnboarding;
 
       powerMonitor.on("suspend", () => this.cancelVoiceWork());
+      windowManager.onExamLayoutChanged = () => this.recoverGlobalShortcuts();
+      windowManager.initializeExamLayout({ enabled: this.examLayoutIntent });
       await windowManager.initializeWindows({ showMainWindow: !isFirstRun && !this.ingestionPlayground });
       this.setupGlobalShortcuts();
       this.startShortcutRecovery();
@@ -992,7 +989,7 @@ class ApplicationController {
         await this.playground.open();
       }
       // Launch the onboarding wizard if this is the first run.
-      if (!this.ingestionPlayground && !this.isFirstRun) setTimeout(()=>this.showMaterials().catch(()=>{}),800);
+      // Optional materials are opened from the toolbar or chat when needed.
       if (!this.ingestionPlayground && this.isFirstRun) {
         // Defer slightly so all windows finish loading before we pop
         // the wizard on top of them.
@@ -1010,6 +1007,8 @@ class ApplicationController {
           }
         }, 800);
       }
+
+      if (this._pendingActivation) this.handleSecondInstance();
 
       logger.info("Application initialized successfully", {
         windowCount: Object.keys(windowManager.getWindowStats().windows).length,
@@ -1417,6 +1416,7 @@ class ApplicationController {
           ['speech', 'speech-alternate'].includes(id) ? 'speech' : null;
         this._shortcutHandlers.set(accelerator, () => {
           if (this._quitting) return;
+          if (['up', 'down', 'left', 'right'].includes(id) && windowManager.examLayout?.enabled) return;
           if (toggleGroup) {
             // Electron supplies no global key-up event. Suppress repeat bursts,
             // including the OS's initial repeat delay, until one quiet second.
@@ -1447,6 +1447,13 @@ class ApplicationController {
     if (this._quitting) return;
     for (const state of this._shortcutStatus || []) {
       if (!state.supported) continue;
+      state.eligible = !(windowManager.examLayout?.enabled && ['up', 'down', 'left', 'right'].includes(state.id));
+      if (!state.eligible) {
+        if (globalShortcut.isRegistered(state.accelerator)) globalShortcut.unregister(state.accelerator);
+        state.registered = false;
+        state.reason = 'Available in normal layout. Exam layout uses its own movement shortcuts.';
+        continue;
+      }
       try {
         state.registered = globalShortcut.isRegistered(state.accelerator);
         if (!state.registered) {
@@ -1462,6 +1469,7 @@ class ApplicationController {
       }
       state._reported = state.registered;
     }
+    windowManager.examLayout?.sync();
   }
 
   startShortcutRecovery() {
@@ -1473,6 +1481,8 @@ class ApplicationController {
   }
 
   stopShortcutRecovery() {
+    windowManager.examLayout?.invalidate();
+    windowManager.examLayout?.release();
     if (this._shortcutRecoveryTimer) clearInterval(this._shortcutRecoveryTimer);
     this._shortcutRecoveryTimer = null;
     if (this._shortcutResumeHandler) powerMonitor.removeListener('resume', this._shortcutResumeHandler);
@@ -1481,7 +1491,7 @@ class ApplicationController {
 
   getShortcutStatus() {
     const shortcuts = (this._shortcutStatus || []).map(({ _reported, ...row }) => {
-      if (row.supported) {
+      if (row.supported && row.eligible !== false) {
         try { row.registered = globalShortcut.isRegistered(row.accelerator); }
         catch (_) { row.registered = false; }
         row.reason = row.registered ? '' : this.shortcutUnavailableReason();
@@ -1498,6 +1508,16 @@ class ApplicationController {
       reason: !supported ? 'Keystroke capture is currently macOS-only; Windows implementation is pending.' :
         registered ? '' : 'Capture shortcut unavailable. Choose another shortcut in Settings and retry.'
     });
+    const layout = windowManager.examLayout;
+    if (layout) {
+      for (const direction of ['Left', 'Right', 'Up', 'Down']) {
+        const accelerator = `${layout.preferences.modifier}+${direction}`;
+        shortcuts.push({ id: `exam-${direction.toLowerCase()}`, action: `Move toolbar and chat ${direction.toLowerCase()}`,
+          accelerator, supported: true, eligible: layout.eligible(),
+          registered: layout.registered.has(accelerator) && globalShortcut.isRegistered(accelerator),
+          reason: layout.eligible() ? layout.error : 'Available while the Exam panel is visible.' });
+      }
+    }
     return { platform: process.platform, shortcuts };
   }
 
@@ -1958,6 +1978,7 @@ class ApplicationController {
     });
     ipcMain.handle('start-speech-recognition', async event => {
       assertVoiceControl(event);
+      windowManager.pendingVoiceHideVersion = windowManager.chatHideVersion;
       await speechService.startRecording();
       return speechService.getStatus();
     });
@@ -1980,6 +2001,7 @@ class ApplicationController {
     // Legacy controls still require a trusted application main frame.
     ipcMain.on('start-speech-recognition', event => {
       try { assertVoiceControl(event); } catch (_) { return; }
+      windowManager.pendingVoiceHideVersion = windowManager.chatHideVersion;
       speechService.startRecording();
     });
     ipcMain.on('stop-speech-recognition', event => {
@@ -2046,8 +2068,13 @@ class ApplicationController {
       return windowManager.getWindowStats();
     });
 
-    ipcMain.handle("resize-window", (event, { width, height }) => {
+    ipcMain.handle("resize-window", (event, { width, height, menuRevision }) => {
       const mainWindow = windowManager.getWindow("main");
+      if (windowManager.examLayout?.enabled) {
+        if (mainWindow?.webContents !== event.sender) return { success: false };
+        windowManager.examLayout.resizeToolbarContent(width, height, menuRevision);
+        return { success: true };
+      }
       if (mainWindow) {
         // Enforce horizontal constraints: min ~one icon, max original width
         const minW = 60;
@@ -2066,6 +2093,7 @@ class ApplicationController {
     });
 
     ipcMain.handle("move-window", (event, { deltaX, deltaY }) => {
+      if (windowManager.examLayout?.enabled) return { success: false, error: 'Use the movement shortcuts in Exam layout.' };
       const mainWindow = windowManager.getWindow("main");
       if (mainWindow) {
         const [currentX, currentY] = mainWindow.getPosition();
@@ -2215,7 +2243,21 @@ class ApplicationController {
         root: !!this.isRootMode,
         platform: process.platform,
         captureShortcut: process.platform === "win32" ? "Ctrl+Shift+S" : "⌘⇧Space",
+        layout: windowManager.examLayout?.state(),
       };
+    });
+
+    ipcMain.handle('get-exam-layout', () => windowManager.examLayout?.state() || { supported: false, enabled: false });
+    ipcMain.handle('set-exam-layout', (_event, enabled) => {
+      if (typeof enabled !== 'boolean' || !windowManager.examLayout) return { success: false, error: 'Exam layout is available on Windows.' };
+      if (windowManager.geometryFrozen) return { success: false, error: 'Finish capture before changing layout.' };
+      return { success: true, state: windowManager.examLayout.setEnabled(enabled) };
+    });
+    ipcMain.handle('configure-exam-layout', (_event, options) => {
+      try {
+        if (!windowManager.examLayout || !options || typeof options !== 'object') throw new Error('Panel setup is unavailable.');
+        return { success: true, state: windowManager.examLayout.configure(options) };
+      } catch (error) { return { success: false, error: error.message }; }
     });
 
     ipcMain.handle("shield-answer", async () => {
@@ -2640,6 +2682,7 @@ class ApplicationController {
       }
     } else {
       try {
+        windowManager.pendingVoiceHideVersion = windowManager.chatHideVersion;
         speechService.startRecording();
         windowManager.showChatWindow();
         logger.info("Speech recognition started via global shortcut");
@@ -2795,7 +2838,15 @@ class ApplicationController {
     try {
       if (this.shouldShowAnswerPanel()) panelOwner = windowManager.showLLMLoading();
 
-      const capture = await captureService.captureAndProcess(captureOptions);
+      const previouslyFrozen = windowManager.geometryFrozen;
+      const freezeExamGeometry = Boolean(windowManager.examLayout?.enabled);
+      let capture;
+      if (freezeExamGeometry) windowManager.setGeometryFrozen(true);
+      try {
+        capture = await captureService.captureAndProcess(captureOptions);
+      } finally {
+        if (freezeExamGeometry) windowManager.setGeometryFrozen(previouslyFrozen);
+      }
       if (!current()) return;
       // Reveal the selected Chat surface only after capture, so it cannot enter the screenshot.
       if (this.getAnswerSurface() !== "panel" && windowManager.chatHideVersion === chatHideVersion) {
@@ -3322,6 +3373,7 @@ class ApplicationController {
   }
 
   getVoiceResponseTarget() {
+    if (windowManager.examLayout?.enabled) return 'chat';
     const configured = String(process.env.WHISPER_RESPONSE_TARGET || 'both').trim().toLowerCase();
     return ['chat', 'overlay', 'both'].includes(configured) ? configured : 'both';
   }
@@ -3332,6 +3384,7 @@ class ApplicationController {
   // 'panel' or 'both'. Configurable via ui.answerSurface in settings or the
   // ANSWER_SURFACE env var; defaults to 'chat'.
   getAnswerSurface() {
+    if (windowManager.examLayout?.enabled) return 'chat';
     const configured = String(
       config.get("ui.answerSurface") || process.env.ANSWER_SURFACE || "chat"
     ).trim().toLowerCase();
@@ -3350,6 +3403,11 @@ class ApplicationController {
     const target = this.getVoiceResponseTarget();
     if (target === 'chat' || target === 'both') {
       this.sendToChatWindow(channel, data);
+      // The persistent toolbar announces completed/failed voice work when chat is collapsed.
+      if (windowManager.examLayout?.enabled && ['transcription-llm-response', 'llm-error'].includes(channel)) {
+        const toolbar = windowManager.getWindow('main');
+        if (toolbar && !toolbar.isDestroyed()) toolbar.webContents.send(channel, data);
+      }
     }
     if (target === 'overlay' || target === 'both') {
       const responseWindow = windowManager.getWindow("llmResponse");
@@ -4118,5 +4176,59 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   const controller = new ApplicationController();
+  applicationController = controller;
+  if (pendingActivation) controller.handleSecondInstance();
   app.on("second-instance", () => controller.handleSecondInstance());
+}
+
+}
+
+let applicationController = null;
+let pendingActivation = false;
+let sessionOwner = null;
+// Development profiles have to opt in deliberately; changing user-data-dir
+// alone must never bypass the production singleton. Playground stays separate.
+const isolatedQA = !PRIVILEGE.isRoot && process.argv.includes('--cluely-qa-instance') &&
+  !!app.commandLine.getSwitchValue('user-data-dir');
+if (process.platform !== 'win32' || INGESTION_PLAYGROUND || isolatedQA) {
+  startApplication();
+} else {
+  const { acquire } = require('./src/platform/windows-instance');
+  acquire({
+    integrity: PRIVILEGE.integrity,
+    isReady: () => !!applicationController && applicationController.isReady,
+    onActivate: () => {
+      pendingActivation = true;
+      if (applicationController) applicationController.handleSecondInstance();
+    },
+  }).then(async result => {
+    if (result.acquired) {
+      sessionOwner = result;
+      // Hold ownership through the asynchronous before-quit cleanup. Releasing
+      // earlier would let a new session race the old hotkeys/audio/capture.
+      app.on('will-quit', () => sessionOwner.close());
+      startApplication();
+      return;
+    }
+    const requested = PRIVILEGE.integrity === 'system' ? 'system' : PRIVILEGE.isRoot ? 'administrator' : 'normal';
+    // Repeated clicks while the same mode boots only queue activation. Do
+    // not leave a stack of duplicate Electron processes waiting on OK boxes.
+    if (result.owner.mode !== requested) {
+      await app.whenReady();
+      await require('electron').dialog.showMessageBox({
+        type: 'info', title: 'OpenCluely is already open', buttons: ['OK'],
+        message: `OpenCluely is ${result.owner.ready ? 'running' : 'starting'} in ${result.owner.mode} mode.`,
+        detail: 'Your existing session stays open. To change modes, use OpenCluely Stop, then open the shortcut for the mode you want.',
+      });
+    }
+    app.quit();
+  }).catch(async error => {
+    await app.whenReady();
+    await require('electron').dialog.showMessageBox({
+      type: 'error', title: 'OpenCluely could not start', buttons: ['OK'],
+      message: 'Could not check the existing OpenCluely session.',
+      detail: 'Use OpenCluely Stop and try again. If this continues, restart Windows.\n\n' + error.message,
+    });
+    app.quit();
+  });
 }

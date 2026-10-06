@@ -76,8 +76,10 @@
     .footer { display: flex; align-items: center; justify-content: flex-end; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
     @media (max-width: 480px) { .wizard { padding: 0 18px 14px; } .topbar { gap: 6px; } .brand { font-size: 14px; } .text-button { padding-inline: 7px; } h1 { font-size: 24px; } .mode-row select { width: 165px; } }
   </style>
+<link rel="stylesheet" href="src/ui/workspace.css">
+<link rel="stylesheet" href="src/ui/setup-theme.css">
 </head>
-<body>
+<body class="onboarding-page">
 <main class="wizard" id="wizard" aria-busy="true">
   <header class="topbar">
     <div class="brand">Open<span>Cluely</span></div>
@@ -99,7 +101,7 @@
     </div>
   </section>
   <section id="questionPanel" hidden aria-label="First question">
-    <p id="identity" class="small identity"></p><div class="card"><h2>Have reference material?</h2><p class="small">Optionally add PowerPoint decks or PDFs before your first question.</p><button id="materials-button" class="button" type="button">Add materials (optional)</button></div>
+    <p id="identity" class="small identity"></p><div class="onboarding-materials"><button id="materials-button" class="text-button" type="button">+ Add class materials</button><span class="small">Optional · PDFs or slides</span></div>
     <div class="mode-row"><label for="inputMode">Ask with</label><select id="inputMode"><option value="text">Text</option><option value="screenshot">Screenshot</option></select></div>
     <div id="capturePanel" class="card" hidden>
       <h2>Capture your screen</h2>

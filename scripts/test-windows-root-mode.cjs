@@ -98,7 +98,7 @@ function startupFixture(sid, { failRootProfile = false, hasNormalSentinel = true
   const events = [];
   const normalData = 'C:\\Users\\Jane\\AppData\\Roaming\\screen-reader-util';
   const normalSentinelPath = path.win32.join(normalData, '.sru-firstrun-completed');
-  const rootData = 'C:\\ProgramData\\CluelyRoot\\userdata';
+  const rootData = 'C:\\ProgramData\\CluelyRoot\\sessions\\7\\userdata';
   const normalSetupPath = path.win32.join(normalData, 'setup-state.json');
   const rootSetupPath = path.win32.join(rootData, 'setup-state.json');
   let userData = normalData;
@@ -147,6 +147,7 @@ function startupFixture(sid, { failRootProfile = false, hasNormalSentinel = true
       if (id === 'electron') return { app };
       if (id === './src/capture-routing') return {};
       if (id === './src/platform/privilege') return privilege;
+      if (id === './src/platform/windows-instance') return { currentSessionId: () => 7 };
       if (id === 'dotenv') return { config({ path: envPath }) { events.push(['dotenv', envPath]); } };
       throw new Error(`unexpected startup dependency: ${id}`);
     },

@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>document.documentElement.classList.toggle("exam-layout", !!window.electronAPI?.initialExamLayout);</script>
     <title>Terminal</title>
     <link href="./dist/output.css" rel="stylesheet" />
     <link href="./src/styles/common.css" rel="stylesheet" />
@@ -364,48 +365,38 @@
         text-decoration: underline;
       }
     </style>
-  </head>
-  <body>
-    <div class="command-tab">
-      <div class="command-item">
-        <i class="fas fa-camera"></i>
-        <span id="captureShortcutLabel">Ctrl/Cmd+Shift+S</span>
-      </div>
-      <div class="command-separator"></div>
-      <div class="command-item" id="micButton">
-        <i class="fas fa-microphone"></i>
-      </div>
-      <div class="command-separator"></div>
-      <div class="command-item" id="captureIndicator" style="display:none;">
-        <i class="fas fa-keyboard"></i>
-        <span>CAPTURING</span>
-      </div>
-      <div class="command-separator"></div>
-      <div class="command-item" id="skillIndicator">
-        <i class="fas fa-brain"></i>
-        <span>DSA</span>
-      </div>
-      <div class="command-separator"></div>
-      <div class="command-item" id="languageSelector">
-        <i class="fas fa-code"></i>
-        <select id="codingLanguage">
-          <option value="cpp">C++</option>
-          <option value="c">C</option>
-          <option value="python">Python</option>
-          <option value="java">Java</option>
-          <option value="javascript">JavaScript</option>
-        </select>
-      </div>
-      <div class="command-separator"></div>
-      <div class="command-item" id="infoButton" title="Shortcuts">
-        <i class="fas fa-circle-info"></i>
-      </div>
-      <div class="command-separator"></div>
-      <div class="status-dot non-interactive" id="statusDot"></div>
+  <link rel="stylesheet" href="src/ui/workspace.css">
+</head>
+  <body class="toolbar-page">
+    <div class="command-tab" role="toolbar" aria-label="NoCatch">
+      <button class="command-item capture-action" id="captureButton" title="Capture your screen and ask NoCatch"><i class="fas fa-camera" aria-hidden="true"></i><span>Capture</span><span id="captureShortcutLabel" class="sr-only">Ctrl/Cmd+Shift+S</span></button>
+      <button class="command-item" id="openChatButton" aria-expanded="false" title="Open or collapse chat · Ctrl+Shift+C"><i class="fas fa-comment" aria-hidden="true"></i><span>Chat</span></button>
+      <button class="command-item" id="openMaterialsButton"><i class="fas fa-book-open" aria-hidden="true"></i><span>Materials</span></button>
+      <button class="command-item" id="micButton" aria-label="Start voice input" title="Start voice input"><i class="fas fa-microphone" aria-hidden="true"></i><span class="voice-stop" hidden>Stop</span></button>
+      <div class="command-item" id="captureIndicator" style="display:none;"><i class="fas fa-keyboard" aria-hidden="true"></i><span>Typing</span></div>
+      <button class="command-item" id="infoButton" aria-controls="shortcutsPopover" aria-expanded="false"><span>More</span><i class="fas fa-angle-down" aria-hidden="true"></i></button>
+      <div class="status-dot non-interactive" id="statusDot" role="status"></div>
+      <button id="toolbarLayoutStatus" class="command-item layout-lock" aria-label="Position locked; open Panel setup" title="Position locked · Ctrl+Shift+arrows to move" hidden><i class="fas fa-lock" aria-hidden="true"></i></button>
     </div>
 
   <!-- Shortcuts Popover (hidden by default via CSS) -->
-  <div id="shortcutsPopover" class="shortcuts-popover">
+  <div id="shortcutsPopover" class="shortcuts-popover" aria-label="Preferences and shortcuts" inert>
+      <div class="toolbar-preferences">
+        <label id="skillIndicator" for="toolbarSkillSelect">Answer style <span class="sr-only">DSA</span></label>
+        <select id="toolbarSkillSelect"><option value="dsa">Data structures &amp; algorithms</option><option value="ood">Object-oriented design</option><option value="mcq">Multiple choice</option><option value="system-design">System design</option><option value="behavioral">Behavioral</option><option value="programming">Programming</option></select>
+        <label for="codingLanguage">Code language</label><select id="codingLanguage"><option value="cpp">C++</option><option value="c">C</option><option value="python">Python</option><option value="java">Java</option><option value="javascript">JavaScript</option></select>
+        <button id="openSettingsButton" class="workspace-button">Settings</button>
+      </div>
+      <details id="toolbarPanelSetup" hidden><summary>Panel setup</summary>
+        <label class="menu-field" for="toolbarMovementKeys">Move with<select id="toolbarMovementKeys"></select></label>
+        <label class="menu-field" for="toolbarDisplay">Display<select id="toolbarDisplay"></select></label>
+        <p class="menu-help" id="toolbarMovementHint">Tap an arrow for a small step. Hold to keep moving.</p>
+        <button id="toolbarSaveSetup" class="workspace-button">Save setup / retry</button>
+        <button id="toolbarResetPosition" class="workspace-button">Reset position</button>
+        <p id="toolbarSetupStatus" class="menu-help" role="status"></p>
+      </details>
+      <p id="toolbarPanelStatus" class="menu-help" role="status" hidden></p>
+      <details class="shortcut-details"><summary>Keyboard shortcuts</summary>
       <div class="shortcuts-title">
         <i class="fas fa-bolt"></i> Global Shortcuts
       </div>
@@ -528,9 +519,11 @@
         </tbody>
       </table>
       </section>
+      </details>
+      <button id="toolbarExamToggle" class="workspace-button" hidden>Return to normal layout</button>
       <div class="shortcuts-footer">
         <span>Unavailable shortcuts are marked above. Use another available shortcut or the app controls.</span>
-        <a href="https://techycsr.dev" target="_blank" rel="noreferrer noopener">Made by @TechyCSR</a>
+
       </div>
     </div>
 

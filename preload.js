@@ -3,6 +3,25 @@ const { contextBridge, ipcRenderer } = require('electron')
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  initialExamLayout: process.argv.includes('--nocatch-exam-layout=1'),
+  getExamLayout: () => ipcRenderer.invoke('get-exam-layout'),
+  setExamLayout: enabled => ipcRenderer.invoke('set-exam-layout', enabled),
+  configureExamLayout: options => ipcRenderer.invoke('configure-exam-layout', options),
+  onExamLayoutChanged: callback => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('exam-layout-changed', listener);
+    return () => ipcRenderer.removeListener('exam-layout-changed', listener);
+  },
+  onToolbarMenuClose: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('toolbar-menu-close', listener);
+    return () => ipcRenderer.removeListener('toolbar-menu-close', listener);
+  },
+  onChatPanelHidden: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('chat-panel-hidden', listener);
+    return () => ipcRenderer.removeListener('chat-panel-hidden', listener);
+  },
   getMaterialsStatus: () => ipcRenderer.invoke('materials-status'),
   importMaterials: () => ipcRenderer.invoke('materials-import'),
   prepareMaterials: () => ipcRenderer.invoke('materials-prepare'),
@@ -56,7 +75,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   disableWindowInteraction: () => ipcRenderer.invoke('disable-window-interaction'),
   switchToChat: () => ipcRenderer.invoke('switch-to-chat'),
   switchToSkills: () => ipcRenderer.invoke('switch-to-skills'),
-  resizeWindow: (width, height) => ipcRenderer.invoke('resize-window', { width, height }),
+  resizeWindow: (width, height, menuRevision) => ipcRenderer.invoke('resize-window', { width, height, menuRevision }),
   moveWindow: (deltaX, deltaY) => ipcRenderer.invoke('move-window', { deltaX, deltaY }),
   getWindowStats: () => ipcRenderer.invoke('get-window-stats'),
   

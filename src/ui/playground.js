@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let state, renderedRun, renderedQuestion, reviewGeneration, reviewLoaded, navigationKey, liveKey, rendering = false;
+let state, renderedRun, renderedQuestion, reviewGeneration, reviewLoaded, navigationKey, liveKey, rendering = false, sourceRevision = 0;
 const api = window.playground;
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
 function error(message) { $('error').hidden = !message; $('error').textContent = message || ''; }
@@ -11,11 +11,13 @@ async function call(action, payload) {
 }
 async function act(action, payload) {
   error('');
+  if (['emergency','clear','quit','start'].includes(action)) clearSourcePreview();
   try { const result = await call(action, typeof payload === 'function' ? payload() : payload); if (result?.phase) render(result); return result; }
   catch (problem) { error(problem.message); }
 }
 function bind(id, action, payload) { $(id).addEventListener('click', () => act(action, payload)); }
 function dialog(id, open) { const d = $(id); if (open && !d.open) d.showModal(); else if (!open && d.open) d.close(); }
+function clearSourcePreview() { sourceRevision++; dialog('source-dialog',false); $('source-content').replaceChildren(); }
 function time() {
   const seconds = state?.expiresAt ? Math.max(0, Math.ceil((state.expiresAt - Date.now()) / 1000)) : 5400;
   $('timer').textContent = `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`;
@@ -27,9 +29,9 @@ function showSources(container, sources, preview = false) {
     if (source.id) div.append(node('p', `Citation: ${source.id}`));
     if (preview && source.documentId && source.page) {
       const button = node('button', 'Open source', 'secondary'); button.addEventListener('click', async () => {
-        const generation = state.generation;
+        const generation = state.generation, previewRevision = ++sourceRevision;
         const result = await act('preview', { documentId: source.documentId, page: source.page });
-        if (!result || state.generation !== generation) return;
+        if (!result || previewRevision !== sourceRevision || state.generation !== generation || !['completed','exited'].includes(state.phase)) return;
         $('source-content').replaceChildren(node('h3', `${result.name} · ${result.kind || 'page'} ${result.page}`), node('p', result.text || '', 'answer-text'), node('p', result.notes ? `Speaker notes: ${result.notes}` : '', 'answer-text'));
         for (const image of result.images || []) addImage($('source-content'), image);
         dialog('source-dialog', true);
@@ -83,10 +85,17 @@ function render(next) {
     if (renderedRun !== state.runId) { renderedRun = state.runId; $('exit-reason').value = ''; }
     const running = state.phase === 'running', reviewing = ['completed','exited'].includes(state.phase), paused = state.focusAcknowledgementRequired || state.exitConfirmationRequired;
     $('setup').hidden = state.phase !== 'idle'; $('exam').hidden = !running || paused; $('review').hidden = !reviewing; $('expired').hidden = state.phase !== 'expired';
-    if (!reviewing) { reviewLoaded = null; reviewGeneration = null; $('review-content').replaceChildren(); $('source-content').replaceChildren(); dialog('source-dialog', false); }
+    if (!reviewing) { reviewLoaded = null; reviewGeneration = null; $('review-content').replaceChildren(); clearSourcePreview(); }
     const material = state.materials || {}, prep = material.preparation || {};
-    $('material-status').textContent = `Materials: ${material.state || 'idle'} · ${(material.documents || []).length} files · Preparation: ${prep.state || 'idle'}${prep.strategy ? ` · ${prep.strategy}` : ''}${prep.phase ? ` · ${prep.phase}` : ''}${prep.total ? ` · ${prep.completed}/${prep.total}` : ''}${material.error ? ` · ${material.error}` : ''}`;
-    $('course-path').textContent = state.courseFolder || 'No course folder exported yet.';
+    const fileCount=(material.documents||[]).filter(doc=>['ready','partial'].includes(doc.state)).length;
+    $('material-status').textContent = material.error || (material.state==='active' ? `${fileCount} files ready for this practice.` : prep.state==='failed' ? prep.error || 'Could not prepare materials. Reopen Materials to retry.' : prep.state==='preparing' ? 'Preparing your materials…' : fileCount ? `${fileCount} files added. Open Materials to start the session.` : 'No materials added yet.');
+    $('materials').classList.toggle('secondary',!state.courseFolder||material.state==='active');
+    $('export-course').classList.toggle('secondary',!!state.courseFolder||material.state==='active');
+    $('timer').hidden=!state.expiresAt;
+    $('exit').hidden=!running;
+    $('clear-setup').hidden=!['draft','active'].includes(material.state)&&!(material.documents||[]).length;
+    updateStart();
+    $('course-path').textContent = state.courseFolder || 'No course folder saved yet.';
     $('open-course').disabled = !state.courseFolder;
     $('recovery-status').textContent = state.recoveryRegistered ? 'Emergency recovery: Ctrl+Shift+Alt+Escape is registered. The on-screen Emergency exit is also available.' : 'The emergency shortcut could not be registered. Use Emergency exit or Windows recovery controls.';
     $('event-log').textContent = (state.events || []).map(e => `${e.at}  ${e.message}`).join('\n') || 'No events recorded.';
@@ -121,6 +130,15 @@ function render(next) {
     if (running && state.mode === 'diagnostic') api.invoke('rendered', { generation: state.generation }).catch(() => {});
   } finally { rendering = false; }
 }
+function updateStart() {
+  if (!state) return;
+  const withFiles=document.querySelector('[name=context]:checked').value==='materials';
+  const material=state.materials||{};
+  const ready=withFiles ? material.state==='active' : !['active','draft'].includes(material.state)&&!(material.documents||[]).length;
+  $('start').disabled=!ready||!$('consent').checked;
+  $('start-hint').textContent=!ready ? (withFiles?'Start your session in Materials first.':'End and clear materials for a run without files.') : !$('consent').checked ? 'Confirm the simulator details above to start.' : 'Ready when you are.';
+}
+for (const input of document.querySelectorAll('[name=context],#consent')) input.addEventListener('change',updateStart);
 bind('export-course','exportCourse'); bind('open-course','openCourse'); bind('materials','materials'); bind('settings','settings');
 bind('start','start', () => ({ mode: document.querySelector('[name=mode]:checked').value, context: document.querySelector('[name=context]:checked').value, consent: $('consent').checked }));
 bind('exit','exit');
@@ -133,7 +151,7 @@ bind('confirm-exit','confirmExit', () => ({ reason: $('exit-reason').value })); 
 for (const id of ['clear-setup','clear-review','clear-expired']) bind(id,'clear');
 for (const id of ['quit-setup','quit-review']) $(id).addEventListener('click', () => dialog('close-dialog', true));
 bind('confirm-close','quit'); $('cancel-close').addEventListener('click', () => dialog('close-dialog', false));
-$('close-source').addEventListener('click', () => { dialog('source-dialog', false); $('source-content').replaceChildren(); });
+$('close-source').addEventListener('click', clearSourcePreview);
 bind('inspect-retrieval','retrieve');
 bind('capture-question','capture', () => { const rect = $('question-panel').getBoundingClientRect(); return { questionId: state.questions[state.questionIndex].id, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } }; });
 $('student-answer').addEventListener('input', async () => {
@@ -142,7 +160,7 @@ $('student-answer').addEventListener('input', async () => {
   catch (problem) { error(problem.message); }
 });
 for (const name of ['copy','cut','paste','contextmenu']) document.addEventListener(name, event => { event.preventDefault(); api.invoke('event', { name }).catch(() => {}); });
-for (const d of document.querySelectorAll('dialog')) d.addEventListener('cancel', event => { event.preventDefault(); if (d.id === 'source-dialog') { d.close(); $('source-content').replaceChildren(); } else act('exit'); });
+for (const d of document.querySelectorAll('dialog')) d.addEventListener('cancel', event => { event.preventDefault(); if (d.id === 'source-dialog') { clearSourcePreview(); } else act('exit'); });
 api.onState(render); api.onError(error); api.onExit(() => dialog('close-dialog', true));
 setInterval(time, 250);
 act('state');

@@ -21,6 +21,7 @@ class WindowManager {
     // User intent survives async window creation and native window loss.
     this.desiredWindowVisibility = new Map();
     this.chatHideVersion = 0;
+    this.examChatOpen = false;
     this._visibilityIntentEpoch = 0;
     this._lastVisibilityHideEpoch = 0;
     this._lastVisibilityShowEpoch = 0;
@@ -81,8 +82,8 @@ class WindowManager {
         alwaysOnTop: true
       },
       settings: {
-        width: 400,
-        height: 380,
+        width: 460,
+        height: 600,
         file: 'settings.html',
         title: 'Settings',
         frame: false,
@@ -124,6 +125,12 @@ class WindowManager {
     // ... existing initialization code ...
   }
 
+  initializeExamLayout(options) {
+    if (process.platform !== 'win32') return;
+    const ExamLayout = require('./exam-layout');
+    this.examLayout = new ExamLayout(this, options);
+  }
+
   async initializeWindows(options = {}) {
     const { showMainWindow = true } = options;
     if (this.isInitialized || this.isInitializing) {
@@ -132,13 +139,23 @@ class WindowManager {
     }
 
     this.isInitializing = true;
+    // Establish the startup intent before awaiting native creation. A hide
+    // during that await can then revoke it without being overwritten.
+    if (showMainWindow && this.examLayout?.enabled && !this._ensureDesiredVisibility().has('main')) {
+      this._ensureDesiredVisibility().set('main', true);
+    }
     logger.info('Initializing application windows', { showMainWindow });
     
     try {
       // Pass autoShow so the main window doesn't flash visible during
       // first-run onboarding before the user has configured API keys.
-      await this.createMainWindow({ autoShow: showMainWindow });
-      await this.createChatWindow();
+      await this.createMainWindow({ autoShow: showMainWindow && !this.examLayout?.enabled });
+      // The toolbar is the recovery surface even if chat loads slowly or fails.
+      if (showMainWindow && this.examLayout?.enabled && this.isWindowDesiredVisible('main')) this.restoreExamCore();
+      try { await this.createChatWindow(); } catch (error) {
+        if (!this.examLayout?.enabled) throw error;
+        logger.warn('Chat could not load; toolbar remains available', { message: error.message });
+      }
       await this.createLLMResponseWindow();
       await this.createSettingsWindow();
       
@@ -151,7 +168,7 @@ class WindowManager {
       this.setInteractive(true);
       
       // Optionally show the main window (deferred during onboarding)
-      if (showMainWindow) {
+      if (showMainWindow && (!this.examLayout?.enabled || this.isWindowDesiredVisible('main'))) {
         await this.showMainWindow();
       }
       
@@ -166,6 +183,7 @@ class WindowManager {
   }
 
   async showMainWindow() {
+    if (this.examLayout?.enabled) return this.restoreExamCore();
     const mainWindow = this.windows.get('main');
     if (!mainWindow) return;
     this._ensureDesiredVisibility().set('main', true);
@@ -206,7 +224,7 @@ class WindowManager {
   }
 
   async createMainWindow(options = {}) {
-    const { autoShow = true } = options;
+    const autoShow = (options.autoShow ?? true) && !this.examLayout?.enabled;
     if (autoShow) this._ensureDesiredVisibility().set('main', true);
     if (this.windows.has('main')) {
       return this.windows.get('main');
@@ -493,7 +511,15 @@ class WindowManager {
     browserWindowOptions.kiosk = false;
     browserWindowOptions.simpleFullscreen = false;
 
+    if ((type === 'main' || type === 'chat') && this.examLayout) {
+      Object.assign(browserWindowOptions, this.examLayout.options(type));
+      browserWindowOptions.webPreferences.additionalArguments = [
+        `--nocatch-exam-layout=${this.examLayout.enabled ? '1' : '0'}`
+      ];
+    }
+
   const window = new BrowserWindow(browserWindowOptions);
+    if (type === 'main' || type === 'chat') this.examLayout?.attach(window, type);
 
     // Windows created after root-mode guards are enabled (settings, llmResponse,
     // onboarding) get the same demotion protection as main/chat.
@@ -519,7 +545,10 @@ class WindowManager {
     });
 
   // Load the HTML file
-    await window.loadFile(windowConfig.file);
+    try { await window.loadFile(windowConfig.file); } catch (error) {
+      if ((type === 'main' || type === 'chat') && this.examLayout?.enabled && !window.isDestroyed()) window.destroy();
+      throw error;
+    }
     
   // Position the window
     this.positionWindow(window, type);
@@ -539,13 +568,14 @@ class WindowManager {
       try {
         // Small practical minimum width so it can collapse to roughly one icon width
         // Height is managed dynamically; don't lock here to allow programmatic changes
-        if (typeof window.setMinimumSize === 'function') {
+        if (!this.examLayout?.enabled && typeof window.setMinimumSize === 'function') {
           // Set a conservative minimum width; height will be adjusted via IPC as needed
           window.setMinimumSize(60, windowConfig.height);
         }
 
         // Intercept user-initiated resizes to lock height and allow width changes only
         window.on('will-resize', (event, newBounds) => {
+          if (this.examLayout?.enabled) { event.preventDefault(); return; }
           try {
             // Keep current content height; only apply the new width
             const [_, currentContentHeight] = window.getContentSize();
@@ -571,6 +601,7 @@ class WindowManager {
         // Windows content resizing must preserve the user's placement. A move
         // can emit resize events at fractional DPI, so never restart top layout.
         window.on('resize', () => {
+          if (this.examLayout?.enabled || this.examLayout?.applyingBounds) return;
           if (this.bindWindows) {
             if (process.platform === 'win32') this.moveBoundWindows(0, 0);
             else this.positionBoundWindows();
@@ -745,6 +776,9 @@ class WindowManager {
   }
 
   positionWindow(window, type) {
+    if (this.examLayout?.enabled && (type === 'main' || type === 'chat')) return;
+    if (type === 'chat' && this.examLayout?.preferences.normalBounds) return;
+    if (type === 'main' && this.examLayout?.preferences.normalWindows?.main) return;
     const display = this.currentDisplay || screen.getPrimaryDisplay();
     const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
 
@@ -782,12 +816,14 @@ class WindowManager {
     // All windows positioned at top of screen with small margin
     const topMargin = 20;
     const [windowWidth] = window.getSize();
+    // Windows DPI scaling can return an odd width; native positions require integers.
+    const centeredX = displayX + Math.round((screenWidth - windowWidth) / 2);
 
     const positions = {
       main: { x: displayX + 50, y: displayY + topMargin },
       chat: { x: displayX + screenWidth - windowWidth - 50, y: displayY + topMargin },
-      llmResponse: { x: displayX + (screenWidth - windowWidth) / 2, y: displayY + topMargin },
-      settings: { x: displayX + (screenWidth - windowWidth) / 2, y: displayY + topMargin }
+      llmResponse: { x: centeredX, y: displayY + topMargin },
+      settings: { x: centeredX, y: displayY + topMargin }
     };
 
     const position = positions[type] || { x: displayX + 100, y: displayY + topMargin };
@@ -803,6 +839,7 @@ class WindowManager {
 
   // New method to position bound windows (vertical column layout) - Always at top
   positionBoundWindows() {
+    if (this.examLayout?.enabled || this.examLayout?.applyingBounds) return;
     if (this.geometryFrozen) return; // A5: no geometry mutation during capture
     const mainWindow = this.windows.get('main');
     const llmWindow = this.windows.get('llmResponse');
@@ -853,6 +890,7 @@ class WindowManager {
 
   // New method to move bound windows (column layout) - Maintains top positioning preference
   moveBoundWindows(deltaX, deltaY) {
+    if (this.examLayout?.enabled) return;
     if (!this.bindWindows || this.geometryFrozen) return;
     if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
     if (process.platform === 'win32') {
@@ -977,6 +1015,8 @@ class WindowManager {
 
   showOnCurrentDesktop(win) {
     if (!win || win.isDestroyed()) return;
+    // The legacy answer panel is replaced by live chat in Exam layout.
+    if (this.examLayout?.enabled && win === this.windows.get('llmResponse')) return;
 
     const llmWin = this.windows.get('llmResponse');
     const isLLM = llmWin && !llmWin.isDestroyed() && win.id === llmWin.id;
@@ -1256,6 +1296,9 @@ class WindowManager {
   setGeometryFrozen(value) {
     if (this.geometryFrozen !== Boolean(value)) {
       this.geometryFrozen = Boolean(value);
+      this.examLayout?.invalidate();
+      if (!this.geometryFrozen && this.examLayout?.fitPending) this.examLayout.fit();
+      else this.examLayout?.sync();
       logger.info('Geometry freeze toggled', { geometryFrozen: this.geometryFrozen });
     }
   }
@@ -1273,6 +1316,7 @@ class WindowManager {
     this.windows.forEach((window, type) => {
       if (!window.isDestroyed()) {
         window.hide();
+        if (this.examLayout?.enabled && (type === 'main' || type === 'chat')) return;
         window.setPosition(-10000, -10000);
       }
     });
@@ -1288,6 +1332,13 @@ class WindowManager {
   }
 
   switchToWindow(windowType) {
+    if (this.examLayout?.enabled && (windowType === 'chat' || windowType === 'main')) {
+      if (windowType === 'chat') {
+        if (this.isWindowDesiredVisible('chat')) return this.hideChatWindow();
+        return this.showChatWindow();
+      }
+      return this.restoreExamCore();
+    }
     if (!this.windowConfigs[windowType]) {
       logger.warn('Attempted to switch to unknown window type', { windowType });
       return;
@@ -1336,6 +1387,8 @@ class WindowManager {
       return;
     }
 
+    if (this.examLayout?.enabled) return this.restoreExamCore();
+
     for (const type of ['main', 'chat']) {
       this._ensureDesiredVisibility().set(type, true);
       const window = this.windows.get(type);
@@ -1361,6 +1414,7 @@ class WindowManager {
   }
 
   hideAllWindows() {
+    if (this.examLayout?.enabled) return this.hideAllWindowsExcept([]);
     // Legacy shape: hide everything except the answer panel, which is only
     // shown transiently when content arrives. Exam mode now calls
     // hideAllWindowsExcept(["chat"]) instead — the chat is the surface.
@@ -1371,6 +1425,7 @@ class WindowManager {
   // with keepTypes=["chat"] so the Cluely chat UI stays visible as the single
   // answer surface while the overlay/settings/answer panel are hidden.
   hideAllWindowsExcept(keepTypes = []) {
+    if (this.examLayout?.enabled) this.examLayout.closeToolbarMenu();
     if (!keepTypes.includes('chat')) this.chatHideVersion += 1;
     for (const type of ['main', 'chat']) {
       this._ensureDesiredVisibility().set(type, keepTypes.includes(type));
@@ -1429,7 +1484,7 @@ class WindowManager {
       this.hideAllWindowsExcept([]);
     } else {
       this.showAllWindows();
-      if (process.platform === 'win32' && this.isInteractive) {
+      if (process.platform === 'win32' && this.isInteractive && !this.examLayout?.enabled) {
         const active = this.windows.get(this.activeWindow);
         if (active && !active.isDestroyed() && active.isVisible()) active.focus();
       }
@@ -1456,7 +1511,9 @@ class WindowManager {
           if (this.windows.get(type) === window) this.windows.delete(type);
         });
         if (!this.isInteractive) window.setIgnoreMouseEvents(true, { forward: true });
-        if (this.isWindowDesiredVisible(type) && !this.isScreenBeingShared) {
+        this.examLayout?.fit();
+        if (this.isWindowDesiredVisible(type) && !this.isScreenBeingShared &&
+            !(this.examLayout?.enabled && type === 'chat' && this.examLayout.chatFits === false)) {
           this.showOnCurrentDesktop(window);
         }
         logger.info('Root visibility window recreated', { type });
@@ -1917,6 +1974,7 @@ class WindowManager {
   }
 
   centerWindow(window) {
+    if (this.examLayout?.enabled && (window === this.windows.get('main') || window === this.windows.get('chat'))) return;
     if (this.geometryFrozen) return; // A5: no geometry mutation during capture
     const display = this.currentDisplay || screen.getPrimaryDisplay();
     const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
@@ -1999,6 +2057,7 @@ class WindowManager {
   }
 
   destroyAllWindows() {
+    this.examLayout?.dispose();
     if (process.platform === 'win32') {
       this._windowsMovementDisposed = true;
       this._windowsPositioner?.dispose();
@@ -2077,9 +2136,18 @@ class WindowManager {
   }
 
   handleDisplayChange() {
+    if (this.examLayout?.enabled) {
+      this.examLayout.invalidate();
+      this.examLayout.displayChanging = true;
+      this.examLayout.sync();
+    }
     if (this._displayChangeTimer) clearTimeout(this._displayChangeTimer);
     this._displayChangeTimer = setTimeout(() => {
       this._displayChangeTimer = null;
+      if (this.examLayout?.enabled) {
+        this.examLayout.fit();
+        return;
+      }
       if (this.isScreenBeingShared) return;
       const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
       const signature = this.displaySignature(display);
@@ -2099,6 +2167,7 @@ class WindowManager {
   }
 
   trackActiveScreen() {
+    if (this.examLayout?.enabled) return;
     if (this.isScreenBeingShared) return;
 
     const cursorPoint = screen.getCursorScreenPoint();
@@ -2118,6 +2187,10 @@ class WindowManager {
   }
 
   moveWindowsToActiveScreen() {
+    if (this.examLayout?.enabled) {
+      this.examLayout.fit();
+      return;
+    }
     if (!this.currentDisplay || this.isScreenBeingShared) return;
 
     const { x: displayX, y: displayY, width: displayWidth, height: displayHeight } = this.currentDisplay.workArea;
@@ -2290,8 +2363,32 @@ class WindowManager {
     return this.windowGap;
   }
 
+  // Core visibility has one explicit shape; auxiliary windows never become part
+  // of a global restore. Desired flags, rather than load callbacks, own intent.
+  restoreExamCore({ chatOpen = this.examChatOpen } = {}) {
+    if (this.isScreenBeingShared) return;
+    this.examChatOpen = Boolean(chatOpen);
+    this._ensureDesiredVisibility().set('main', true);
+    this._ensureDesiredVisibility().set('chat', this.examChatOpen);
+    this.examLayout.closeToolbarMenu();
+    this.examLayout.fit();
+    for (const type of ['main', 'chat']) {
+      const desired = this.isWindowDesiredVisible(type);
+      const window = this.windows.get(type);
+      if (!window || window.isDestroyed()) { if (desired) this.ensureWindow(type); continue; }
+      if (desired && (type !== 'chat' || this.examLayout.chatFits !== false)) this.showOnCurrentDesktop(window);
+      else window.hide();
+    }
+    this._visibilityIntentEpoch = (this._visibilityIntentEpoch || 0) + 1;
+    this._lastVisibilityShowEpoch = this._visibilityIntentEpoch;
+    this.isVisible = true;
+    this.activeWindow = this.examChatOpen ? 'chat' : 'main';
+    this.examLayout.sync();
+  }
+
   showChatWindow() {
     if (this.isScreenBeingShared) return;
+    if (this.examLayout?.enabled) return this.restoreExamCore({ chatOpen: true });
     this._ensureDesiredVisibility().set('chat', true);
     const chatWindow = this.windows.get('chat');
     if (!chatWindow || chatWindow.isDestroyed()) {
@@ -2306,6 +2403,10 @@ class WindowManager {
   }
 
   showWindow(windowType) {
+    if (this.examLayout?.enabled) {
+      if (windowType === 'chat' || windowType === 'llmResponse') return this.showChatWindow();
+      if (windowType === 'main') return this.restoreExamCore();
+    }
     // Unconditional show (no toggle) — used by keystroke-capture mode so the
     // user can always see where their keystrokes are landing.
     if (this.isScreenBeingShared) return;
@@ -2334,6 +2435,10 @@ class WindowManager {
   }
 
   hideChatWindow() {
+    if (this.examLayout?.enabled) {
+      this.examChatOpen = false;
+      this.recordVisibilityHide();
+    }
     this.chatHideVersion += 1;
     this._ensureDesiredVisibility().set('chat', false);
     const chatWindow = this.windows.get('chat');
@@ -2341,11 +2446,15 @@ class WindowManager {
       chatWindow.hide();
       logger.debug('Chat window hidden');
     }
+    if (this.examLayout?.enabled) this.examLayout.fit();
   }
 
   handleRecordingStarted() {
     this.isRecording = true;
-    this.showChatWindow();
+    // Device acquisition may complete after a user collapse/global hide.
+    // Keep recording feedback live without reversing that visibility choice.
+    if (!this.examLayout?.enabled || this.pendingVoiceHideVersion === this.chatHideVersion) this.showChatWindow();
+    this.pendingVoiceHideVersion = undefined;
     // Notify all windows about recording state
     this.broadcastToAllWindows('recording-started');
     logger.debug('Recording started, chat window shown');

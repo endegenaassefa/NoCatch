@@ -4,9 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Terminal</title>
-    <script src="lib/markdown.js"></script>
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
     <script src="lib/mathrender.js"></script>
     <script src="lib/sanitize.js"></script>
+    <link rel="stylesheet" href="node_modules/prismjs/themes/prism-tomorrow.min.css">
+    <script src="node_modules/prismjs/prism.min.js"></script>
+    <script src="node_modules/prismjs/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="src/ui/answer-renderer.js"></script>
     <style>
         .text-white { color: white; }
         .text-gray-300 { color: #d1d5db; }
@@ -398,14 +402,16 @@
 
         /* Copy buttons REMOVED — clipboard writes are a proctor tell. */
     </style>
+<link rel="stylesheet" href="src/ui/workspace.css">
+<link rel="stylesheet" href="src/ui/answer.css">
 </head>
-<body class="text-white">
+<body class="text-white response-page">
     <div class="main-container has-header">
         <!-- Draggable Header -->
         <div class="window-header">
-            <div class="window-title">AI Response</div>
+            <div class="window-title">NoCatch / Answer</div>
             <div class="window-controls">
-                <button id="close-window-btn" class="window-btn window-btn-close" title="Close">×</button>
+                <button id="close-window-btn" aria-label="Close answer" class="window-btn window-btn-close" title="Close">×</button>
             </div>
         </div>
 
@@ -451,7 +457,7 @@
 
     <script>
         // Global variables
-        let currentLayout = 'split';
+        let currentLayout = 'full';
         let hasCode = false;
         let currentSkill = 'dsa';
         let isInteractive = false;
@@ -522,7 +528,9 @@
                 if (window.electronAPI.onTranscriptionLlmResponseStart) {
                     window.electronAPI.onTranscriptionLlmResponseStart(() => {
                         streamingText = '';
+                        window.MaterialSourceLinks?.clear();
                         hideLoadingState();
+                        document.getElementById('response-content').classList.remove('hidden');
                         document.getElementById('split-layout').classList.add('hidden');
                         document.getElementById('full-content').classList.remove('hidden');
                         const full = document.getElementById('full-markdown');
@@ -535,9 +543,14 @@
                         streamingText += data.delta;
                         const full = document.getElementById('full-markdown');
                         if (full) {
-                            full.textContent = streamingText;
-                            const container = document.getElementById('response-content');
-                            if (container) container.scrollTop = container.scrollHeight;
+                            // Typed/voice paths can send show-loading after start.
+                            // The first text always transitions to visible content.
+                            hideLoadingState();
+                            document.getElementById('response-content').classList.remove('hidden');
+                            const container = document.querySelector('.full-content-inner');
+                            const following = container.scrollHeight - container.scrollTop - container.clientHeight < 32;
+                            window.AnswerRenderer.render(full, streamingText, { streaming: true, pendingSources: Boolean(data.materialSession || data.metadata?.materialSession) });
+                            if (following) container.scrollTop = container.scrollHeight;
                         }
                     });
                 }
@@ -585,6 +598,9 @@
         } // end initLLMResponseWindow
 
         function showLoadingState() {
+            window.MaterialSourceLinks?.clear();
+            const scroll = document.querySelector('.full-content-inner');
+            if (scroll) { scroll.scrollTop = 0; scroll.scrollLeft = 0; }
             const loadingElement = document.getElementById('loading');
             const responseElement = document.getElementById('response-content');
             
@@ -609,22 +625,6 @@
             } else {
                 console.error('Loading element not found!');
             }
-        }
-
-        function renderMarkdown(text) {
-            let html;
-            if (typeof marked !== 'undefined') {
-                html = marked.parse ? marked.parse(text) : marked(text);
-            } else if (typeof markdown !== 'undefined' && typeof markdown.toHTML === 'function') {
-                html = markdown.toHTML(text);
-            } else {
-                return escapeHtml(text).replace(/\n/g, '<br>');
-            }
-            // Scrub script/event-handler/javascript: constructs before the
-            // output hits innerHTML — in root exam mode this renderer runs
-            // unsandboxed as root and LLM output is untrusted input.
-            if (window.sanitizeHtml) html = window.sanitizeHtml(html);
-            return html;
         }
 
         function calculateContentMetrics(response, codeBlocks) {
@@ -680,13 +680,8 @@
             // Calculate content metrics for dynamic sizing
             const contentMetrics = calculateContentMetrics(response, codeBlocks);
 
-            if (hasCode) {
-                // Split layout: text on left, code on right
-                displaySplitLayout(response, codeBlocks);
-            } else {
-                // Full layout: all content in one panel
-                displayFullLayout(response);
-            }
+            displayFullLayout(response);
+            window.MaterialSourceLinks?.render(data, document.querySelector('.full-content-inner'));
             
             // Request dynamic window sizing based on content
             setTimeout(() => {
@@ -702,7 +697,7 @@
         function setupScrolling() {
             // Set up scrollable elements based on current layout
             setTimeout(() => {
-                if (hasCode) {
+                if (currentLayout === 'split') {
                     scrollableElements = [
                         document.querySelector('.text-panel .panel-content'),
                         document.querySelector('.code-panel .panel-content')
@@ -712,10 +707,8 @@
                         document.querySelector('.full-content-inner')
                     ].filter(el => el !== null);
                 }
-                // Reset scroll positions and ensure elements are focusable
+                // Completion must not move someone already reading the stream.
                 scrollableElements.forEach(element => {
-                    element.scrollTop = 0;
-                    element.scrollLeft = 0;
                     element.setAttribute('tabindex', '0');
                 });
 
@@ -782,72 +775,13 @@
             return blocks;
         }
 
-        // Copy buttons REMOVED — attachCopy was deleted along with them.
-
-        function renderCopyButtonsInFullMarkdown(container) {
-            // Copy buttons REMOVED — clipboard writes are a proctor tell.
-        }
-
-        function displaySplitLayout(response, codeBlocks) {
-            // Show split layout, hide full layout
-            document.getElementById('split-layout').classList.remove('hidden');
-            document.getElementById('full-content').classList.add('hidden');
-
-            // Remove code blocks from text content
-            let textContent = response;
-            codeBlocks.forEach(block => {
-                textContent = textContent.replace(block.fullMatch, '');
-            });
-
-            // Clean up text content
-            textContent = textContent.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
-
-            // Render text content
-            const textHtml = renderMarkdown(textContent);
-            document.getElementById('text-content').innerHTML = textHtml;
-            if (window.renderMathInElement) window.renderMathInElement(document.getElementById('text-content'));
-
-            // Render code blocks
-            const codeContainer = document.getElementById('code-content');
-            codeContainer.innerHTML = '';
-
-            if (codeBlocks.length === 0) {
-                codeContainer.innerHTML = '<div class="no-code">No code examples found</div>';
-            } else {
-                codeBlocks.forEach((block, index) => {
-                    const codeBlock = document.createElement('div');
-                    codeBlock.className = 'code-block';
-                    codeBlock.innerHTML = `
-                        <div class="code-header">${block.language.toUpperCase()}</div>
-                        <div class="code-content">
-                            <pre><code class="language-${block.language}">${escapeHtml(block.code)}</code></pre>
-                        </div>
-                    `;
-                    codeContainer.appendChild(codeBlock);
-                });
-            }
-
-            // Highlight code if Prism is available
-            if (typeof Prism !== 'undefined') {
-                Prism.highlightAll();
-            }
-        }
-
         function displayFullLayout(response) {
             // Show full layout, hide split layout
             document.getElementById('split-layout').classList.add('hidden');
             document.getElementById('full-content').classList.remove('hidden');
 
-            // Render full markdown
-            const html = renderMarkdown(response);
             const full = document.getElementById('full-markdown');
-            full.innerHTML = html;
-            if (window.renderMathInElement) window.renderMathInElement(full);
-
-            // Highlight any code if Prism is available
-            if (typeof Prism !== 'undefined') {
-                Prism.highlightAll();
-            }
+            window.AnswerRenderer.render(full, response);
 
             // Copy buttons REMOVED — clipboard writes are a proctor tell.
         }
